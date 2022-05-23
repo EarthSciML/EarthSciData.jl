@@ -1,10 +1,17 @@
-using NetCDF,NCDatasets,ZfpCompression,BSON,Statistics
+using NetCDF,ZfpCompression,BSON
+
+"""
+    decompress_netcdf(oldfile,output)
+
+Decompress the bson file and create a new netcdf file withthe given values and variables.
+
+#Arguments
+- `comp_file::string`: the name of the compressed bson file.
+- `output::string`: the name of the new NetCDF file.
+"""
 
 #Decompression function
-function decompress_netcdf(comp_file)
-    #Change the filename
-    output = "test1.nc"
-
+function decompress_netcdf(comp_file,output)
     #Gloabla Attributes
     attribs = BSON.load(comp_file)[:global_att]
     nccreate(output, "global", atts=attribs, mode=NC_NETCDF4)
@@ -24,10 +31,8 @@ function decompress_netcdf(comp_file)
             nccreate(output, var, dims[1], dimlen[1], dims[2], dimlen[2], dims[3], dimlen[3], dims[4], dimlen[4], 
             atts=data[:variables][var][:atts],
             t=NC_FLOAT)
-
         end
         ncwrite(vardata,output,var)
-
     end
 end
 

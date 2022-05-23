@@ -1,10 +1,15 @@
-using NetCDF
-using NCDatasets,ZfpCompression,BSON,Statistics
+using NetCDF,ZfpCompression,BSON
 
+"""
+    compress_netcdf(oldfile,prec)
 
+Compress the NetCDF file with the desired precision number from the ZfpCompression function
+and create a new bson file with the compressed values.
 
-oldfile = "/Users/Minwoo/Desktop/emis/METDOT3D_160701.nc"
-
+#Arguments
+- `oldfile::string`: the name of the file to be compressed.
+- `prec::Integer`: the precision number to perform compression.
+"""
 #Compress function
 function compress_netcdf(oldfile, prec)
     comp_list = Dict()
@@ -31,12 +36,9 @@ function compress_netcdf(oldfile, prec)
         println(keys(comp_list))
     
     end
-    bson("precision_" * string(prec)* "_METDOT3D_160701.bson", comp_list)
+    #New file name can be different
+    bson("precision_" * string(prec)* "_METDOT3D_160702.bson", comp_list)
 end
-
-compress_netcdf(oldfile,100)
-compress_netcdf(oldfile,10)
-
 
 
 
