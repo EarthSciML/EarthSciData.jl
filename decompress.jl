@@ -5,12 +5,8 @@ using NetCDF,ZfpCompression,BSON
 
 Decompress the bson file and create a new netcdf file withthe given values and variables.
 
-#Arguments
-- `comp_file::string`: the name of the compressed bson file.
-- `output::string`: the name of the new NetCDF file.
 """
 
-#Decompression function
 function decompress_netcdf(comp_file,output)
     #Gloabla Attributes
     attribs = BSON.load(comp_file)[:global_att]
@@ -21,7 +17,17 @@ function decompress_netcdf(comp_file,output)
     for var in varname
         dims = data[:variables][var][:dims]
         dimlen = data[:variables][var][:dimlen]
-        if size(dims)[1] == 3
+        if size(dims)[1] == 1
+            vardata = zfp_decompress(data[:variables][var][:data])
+            nccreate(output, var, dims[1], dimlen[1], 
+                atts=data[:variables][var][:atts],
+                t=NC_FLOAT)
+        elseif size(dims)[1] == 2
+            vardata = zfp_decompress(data[:variables][var][:data])
+            nccreate(output, var, dims[1], dimlen[1], dims[2], dimlen[2], 
+                atts=data[:variables][var][:atts],
+                t=NC_FLOAT)
+        elseif size(dims)[1] == 3
             vardata = zfp_decompress(data[:variables][var][:data])
             nccreate(output, var, dims[1], dimlen[1], dims[2], dimlen[2], dims[3], dimlen[3], 
                 atts=data[:variables][var][:atts],
