@@ -3,12 +3,16 @@ using NetCDF,ZfpCompression,BSON
 """
     decompress_netcdf(oldfile,output)
 
-Decompress the bson file and create a new netcdf file withthe given values and variables.
+Decompress the bson file and create a new netcdf file with the given values and variables.
+The function is the reverse of what we do in compress.jl
+    
+"comp_file" is the path of the compressed .bson file.
+"output" is the desired path and name of a new .nc file and is recommended to name after comp_file
 
+retruns : decompressed .nc file in pwd()
 """
-
 function decompress_netcdf(comp_file,output)
-    #Gloabla Attributes
+    #Gloabal Attributes
     attribs = BSON.load(comp_file)[:global_att]
     nccreate(output, "global", atts=attribs, mode=NC_NETCDF4)
 
@@ -40,5 +44,6 @@ function decompress_netcdf(comp_file,output)
         end
         ncwrite(vardata,output,var)
     end
+    return output
 end
 
