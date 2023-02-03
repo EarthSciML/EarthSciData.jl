@@ -1,6 +1,8 @@
 using EarthSciMLData
-using Test
+using Test, SafeTestsets
+
 
 @testset "EarthSciMLData.jl" begin
-    # Write your tests here.
+    @safetestset "load" begin include("load_test.jl") end
+    @safetestset "geosfp" begin include("geosfp_test.jl") end
 end
