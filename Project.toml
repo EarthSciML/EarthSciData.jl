@@ -17,6 +17,11 @@ Symbolics = "0c5d862f-8b57-4792-8d23-62f2024744c7"
 UUIDs = "cf7118a7-6976-5b1a-9a39-7adc72f591a4"
 
 [compat]
+DocStringExtensions = "0.9"
+EarthSciMLBase = "0.2"
+Interpolations = "0.14"
+ProgressLogging = "0.1"
+ModelingToolkit = "8"
 Symbolics = "5"
 julia = "1.1"
 
