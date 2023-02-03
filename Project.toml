@@ -17,14 +17,15 @@ Symbolics = "0c5d862f-8b57-4792-8d23-62f2024744c7"
 UUIDs = "cf7118a7-6976-5b1a-9a39-7adc72f591a4"
 
 [compat]
+NetCDF = "0.11"
 julia = "1.1"
 
 [extras]
-Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
-SafeTestsets = "1bc83da4-3b8d-516f-aca4-4fe02f6d838f"
-DomainSets = "5b8099bc-c8ec-5219-889f-1d9e522a28bf"
 DifferentialEquations = "0c46a032-eb83-5123-abaf-570d42b7fbaa"
+DomainSets = "5b8099bc-c8ec-5219-889f-1d9e522a28bf"
 MethodOfLines = "94925ecb-adb7-4558-8ed8-f975c56a0bf4"
+SafeTestsets = "1bc83da4-3b8d-516f-aca4-4fe02f6d838f"
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
 test = ["Test", "SafeTestsets", "DomainSets", "DifferentialEquations", "MethodOfLines"]
