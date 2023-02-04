@@ -18,11 +18,11 @@ UUIDs = "cf7118a7-6976-5b1a-9a39-7adc72f591a4"
 
 [compat]
 DocStringExtensions = "0.9"
-EarthSciMLBase = "0.2"
+EarthSciMLBase = "0.2, 0.3"
 Interpolations = "0.14"
-ProgressLogging = "0.1"
 ModelingToolkit = "8"
 NetCDF = "0.11"
+ProgressLogging = "0.1"
 Symbolics = "4, 5"
 julia = "1.6"
 
