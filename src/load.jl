@@ -1,9 +1,10 @@
 export interp!
 
-# Set a directory for storing data
-if !("ESMLDATADIR" ∈ keys(ENV))
-    ENV["ESMLDATADIR"] = "./ESMLData"
+# Get the directory for storing data
+function esmldatadir()
+    ("ESMLDATADIR" ∈ keys(ENV)) ? ENV["ESMLDATADIR"] : "./ESMLData"
 end
+
 
 """
 An interface for types describing a dataset, potentially comprised of multiple files.
@@ -34,18 +35,19 @@ function maybedownload(fs::FileSet, t::DateTime)
         mkpath(dirname(p))
     end
     u = url(fs, t)
-    @info "Downloading $u to $(realpath(ENV["ESMLDATADIR"]))..."
-    pid = uuid4()
-    ProgressLogging.Progress(pid)
     try
         # TODO(CT): Progress bar doesn't seem to be working correctly.
         Downloads.download(u, p, progress=(total::Integer, now::Integer) -> 
-                                    ProgressLogging.Progress(pid, total > 0 ? now/total : 0.0))
+                @info("Downloading $u to $(realpath(esmldatadir()))...",
+                    _id = :EarthSciMLDataDownload,
+                    progress = total > 0 ? now/total : 0.0))
     catch e # Delete partially downloaded file if an error occurs.
         rm(p)
         e
     end
-    ProgressLogging.Progress(pid, done=true)
+    @info("Downloading $u to $(realpath(esmldatadir()))...",
+        _id = :EarthSciMLDataDownload,
+        progress="done")
     return p
 end
 
@@ -113,8 +115,9 @@ mutable struct DataSetInterpolator
     itp2
     data2
     time2
+    currenttime
 
-    DataSetInterpolator(fs::FileSet, varname) = new(fs, varname, nothing, nothing, nothing, nothing, nothing, nothing)
+    DataSetInterpolator(fs::FileSet, varname) = new(fs, varname, nothing, nothing, nothing, nothing, nothing, nothing, nothing)
 end
 
 function Base.show(io::IO, itp::DataSetInterpolator)
@@ -125,47 +128,41 @@ function initialize!(itp::DataSetInterpolator, t::DateTime)
     ti = DataFrequencyInfo(itp.fs, t)
     centerpoint = ti.centerpoints[centerpoint_index(ti, t)]
     if t < centerpoint # Load data for current and previous time step.
-        ti_minus = DataFrequencyInfo(itp.fs, t - ti.frequency)
-        itp.itp1, itp.data1 = load_interpolator(itp.fs, t - ti.frequency, itp.varname)
-        itp.time1 = ti_minus.centerpoints[centerpoint_index(ti_minus, t - ti.frequency)]
-        itp.itp2, itp.data2 = load_interpolator(itp.fs, t, itp.varname)
         itp.time2 = ti.centerpoints[centerpoint_index(ti, t)]
+        if itp.time2 == itp.time1
+            itp.itp2, itp.data2 = itp.itp1, itp.data1
+        else
+            itp.itp2, itp.data2 = load_interpolator(itp.fs, t, itp.varname)
+        end
+        ti_minus = DataFrequencyInfo(itp.fs, t - ti.frequency)
+        itp.time1 = ti_minus.centerpoints[centerpoint_index(ti_minus, t - ti.frequency)]
+        itp.itp1, itp.data1 = load_interpolator(itp.fs, t - ti.frequency, itp.varname)
     else # Load data for current and next time step.
-        ti_plus = DataFrequencyInfo(itp.fs, t + ti.frequency)
-        itp.itp1, itp.data1 = load_interpolator(itp.fs, t, itp.varname)
         itp.time1 = ti.centerpoints[centerpoint_index(ti, t)]
+        if itp.time1 == itp.time2
+            itp.itp1, itp.data1 = itp.itp2, itp.data2
+        else
+            itp.itp1, itp.data1 = load_interpolator(itp.fs, t, itp.varname)
+        end
+        ti_plus = DataFrequencyInfo(itp.fs, t + ti.frequency)
         itp.itp2, itp.data2 = load_interpolator(itp.fs, t + ti.frequency, itp.varname)
         itp.time2 = ti_plus.centerpoints[centerpoint_index(ti_plus, t + ti.frequency)]
     end
     @assert itp.time1 < itp.time2 "Interpolator times are in wrong order"
 end
 
-function update!(itp::DataSetInterpolator, t::DateTime)
-    itp.itp1 = itp.itp2
-    itp.data1 = itp.data2
-    itp.time1 = itp.time2
-    
-    ti = DataFrequencyInfo(itp.fs, t)
-    ti_plus = DataFrequencyInfo(itp.fs, t + ti.frequency)
-    itp.itp2, itp.data2 = load_interpolator(itp.fs, t + ti.frequency, itp.varname)
-    itp.time2 = ti_plus.centerpoints[centerpoint_index(ti_plus, t + ti.frequency)]
-
-    @assert itp.time1 < itp.time2 "Interpolator times are in wrong order."
-end
-
 function lazyload!(itp::DataSetInterpolator, t::DateTime)
+    if itp.currenttime == t
+        return
+    end
+    itp.currenttime = t
     if itp.itp1 == nothing # Initialize new interpolator.
         initialize!(itp, t)
         return
     end
-    ti = DataFrequencyInfo(itp.fs, t)
-    if  t < itp.time1 || t >= itp.time2 + ti.frequency # Re-initialize interpolator.
-        @info "Re-initializing interpolator for $(itp.varname) because time jumped or went backwards."
+    if  t <= itp.time1 || t > itp.time2
+        @info "Updating data loader for $(itp.varname) for t = $t"
         initialize!(itp, t)
-    end
-    if t >= itp.time2 # Update data cache.
-        update!(itp, t)
-        return
     end
 end
 

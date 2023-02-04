@@ -1,5 +1,5 @@
 module EarthSciMLData
-using Dates, Printf, Downloads, ProgressLogging, UUIDs
+using Dates, Downloads, Printf
 using DocStringExtensions
 using NetCDF, Interpolations, ModelingToolkit, Symbolics
 using EarthSciMLBase

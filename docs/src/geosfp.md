@@ -1,4 +1,6 @@
-using DomainSets, MethodOfLines, DifferentialEquations
+using EarthSciMLData, EarthSciMLBase
+using DomainSets, ModelingToolkit, MethodOfLines, DifferentialEquations
+using Dates, Plots
 
 @parameters t lev lon lat
 geosfp = GEOSFP("4x5", t)
@@ -31,7 +33,7 @@ parameters(pde_sys)
 6^3
 8 * 8 * 6
 discretization = MOLFiniteDifference([lat => 6, lon => 6, lev => 6], t, approx_order=2)
-@time pdeprob = discretize(pde_sys3, discretization)
+@time pdeprob = discretize(pde_sys, discretization)
 
 cb = DiscreteCallback(
     (u, t, integrator) -> true,
@@ -41,4 +43,4 @@ cb = DiscreteCallback(
     end
 )
 
-@time pdesol = solve(pdeprob, Tsit5(), saveat=3600.0, callback=cb)
+@time pdesol = solve(pdeprob, Tsit5())#callback=cb) saveat=3600.0, 

@@ -75,10 +75,16 @@ $(SIGNATURES)
 
 Return the local path for the GEOS-FP file for the given `DateTime`.
 """
-localpath(fs::GEOSFPFileSet, t::DateTime) = joinpath(ENV["ESMLDATADIR"], relpath(fs, t))
+localpath(fs::GEOSFPFileSet, t::DateTime) = joinpath(esmldatadir(), relpath(fs, t))
+
+# Cache to store data frequency information.
+GEOSFPDataFrequencyInfoCache = Dict{String, DataFrequencyInfo}()
 
 function DataFrequencyInfo(fs::GEOSFPFileSet, t::DateTime)::DataFrequencyInfo
     filepath = maybedownload(fs, t)
+    if haskey(GEOSFPDataFrequencyInfoCache, filepath)
+        return GEOSFPDataFrequencyInfoCache[filepath]
+    end
     fid = NetCDF.open(filepath)
     sd = fid.gatts["Start_Date"]
     st = fid.gatts["Start_Time"]
@@ -88,7 +94,9 @@ function DataFrequencyInfo(fs::GEOSFPFileSet, t::DateTime)::DataFrequencyInfo
     frequency = Second(parse(Int64, dt[1:2]))*3600 + Second(parse(Int64, dt[3:4]))*60 + 
                         Second(parse(Int64, dt[5:6]))
     centerpoints = start .+ Second.(fid["time"][:]) * 60
-    DataFrequencyInfo(start, frequency, centerpoints)
+    di = DataFrequencyInfo(start, frequency, centerpoints)
+    GEOSFPDataFrequencyInfoCache[filepath] = di
+    return di
 end
 
 """

@@ -1,6 +1,7 @@
 using EarthSciMLData
 using Dates
 using ModelingToolkit
+using Random
 
 fs = EarthSciMLData.GEOSFPFileSet("4x5", "A3dyn")
 t = DateTime(2022, 5, 1)
@@ -35,4 +36,29 @@ itp = EarthSciMLData.DataSetInterpolator(fs, "U")
     want_uvals = [-0.0474265694618225, 0.06403500636418662, 0.1116628348827362, 0.0954569160938263, 0.07925099730491639, 
                 -0.011302002271016437, -0.1762020826339722, -0.34110216299692797, -0.5013981193304062, -0.6570899516344071]
     @test uvals[1:10] ≈ want_uvals
+
+    # Test that shuffling the times doesn't change the results.
+    uvals2 = []
+    idx = randperm(length(times))
+    for t ∈ times[idx]
+        push!(uvals2, interp!(itp, t, 1.0, 0.0, 1.0))
+    end
+    @test uvals2 ≈ uvals[idx]
 end
+
+#== Profile data loading and interpolation.
+fs = GEOSFPFileSet("4x5", "A3dyn")
+itp = DataSetInterpolator(fs, "U")
+ts = DateTime(2022, 5, 1):Hour(1):DateTime(2022, 5, 3)
+function interpfunc()
+    for t ∈ ts 
+        for lon ∈ -180:1:175
+            for lat ∈ -90:1:85
+                interp!(itp, t, lon, lat, 1.0)
+            end
+        end
+    end
+end
+interpfunc()
+@profview interpfunc()
+==#
