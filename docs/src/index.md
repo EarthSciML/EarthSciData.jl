@@ -4,7 +4,7 @@ CurrentModule = EarthSciMLData
 
 # EarthSciMLData
 
-Documentation for [EarthSciMLData](https://github.com/ctessum/EarthSciMLData.jl).
+Documentation for [EarthSciMLData](https://github.com/EarthSciML/EarthSciMLData.jl).
 
 ```@index
 ```

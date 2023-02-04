@@ -6,11 +6,11 @@ DocMeta.setdocmeta!(EarthSciMLData, :DocTestSetup, :(using EarthSciMLData); recu
 makedocs(;
     modules=[EarthSciMLData],
     authors="EarthSciML Authors",
-    repo="https://github.com/ctessum/EarthSciMLData.jl/blob/{commit}{path}#{line}",
+    repo="https://github.com/EarthSciML/EarthSciMLData.jl/blob/{commit}{path}#{line}",
     sitename="EarthSciMLData.jl",
     format=Documenter.HTML(;
         prettyurls=get(ENV, "CI", "false") == "true",
-        canonical="https://ctessum.github.io/EarthSciMLData.jl",
+        canonical="https://earthsciml.github.io/EarthSciMLData.jl",
         assets=String[],
     ),
     pages=[
@@ -19,6 +19,6 @@ makedocs(;
 )
 
 deploydocs(;
-    repo="github.com/ctessum/EarthSciMLData.jl",
+    repo="github.com/EarthSciML/EarthSciMLData.jl",
     devbranch="main",
 )
