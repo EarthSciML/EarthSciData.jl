@@ -19,10 +19,10 @@ using ModelingToolkit, DomainSets
 
     domain = DomainInfo(
         partialderivatives_lonlat2xymeters,
+        constIC(0.0, t ∈ Interval(Dates.datetime2unix(DateTime(2022, 1, 1)), Dates.datetime2unix(DateTime(2022, 1, 3)))),
         zerogradBC(lat ∈ Interval(-85.0f0, 85.0f0)),
         periodicBC(lon ∈ Interval(-180.0f0, 175.0f0)),
         zerogradBC(lev ∈ Interval(1.0f0, 10.0f0)),
-        constIC(0.0, t ∈ Interval(Dates.datetime2unix(DateTime(2022, 1, 1)), Dates.datetime2unix(DateTime(2022, 1, 3)))),
     )
 
     composed_sys = examplesys + domain + Advection() + geosfp
@@ -31,13 +31,13 @@ using ModelingToolkit, DomainSets
     eqs = equations(pde_sys)
 
     want_eqs = [
-        "meanwind₊u(lat, lon, lev, t) ~ GEOSFP₊A3dyn₊U(lat, lon, lev, t)"
-        "meanwind₊v(lat, lon, lev, t) ~ GEOSFP₊A3dyn₊V(lat, lon, lev, t)"
-        "meanwind₊w(lat, lon, lev, t) ~ GEOSFP₊A3dyn₊OMEGA(lat, lon, lev, t)"
-        "GEOSFP₊A3dyn₊U(lat, lon, lev, t) ~ EarthSciMLData.interp!(DataSetInterpolator{EarthSciMLData.GEOSFPFileSet, U}, t, lon, lat, lev)"
-        "GEOSFP₊A3dyn₊OMEGA(lat, lon, lev, t) ~ EarthSciMLData.interp!(DataSetInterpolator{EarthSciMLData.GEOSFPFileSet, OMEGA}, t, lon, lat, lev)"
-        "GEOSFP₊A3dyn₊V(lat, lon, lev, t) ~ EarthSciMLData.interp!(DataSetInterpolator{EarthSciMLData.GEOSFPFileSet, V}, t, lon, lat, lev)"
-        "Differential(t)(examplesys₊c(lat, lon, lev, t)) ~ (-Differential(lon)(examplesys₊c(lat, lon, lev, t))*meanwind₊v(lat, lon, lev, t)) / (111319.44444444445cos(0.017453292519943295lat)) + sin(0.10471975511965978lat) + sin(0.10471975511965978lon) - 8.98311174991017e-6Differential(lat)(examplesys₊c(lat, lon, lev, t))*meanwind₊u(lat, lon, lev, t) - Differential(lev)(examplesys₊c(lat, lon, lev, t))*meanwind₊w(lat, lon, lev, t)"
+        "meanwind₊u(t, lat, lon, lev) ~ GEOSFP₊A3dyn₊U(t, lat, lon, lev)"
+        "meanwind₊v(t, lat, lon, lev) ~ GEOSFP₊A3dyn₊V(t, lat, lon, lev)"
+        "meanwind₊w(t, lat, lon, lev) ~ GEOSFP₊A3dyn₊OMEGA(t, lat, lon, lev)"
+        "GEOSFP₊A3dyn₊U(t, lat, lon, lev) ~ EarthSciMLData.interp!(DataSetInterpolator{EarthSciMLData.GEOSFPFileSet, U}, t, lon, lat, lev)"
+        "GEOSFP₊A3dyn₊OMEGA(t, lat, lon, lev) ~ EarthSciMLData.interp!(DataSetInterpolator{EarthSciMLData.GEOSFPFileSet, OMEGA}, t, lon, lat, lev)"
+        "GEOSFP₊A3dyn₊V(t, lat, lon, lev) ~ EarthSciMLData.interp!(DataSetInterpolator{EarthSciMLData.GEOSFPFileSet, V}, t, lon, lat, lev)"
+        "Differential(t)(examplesys₊c(t, lat, lon, lev)) ~ (-Differential(lon)(examplesys₊c(t, lat, lon, lev))*meanwind₊v(t, lat, lon, lev)) / (111319.44444444445cos(0.017453292519943295lat)) + sin(0.10471975511965978lat) + sin(0.10471975511965978lon) - 8.98311174991017e-6Differential(lat)(examplesys₊c(t, lat, lon, lev))*meanwind₊u(t, lat, lon, lev) - Differential(lev)(examplesys₊c(t, lat, lon, lev))*meanwind₊w(t, lat, lon, lev)"
     ]
 
     @test string.(eqs) == want_eqs

@@ -16,7 +16,7 @@ Symbolics = "0c5d862f-8b57-4792-8d23-62f2024744c7"
 
 [compat]
 DocStringExtensions = "0.9"
-EarthSciMLBase = "0.3"
+EarthSciMLBase = "0.4"
 Interpolations = "0.14"
 ModelingToolkit = "8"
 NetCDF = "0.11"
