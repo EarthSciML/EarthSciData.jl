@@ -53,7 +53,7 @@ end
 """
 $(SIGNATURES)
 
-File path on the server relative to the host root; also path on local disk relative to `ENV["ESMLDATADIR"]`.
+File path on the server relative to the host root; also path on local disk relative to `ENV["EARTHSCIDATADIR"]`.
 """
 function relpath(fs::GEOSFPFileSet, t::DateTime)
     year = Dates.format(t, "Y")
@@ -75,7 +75,7 @@ $(SIGNATURES)
 
 Return the local path for the GEOS-FP file for the given `DateTime`.
 """
-localpath(fs::GEOSFPFileSet, t::DateTime) = joinpath(esmldatadir(), relpath(fs, t))
+localpath(fs::GEOSFPFileSet, t::DateTime) = joinpath(datadir(), relpath(fs, t))
 
 # Cache to store data frequency information.
 GEOSFPDataFrequencyInfoCache = Dict{String, DataFrequencyInfo}()

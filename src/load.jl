@@ -1,8 +1,8 @@
 export interp!
 
 # Get the directory for storing data
-function esmldatadir()
-    ("ESMLDATADIR" ∈ keys(ENV)) ? ENV["ESMLDATADIR"] : "./ESMLData"
+function datadir()
+    ("EARTHSCIDATADIR" ∈ keys(ENV)) ? ENV["EARTHSCIDATADIR"] : "./earthscidata"
 end
 
 
@@ -38,14 +38,14 @@ function maybedownload(fs::FileSet, t::DateTime)
     try
         # TODO(CT): Progress bar doesn't seem to be working correctly.
         Downloads.download(u, p, progress=(total::Integer, now::Integer) -> 
-                @info("Downloading $u to $(realpath(esmldatadir()))...",
+                @info("Downloading $u to $(realpath(datadir()))...",
                     _id = :EarthSciDataDownload,
                     progress = total > 0 ? now/total : 0.0))
     catch e # Delete partially downloaded file if an error occurs.
         rm(p)
         e
     end
-    @info("Downloading $u to $(realpath(esmldatadir()))...",
+    @info("Downloading $u to $(realpath(datadir()))...",
         _id = :EarthSciDataDownload,
         progress="done")
     return p
@@ -102,7 +102,7 @@ $(SIGNATURES)
 DataSetInterpolators are used to interpolate data from a `FileSet` to represent a given time and location.
 Data is loaded (and downloaded) lazily, so the first time you use it on a for a given 
 dataset and time period it may take a while to load. Each time step is downloaded and loaded as it is needed 
-during the simulation and cached on the hard drive at the path specified by the `\\\$ESMLDATADIR`
+during the simulation and cached on the hard drive at the path specified by the `\\\$EARTHSCIDATADIR`
 environment variable. The interpolator will also cache data in memory representing the 
 data records for the times immediately before and after the current time step.
 """
