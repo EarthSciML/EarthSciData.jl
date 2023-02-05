@@ -54,6 +54,6 @@ jobs:
       - run: |
           julia --project=docs -e '
             using Documenter: DocMeta, doctest
-            using EarthSciMLData
-            DocMeta.setdocmeta!(EarthSciMLData, :DocTestSetup, :(using EarthSciMLData); recursive=true)
-            doctest(EarthSciMLData)'
+            using EarthSciData
+            DocMeta.setdocmeta!(EarthSciData, :DocTestSetup, :(using EarthSciData); recursive=true)
+            doctest(EarthSciData)'

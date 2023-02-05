@@ -1,4 +1,4 @@
-module EarthSciMLData
+module EarthSciData
 using Dates, Downloads, Printf
 using DocStringExtensions
 using NetCDF, Interpolations, ModelingToolkit, Symbolics

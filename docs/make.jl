@@ -1,16 +1,16 @@
-using EarthSciMLData
+using EarthSciData
 using Documenter
 
-DocMeta.setdocmeta!(EarthSciMLData, :DocTestSetup, :(using EarthSciMLData); recursive=true)
+DocMeta.setdocmeta!(EarthSciData, :DocTestSetup, :(using EarthSciData); recursive=true)
 
 makedocs(;
-    modules=[EarthSciMLData],
+    modules=[EarthSciData],
     authors="EarthSciML Authors",
-    repo="https://github.com/EarthSciML/EarthSciMLData.jl/blob/{commit}{path}#{line}",
-    sitename="EarthSciMLData.jl",
+    repo="https://github.com/EarthSciML/EarthSciData.jl/blob/{commit}{path}#{line}",
+    sitename="EarthSciData.jl",
     format=Documenter.HTML(;
         prettyurls=get(ENV, "CI", "false") == "true",
-        canonical="https://earthsciml.github.io/EarthSciMLData.jl",
+        canonical="https://earthsciml.github.io/EarthSciData.jl",
         assets=String[],
     ),
     pages=[
@@ -20,6 +20,6 @@ makedocs(;
 )
 
 deploydocs(;
-    repo="github.com/EarthSciML/EarthSciMLData.jl",
+    repo="github.com/EarthSciML/EarthSciData.jl",
     devbranch="main",
 )

@@ -1,7 +1,7 @@
 # Using data from GEOS-FP
 
 ``` julia
-using EarthSciMLData, EarthSciMLBase
+using EarthSciData, EarthSciMLBase
 using DomainSets, ModelingToolkit, MethodOfLines, DifferentialEquations
 using Dates, Plots
 
@@ -29,10 +29,6 @@ domain = DomainInfo(
 
 composed_sys = examplesys + domain + Advection() + geosfp;
 pde_sys = get_mtk(composed_sys)
-
-pde_sys.dvs
-equations(pde_sys)
-parameters(pde_sys)
 
 # Solve
 discretization = MOLFiniteDifference([lat => 6, lon => 6, lev => 6], t, approx_order=2)

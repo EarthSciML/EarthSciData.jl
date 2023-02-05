@@ -1,28 +1,28 @@
-using EarthSciMLData
+using EarthSciData
 using Dates
 using ModelingToolkit
 using Random
 
-fs = EarthSciMLData.GEOSFPFileSet("4x5", "A3dyn")
+fs = EarthSciData.GEOSFPFileSet("4x5", "A3dyn")
 t = DateTime(2022, 5, 1)
-@test EarthSciMLData.url(fs, t) == "http://geoschemdata.wustl.edu/ExtData/GEOS_4x5/GEOS_FP/2022/05/GEOSFP.20220501.A3dyn.4x5.nc"
+@test EarthSciData.url(fs, t) == "http://geoschemdata.wustl.edu/ExtData/GEOS_4x5/GEOS_FP/2022/05/GEOSFP.20220501.A3dyn.4x5.nc"
 
-@test endswith(EarthSciMLData.localpath(fs, t), joinpath("GEOS_4x5", "GEOS_FP", "2022", "05", "GEOSFP.20220501.A3dyn.4x5.nc"))
+@test endswith(EarthSciData.localpath(fs, t), joinpath("GEOS_4x5", "GEOS_FP", "2022", "05", "GEOSFP.20220501.A3dyn.4x5.nc"))
 
-ti = EarthSciMLData.DataFrequencyInfo(fs, t)
-epp = EarthSciMLData.endpoints(ti)
+ti = EarthSciData.DataFrequencyInfo(fs, t)
+epp = EarthSciData.endpoints(ti)
 
 @test epp[1] == (DateTime("2022-05-01T00:00:00"), DateTime("2022-05-01T03:00:00"))
 @test epp[8] == (DateTime("2022-05-01T21:00:00"), DateTime("2022-05-02T00:00:00"))
 
-dat = EarthSciMLData.loadslice(fs, t, "U")
+dat = EarthSciData.loadslice(fs, t, "U")
 @test size(dat.data) == (72, 46, 72)
 @test dat.dimnames == ["lon", "lat", "lev"]
 
-itp = EarthSciMLData.DataSetInterpolator(fs, "U")
+itp = EarthSciData.DataSetInterpolator(fs, "U")
 
-@test EarthSciMLData.dimnames(itp, t) == ["lon", "lat", "lev"]
-@test EarthSciMLData.varnames(fs, t) == ["U", "OMEGA", "RH", "DTRAIN", "V"]
+@test EarthSciData.dimnames(itp, t) == ["lon", "lat", "lev"]
+@test EarthSciData.varnames(fs, t) == ["U", "OMEGA", "RH", "DTRAIN", "V"]
 
 @testset "interpolation" begin
     uvals = []

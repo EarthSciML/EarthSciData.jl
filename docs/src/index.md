@@ -1,14 +1,14 @@
 ```@meta
-CurrentModule = EarthSciMLData
+CurrentModule = EarthSciData
 ```
 
-# EarthSciMLData
+# EarthSciData
 
-Documentation for [EarthSciMLData](https://github.com/EarthSciML/EarthSciMLData.jl).
+Documentation for [EarthSciData](https://github.com/EarthSciML/EarthSciData.jl).
 
 ```@index
 ```
 
 ```@autodocs
-Modules = [EarthSciMLData]
+Modules = [EarthSciData]
 ```

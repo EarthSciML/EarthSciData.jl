@@ -39,14 +39,14 @@ function maybedownload(fs::FileSet, t::DateTime)
         # TODO(CT): Progress bar doesn't seem to be working correctly.
         Downloads.download(u, p, progress=(total::Integer, now::Integer) -> 
                 @info("Downloading $u to $(realpath(esmldatadir()))...",
-                    _id = :EarthSciMLDataDownload,
+                    _id = :EarthSciDataDownload,
                     progress = total > 0 ? now/total : 0.0))
     catch e # Delete partially downloaded file if an error occurs.
         rm(p)
         e
     end
     @info("Downloading $u to $(realpath(esmldatadir()))...",
-        _id = :EarthSciMLDataDownload,
+        _id = :EarthSciDataDownload,
         progress="done")
     return p
 end
