@@ -2,7 +2,7 @@ export interp!
 
 # Get the directory for storing data
 function datadir()
-    ("EARTHSCIDATADIR" ∈ keys(ENV)) ? ENV["EARTHSCIDATADIR"] : "./earthscidata"
+    ("EARTHSCIDATADIR" ∈ keys(ENV)) ? ENV["EARTHSCIDATADIR"] : "./earthscidatadir/"
 end
 
 
