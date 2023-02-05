@@ -1,3 +1,6 @@
+# Using data from GEOS-FP
+
+``` julia
 using EarthSciMLData, EarthSciMLBase
 using DomainSets, ModelingToolkit, MethodOfLines, DifferentialEquations
 using Dates, Plots
@@ -35,6 +38,8 @@ parameters(pde_sys)
 discretization = MOLFiniteDifference([lat => 6, lon => 6, lev => 6], t, approx_order=2)
 @time pdeprob = discretize(pde_sys, discretization)
 
+#@run pdesol = solve(pdeprob, Tsit5(), saveat=3600.0)
+@profview pdesol = solve(pdeprob, Tsit5(), saveat=36000.0)
 @time pdesol = solve(pdeprob, Tsit5(), saveat=3600.0)
 
 # Plot
@@ -58,3 +63,4 @@ anim = @animate for k in 1:length(discrete_t)
     plot(p1, p2, p3, size=(1200, 700))
 end
 gif(anim, "animation.gif", fps = 8)
+```
