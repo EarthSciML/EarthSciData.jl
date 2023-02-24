@@ -59,7 +59,9 @@ function relpath(fs::GEOSFPFileSet, t::DateTime)
     year = Dates.format(t, "Y")
     month = @sprintf("%.2d", Dates.month(t))
     day = @sprintf("%.2d", Dates.day(t))
-    return joinpath("GEOS_$(fs.domain)/GEOS_FP/$year/$month", "GEOSFP.$(year)$(month)$day.$(fs.filetype).$(fs.domain).nc")
+    domain = replace(fs.domain, '.' => "")
+    domain = replace(domain, '_' => ".")
+    return joinpath("GEOS_$(fs.domain)/GEOS_FP/$year/$month", "GEOSFP.$(year)$(month)$day.$(fs.filetype).$(domain).nc")
 end
 
 """
@@ -186,12 +188,16 @@ Domain options (as of 2022-01-30):
 - NATIVE
 - c720
 
+`coord_defaults` can be used to provide default values for the coordinates of the
+domain. For example if we want to perform a 2D simulation with a vertical dimension,
+we can set `coord_defaults = Dict(:lev => 1)`.
+
 See http://geoschemdata.wustl.edu/ExtData/ for current options.
 """
 struct GEOSFP <: EarthSciMLODESystem
     filsets::Dict{String,GEOSFPFileSet}
     sys::ODESystem
-    function GEOSFP(domain, t)
+    function GEOSFP(domain, t; coord_defaults=Dict{Symbol,Number}())
         filesets = Dict{String,GEOSFPFileSet}(
             "A1" => GEOSFPFileSet(domain, "A1"),
             "A3cld" => GEOSFPFileSet(domain, "A3cld"),
@@ -209,7 +215,11 @@ struct GEOSFP <: EarthSciMLODESystem
                 coords = Num[]
                 for dim ∈ dims
                     d = Symbol(dim)
-                    v = (@parameters $d = 0.0)[1]
+                    if d ∈ keys(coord_defaults)
+                        v = (@parameters $d = coord_defaults[d])[1]
+                    else
+                        v = (@parameters $d)[1]
+                    end
                     push!(coords, v)
                 end
                 desc = description(itp, sample_time)
@@ -234,11 +244,11 @@ struct GEOSFP <: EarthSciMLODESystem
 end
 
 function Base.:(+)(mw::EarthSciMLBase.MeanWind, g::GEOSFP)::ComposedEarthSciMLSystem
-    eqs = [
-        mw.sys.u ~ g.sys.A3dyn₊U
-        mw.sys.v ~ g.sys.A3dyn₊V
-        mw.sys.w ~ g.sys.A3dyn₊OMEGA
-    ]
+    eqs = [mw.sys.u ~ g.sys.A3dyn₊U]
+    # Only add the number of dimensions present in the mean wind system.
+    length(states(mw.sys)) > 1 ? push!(eqs, mw.sys.v ~ g.sys.A3dyn₊V) : nothing
+    length(states(mw.sys)) > 2 ? push!(eqs, mw.sys.w ~ g.sys.A3dyn₊OMEGA) : nothing
+    
     ComposedEarthSciMLSystem(AbstractEarthSciMLSystem[ConnectorSystem(
         eqs,
         mw, g,
