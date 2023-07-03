@@ -60,7 +60,7 @@ struct DataArray
     "The data."
     data::AbstractArray
     "Physical units of the data, e.g. m s⁻¹."
-    units::AbstractString
+    units::Unitful.Unitlike
     "Description of the data."
     description::AbstractString
     "Dimensions of the data, e.g. (lat, lon, layer)."
@@ -123,6 +123,9 @@ end
 function Base.show(io::IO, itp::DataSetInterpolator)
     print(io, "DataSetInterpolator{$(typeof(itp.fs)), $(itp.varname)}")
 end
+
+""" Return the units of the data. """
+ModelingToolkit.get_unit(itp::DataSetInterpolator) = itp.data1.units
 
 function initialize!(itp::DataSetInterpolator, t::DateTime)
     ti = DataFrequencyInfo(itp.fs, t)
@@ -204,13 +207,41 @@ Return the value of the given variable from the given dataset at the given time 
 function interp!(itp::DataSetInterpolator, t::DateTime, locs...)
     lazyload!(itp, t)
     t_frac = (t - itp.time1) / (itp.time2 - itp.time1)
-    itp.itp2(locs...) * t_frac + itp.itp1(locs...) * (1-t_frac)
+    val = itp.itp2(locs...) * t_frac + itp.itp1(locs...) * (1-t_frac)
 end
+"""
+Interpolation with a unix timestamp.
+"""
+interp!(itp::DataSetInterpolator, t::AbstractFloat, locs...) = interp!(itp, Dates.unix2datetime(t), locs...)
 
-# Register functions with specific numbers of arguments for ModelingToolkit.
-interp!(itp, t::AbstractFloat, loc1, loc2, loc3) = interp!(itp, Dates.unix2datetime(t), loc1, loc2, loc3)
-interp!(itp, t::AbstractFloat, loc1, loc2) = interp!(itp, Dates.unix2datetime(t), loc1, loc2)
-interp!(itp, t::AbstractFloat, loc1) = interp!(itp, Dates.unix2datetime(t), loc1)
-@register_symbolic interp!(itp::DataSetInterpolator, t::Num, loc1::Num, loc2::Num, loc3::Num)
-@register_symbolic interp!(itp::DataSetInterpolator, t::Num, loc1::Num, loc2::Num)
-@register_symbolic interp!(itp::DataSetInterpolator, t::Num, loc1::Num)
+# Dummy function for unit validation. Basically ModelingToolkit 
+# will call the function with a Unitful.Quantity or an integer to 
+# get information about the type and units of the output.
+interp!(itp::Union{Unitful.Quantity, Real}, t, locs...) = itp
+
+# Symbolic tracing, for different numbers of dimensions (up to three dimensions).
+@register_symbolic interp!(itp::DataSetInterpolator, t, loc1, loc2, loc3)
+@register_symbolic interp!(itp::DataSetInterpolator, t, loc1, loc2) false
+@register_symbolic interp!(itp::DataSetInterpolator, t, loc1) false
+
+"""
+Create an equation that interpolates the given dataset at the given time and location.
+`filename` is an identifier for the dataset, and `t` is the time variable.
+"""
+function create_interp_equation(itp::DataSetInterpolator, filename, t, sample_time, coords)
+    desc = description(itp, sample_time)
+    uu = units(itp, sample_time)
+    n = Symbol("$(filename)₊$(itp.varname)")
+    lhs = (@variables $n(t) [unit = uu, description = desc])[1]
+
+    # Create equation.
+    if length(coords) == 3
+        return lhs ~ interp!(itp, t, coords[1], coords[2], coords[3])
+    elseif length(coords) == 2
+        return lhs ~ interp!(itp, t, coords[1], coords[2])
+    elseif length(coords) == 1
+        return lhs ~ interp!(itp, t, coords[1])
+    else
+        error("Unexpected number of coordinates: $(length(coords))")
+    end
+end

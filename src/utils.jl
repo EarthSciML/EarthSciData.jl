@@ -28,3 +28,34 @@ function prune!(pde_sys::PDESystem, prefix::AbstractString)
     deleteat!(pde_sys.eqs, deleteindex)
     return pde_sys
 end
+
+# Define the Dobson Unit: https://ozonewatch.gsfc.nasa.gov/facts/dobson_SH.html
+module MyUnits; using Unitful; @unit dobson "Dobson" Dobson 2.69e16/6.022e23u"mol/cm^2" false; end
+Unitful.register(MyUnits)
+
+"""
+Convert a string to a `Unitful` object.
+"""
+function to_unitful(u)
+    d = Dict(
+        "m s-1" => u"m/s",
+        "Pa s-1" => u"Pa/s",
+        "kg m-2 s-2" => u"kg/m^2/s^2",
+        "kg kg-1" => u"kg/kg",
+        "K" => u"K",
+        "K m-2 kg-1 s-1" => u"K/m^2/kg/s",
+        "hPa" => u"hPa",
+        "kg m-2 s-1" => u"kg/m^2/s",
+        "W m-2" => u"W/m^2",
+        "m" => u"m",
+        "Dobsons" => u"dobson",
+        "m2 m-2" => u"m^2/m^2",
+        "kg m-2" => u"kg/m^2",
+        "kg kg-1 s-1" => u"kg/kg/s",
+        "1" => Unitful.unit(1), # unitless
+    )
+    if haskey(d, u)
+        return d[u]
+    end
+    error(ArgumentError("unregistered unit `$(u)`"))
+end

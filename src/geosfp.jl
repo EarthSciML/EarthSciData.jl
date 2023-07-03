@@ -125,7 +125,7 @@ function loadslice(fs::GEOSFPFileSet, t::DateTime, varname)::DataArray
     slices[time_index] = centerpoint_index(DataFrequencyInfo(fs, t), t)
     data = var[slices...]
 
-    units = var.atts["units"]
+    units = to_unitful(var.atts["units"])
     description = var.atts["long_name"]
     @assert var.atts["scale_factor"] == 1.0 "Unexpected scale factor."
 
@@ -215,26 +215,14 @@ struct GEOSFP <: EarthSciMLODESystem
                 coords = Num[]
                 for dim ∈ dims
                     d = Symbol(dim)
-                    if d ∈ keys(coord_defaults)
+                    if d ∈ keys(coord_defaults) # Set a default value for this coordinate.
                         v = (@parameters $d = coord_defaults[d])[1]
-                    else
+                    else # No default value.
                         v = (@parameters $d)[1]
                     end
                     push!(coords, v)
                 end
-                desc = description(itp, sample_time)
-                uu = units(itp, sample_time)
-                n = Symbol("$(filename)₊$(varname)")
-                lhs = (@variables $n(t) [unit = uu, description = desc])[1]
-                if length(coords) == 3
-                    push!(eqs, lhs ~ interp!(itp, t, coords[1], coords[2], coords[3]))
-                elseif length(coords) == 2
-                    push!(eqs, lhs ~ interp!(itp, t, coords[1], coords[2]))
-                elseif length(coords) == 1
-                    push!(eqs, lhs ~ interp!(itp, t, coords[1]))
-                else
-                    error("Unexpected number of coordinates: $(length(coords))")
-                end
+                push!(eqs, create_interp_equation(itp, filename, t, sample_time, coords))
             end
         end
         sys = ODESystem(eqs, t, name=:GEOSFP)
@@ -244,10 +232,10 @@ struct GEOSFP <: EarthSciMLODESystem
 end
 
 function Base.:(+)(mw::EarthSciMLBase.MeanWind, g::GEOSFP)::ComposedEarthSciMLSystem
-    eqs = [mw.sys.u ~ g.sys.A3dyn₊U]
+    eqs = [mw.sys.v_lon ~ g.sys.A3dyn₊U]
     # Only add the number of dimensions present in the mean wind system.
-    length(states(mw.sys)) > 1 ? push!(eqs, mw.sys.v ~ g.sys.A3dyn₊V) : nothing
-    length(states(mw.sys)) > 2 ? push!(eqs, mw.sys.w ~ g.sys.A3dyn₊OMEGA) : nothing
+    length(states(mw.sys)) > 1 ? push!(eqs, mw.sys.v_lat ~ g.sys.A3dyn₊V) : nothing
+    length(states(mw.sys)) > 2 ? push!(eqs, mw.sys.v_lev ~ g.sys.A3dyn₊OMEGA) : nothing
     
     ComposedEarthSciMLSystem(AbstractEarthSciMLSystem[ConnectorSystem(
         eqs,
