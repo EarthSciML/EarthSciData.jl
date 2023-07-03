@@ -1,7 +1,7 @@
 name = "EarthSciData"
 uuid = "a293c155-435f-439d-9c11-a083b6b47337"
 authors = ["EarthSciML Authors"]
-version = "0.1.1"
+version = "0.2.0"
 
 [deps]
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
@@ -9,6 +9,7 @@ DocStringExtensions = "ffbed154-4ef7-542d-bbb7-c09d3a79fcae"
 Downloads = "f43a241f-c20a-4ad4-852c-f6b1247861c6"
 EarthSciMLBase = "e53f1632-a13c-4728-9402-0c66d48804b0"
 Interpolations = "a98d9a8b-a2ab-59e6-89dd-64a1c18fca59"
+Latexify = "23fbe1c1-3f47-55db-b15f-69d7ec21a316"
 ModelingToolkit = "961ee093-0014-501f-94e3-6117800e7a78"
 NetCDF = "30363a11-5582-574a-97bb-aa9a979735b9"
 Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
@@ -19,6 +20,8 @@ Unitful = "1986cc42-f94f-5a68-af5c-568840ba703d"
 DocStringExtensions = "0.9"
 EarthSciMLBase = "0.5"
 Interpolations = "0.14"
+Latexify = "0.16"
+LaTeXStrings = "1"
 ModelingToolkit = "8"
 NetCDF = "0.11"
 Symbolics = "4, 5"
@@ -28,10 +31,11 @@ julia = "1.6"
 [extras]
 DifferentialEquations = "0c46a032-eb83-5123-abaf-570d42b7fbaa"
 DomainSets = "5b8099bc-c8ec-5219-889f-1d9e522a28bf"
+LaTeXStrings = "b964fa9f-0449-5b57-a5c2-d3ea65f4040f"
 MethodOfLines = "94925ecb-adb7-4558-8ed8-f975c56a0bf4"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 SafeTestsets = "1bc83da4-3b8d-516f-aca4-4fe02f6d838f"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
-test = ["Test", "SafeTestsets", "DomainSets", "DifferentialEquations", "MethodOfLines", "Random"]
+test = ["Test", "SafeTestsets", "DomainSets", "DifferentialEquations", "LaTeXStrings", "MethodOfLines", "Random"]

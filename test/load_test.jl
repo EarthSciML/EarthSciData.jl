@@ -2,6 +2,7 @@ using EarthSciData
 using Dates
 using ModelingToolkit
 using Random
+using Latexify, LaTeXStrings
 
 fs = EarthSciData.GEOSFPFileSet("4x5", "A3dyn")
 t = DateTime(2022, 5, 1)
@@ -20,6 +21,8 @@ dat = EarthSciData.loadslice(fs, t, "U")
 @test dat.dimnames == ["lon", "lat", "lev"]
 
 itp = EarthSciData.DataSetInterpolator(fs, "U")
+
+@test String(latexify(itp)) == L"$\mathrm{EarthSciData}\left( GEOSFPFileSet_{x}U_{interp} \right)$"
 
 @test EarthSciData.dimnames(itp, t) == ["lon", "lat", "lev"]
 @test EarthSciData.varnames(fs, t) == ["U", "OMEGA", "RH", "DTRAIN", "V"]
