@@ -1,7 +1,7 @@
 name = "EarthSciData"
 uuid = "a293c155-435f-439d-9c11-a083b6b47337"
 authors = ["EarthSciML Authors"]
-version = "0.2.0"
+version = "0.2.1"
 
 [deps]
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
@@ -20,7 +20,7 @@ Unitful = "1986cc42-f94f-5a68-af5c-568840ba703d"
 DocStringExtensions = "0.9"
 EarthSciMLBase = "0.5"
 Interpolations = "0.14"
-Latexify = "0.16"
+Latexify = "0.11, 0.12, 0.13, 0.14, 0.15, 0.16"
 LaTeXStrings = "1"
 ModelingToolkit = "8"
 NetCDF = "0.11"
