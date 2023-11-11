@@ -1,6 +1,6 @@
 # Using data from GEOS-FP
 
-``` julia
+``` example 1
 using EarthSciData, EarthSciMLBase
 using DomainSets, ModelingToolkit, MethodOfLines, DifferentialEquations
 using Dates, Plots

@@ -3,6 +3,7 @@ using Dates, Downloads, Printf
 using DocStringExtensions
 using NetCDF, Interpolations, ModelingToolkit, Symbolics
 using EarthSciMLBase
+using Scratch
 using Unitful, Latexify
 
 # General utilities
