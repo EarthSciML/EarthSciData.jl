@@ -1,10 +1,9 @@
 export interp!
 
-# Get the directory for storing data
-function datadir()
-    ("EARTHSCIDATADIR" ∈ keys(ENV)) ? ENV["EARTHSCIDATADIR"] : @get_scratch!("earthsci_data")
+download_cache = ""
+function __init__()
+    global download_cache = ("EARTHSCIDATADIR" ∈ keys(ENV)) ? ENV["EARTHSCIDATADIR"] : @get_scratch!("earthsci_data")
 end
-
 
 """
 An interface for types describing a dataset, potentially comprised of multiple files.
@@ -38,14 +37,14 @@ function maybedownload(fs::FileSet, t::DateTime)
     try
         # TODO(CT): Progress bar doesn't seem to be working correctly.
         Downloads.download(u, p, progress=(total::Integer, now::Integer) -> 
-                @info("Downloading $u to $(realpath(datadir()))...",
+                @info("Downloading $u to $(realpath(download_cache))...",
                     _id = :EarthSciDataDownload,
                     progress = total > 0 ? now/total : 0.0))
     catch e # Delete partially downloaded file if an error occurs.
         rm(p)
         e
     end
-    @info("Downloading $u to $(realpath(datadir()))...",
+    @info("Downloading $u to $(realpath(download_cache))...",
         _id = :EarthSciDataDownload,
         progress="done")
     return p
