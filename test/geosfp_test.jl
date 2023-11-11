@@ -36,14 +36,13 @@ using Unitful
     eqs = equations(pde_sys)
 
     want_eqs = [
-        "meanwind₊v_lon(t, lat, lon, lev) ~ GEOSFP₊A3dyn₊U(t, lat, lon, lev)"
-        "meanwind₊v_lat(t, lat, lon, lev) ~ GEOSFP₊A3dyn₊V(t, lat, lon, lev)"
-        "meanwind₊v_lev(t, lat, lon, lev) ~ GEOSFP₊A3dyn₊OMEGA(t, lat, lon, lev)"
-        "GEOSFP₊A3dyn₊U(t, lat, lon, lev) ~ EarthSciData.interp!(DataSetInterpolator{EarthSciData.GEOSFPFileSet, U}, t, lon, lat, lev)"
-        "GEOSFP₊A3dyn₊OMEGA(t, lat, lon, lev) ~ EarthSciData.interp!(DataSetInterpolator{EarthSciData.GEOSFPFileSet, OMEGA}, t, lon, lat, lev)"
-        "GEOSFP₊A3dyn₊V(t, lat, lon, lev) ~ EarthSciData.interp!(DataSetInterpolator{EarthSciData.GEOSFPFileSet, V}, t, lon, lat, lev)"
-        "Differential(t)(examplesys₊c(t, lat, lon, lev)) ~ ((sin(lat / examplesys₊c_unit) + sin(lon / examplesys₊c_unit))*examplesys₊c(t, lat, lon, lev)) / t + (-meanwind₊v_lat(t, lat, lon, lev)*Differential(lat)(examplesys₊c(t, lat, lon, lev))) / lat2meters + (-meanwind₊v_lon(t, lat, lon, lev)*Differential(lon)(examplesys₊c(t, lat, lon, lev))) / (lon2m*cos(lat)) - meanwind₊v_lev(t, lat, lon, lev)*Differential(lev)(examplesys₊c(t, lat, lon, lev))"
+        "meanwind₊v_lon(t, lat, lon, lev) ~ GEOSFP₊A3dyn₊U(t, lat, lon, lev)", 
+        "meanwind₊v_lat(t, lat, lon, lev) ~ GEOSFP₊A3dyn₊V(t, lat, lon, lev)", 
+        "meanwind₊v_lev(t, lat, lon, lev) ~ GEOSFP₊A3dyn₊OMEGA(t, lat, lon, lev)", 
+        "GEOSFP₊A3dyn₊U(t, lat, lon, lev) ~ EarthSciData.interp!(DataSetInterpolator{EarthSciData.GEOSFPFileSet, U}, t, lon, lat, lev)", 
+        "GEOSFP₊A3dyn₊OMEGA(t, lat, lon, lev) ~ EarthSciData.interp!(DataSetInterpolator{EarthSciData.GEOSFPFileSet, OMEGA}, t, lon, lat, lev)", 
+        "GEOSFP₊A3dyn₊V(t, lat, lon, lev) ~ EarthSciData.interp!(DataSetInterpolator{EarthSciData.GEOSFPFileSet, V}, t, lon, lat, lev)", 
+        "Differential(t)(examplesys₊c(t, lat, lon, lev)) ~ (-Differential(lon)(examplesys₊c(t, lat, lon, lev))*meanwind₊v_lon(t, lat, lon, lev)) / (lon2m*cos(lat)) + (-Differential(lat)(examplesys₊c(t, lat, lon, lev))*meanwind₊v_lat(t, lat, lon, lev)) / lat2meters + ((sin(lat / examplesys₊c_unit) + sin(lon / examplesys₊c_unit))*examplesys₊c(t, lat, lon, lev)) / t - Differential(lev)(examplesys₊c(t, lat, lon, lev))*meanwind₊v_lev(t, lat, lon, lev)",
     ]
-
     @test string.(eqs) == want_eqs
 end
