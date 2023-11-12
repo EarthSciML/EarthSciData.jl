@@ -2,17 +2,12 @@ using Test
 using EarthSciData, Unitful, EarthSciMLBase, ModelingToolkit
 using Dates
 @parameters t lat lon lev
-@parameters Δlon = 0.1 [unit = u"rad"]
-@parameters Δlat = 0.1 [unit = u"rad"]
-emis = NEI2016MonthlyEmis("mrggrid_withbeis_withrwc", t, lat,
-    EarthSciMLBase.lon2meters(lat) * Δlon,
-    lon,
-    EarthSciMLBase.lat2meters * Δlat,
-    lev)
+@parameters Δz = 60 [unit=u"m"]
+emis = NEI2016MonthlyEmis("mrggrid_withbeis_withrwc", t, lat, lon, lev, Δz)
 
 eqs = equations(emis.sys)
 @test length(eqs) == 69
-@test contains(string(eqs[1].rhs), "cos(lat)")
+@test contains(string(eqs[1].rhs), "/ Δz")
 
 sample_time = DateTime(2016, 5, 1)
 @testset "correct projection" begin

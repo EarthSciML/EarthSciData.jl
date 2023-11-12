@@ -151,29 +151,23 @@ emissions mass, especially if the simulation grid is coarser than the emissions 
 
 # Example
 ``` jldoctest
-using EarthSciData, Unitful, EarthSciMLBase, ModelingToolkit
+using EarthSciData, ModelingToolkit, Unitful
 @parameters t lat lon lev
-@parameters Δlon=0.1 [unit=u"rad"]
-@parameters Δlat=0.1 [unit=u"rad"]
-emis = NEI2016MonthlyEmis("mrggrid_withbeis_withrwc", t, lat, 
-    EarthSciMLBase.lon2meters(lat) * Δx, 
-    lon, 
-    EarthSciMLBase.lat2meters * Δy, 
-    lev)
+@parameters Δz = 60 [unit=u"m"]
+emis = NEI2016MonthlyEmis("mrggrid_withbeis_withrwc", t, lat, lon, lev, Δz)
 ```
 """
 struct NEI2016MonthlyEmis <: EarthSciMLODESystem
     fileset::NEI2016MonthlyEmisFileSet
     sys::ODESystem
-    function NEI2016MonthlyEmis(sector, t, x, Δx, y, Δy, lev; spatial_ref="EPSG:4326")
+    function NEI2016MonthlyEmis(sector, t, x, y, lev, Δz; spatial_ref="EPSG:4326")
         fs = NEI2016MonthlyEmisFileSet(sector)
         sample_time = DateTime(2016, 5, 1) # Dummy time to get variable names and dimensions from data.
         eqs = []
-        @assert ModelingToolkit.get_unit(Δx) == u"m" "Δx must be in units of meters."
-        @assert ModelingToolkit.get_unit(Δy) == u"m" "Δy must be in units of meters."
+        @assert ModelingToolkit.get_unit(Δz) == u"m" "Δz must be in units of meters."
         for varname ∈ varnames(fs, sample_time)
             itp = DataSetInterpolator(fs, varname; spatial_ref)
-            push!(eqs, create_interp_equation(itp, sector, t, sample_time, [x, y, lev], Δx * Δy))
+            push!(eqs, create_interp_equation(itp, sector, t, sample_time, [x, y, lev], 1/Δz))
         end
         sys = ODESystem(eqs, t; name=:NEI2016MonthlyEmis)
         new(fs, sys)
