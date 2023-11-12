@@ -3,7 +3,7 @@ using EarthSciData, Unitful, EarthSciMLBase, ModelingToolkit
 using Dates
 @parameters t lat lon lev
 @parameters Δz = 60 [unit=u"m"]
-emis = NEI2016MonthlyEmis("mrggrid_withbeis_withrwc", t, lat, lon, lev, Δz)
+emis = NEI2016MonthlyEmis("mrggrid_withbeis_withrwc", t, lon, lat, lev, Δz)
 
 eqs = equations(emis.sys)
 @test length(eqs) == 69
