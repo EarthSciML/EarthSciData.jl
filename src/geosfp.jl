@@ -53,7 +53,8 @@ end
 """
 $(SIGNATURES)
 
-File path on the server relative to the host root; also path on local disk relative to `ENV["EARTHSCIDATADIR"]`.
+File path on the server relative to the host root; also path on local disk relative to `ENV["EARTHSCIDATADIR"]` 
+(or a scratch directory if that environment variable is not set).
 """
 function relpath(fs::GEOSFPFileSet, t::DateTime)
     year = Dates.format(t, "Y")

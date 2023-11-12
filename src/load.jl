@@ -1,10 +1,9 @@
 export interp!
 
-# Get the directory for storing data
-function datadir()
-    ("EARTHSCIDATADIR" ∈ keys(ENV)) ? ENV["EARTHSCIDATADIR"] : "./earthsci_data/"
+download_cache = ""
+function __init__()
+    global download_cache = ("EARTHSCIDATADIR" ∈ keys(ENV)) ? ENV["EARTHSCIDATADIR"] : @get_scratch!("earthsci_data")
 end
-
 
 """
 An interface for types describing a dataset, potentially comprised of multiple files.
@@ -115,7 +114,8 @@ DataSetInterpolators are used to interpolate data from a `FileSet` to represent 
 Data is loaded (and downloaded) lazily, so the first time you use it on a for a given 
 dataset and time period it may take a while to load. Each time step is downloaded and loaded as it is needed 
 during the simulation and cached on the hard drive at the path specified by the `\\\$EARTHSCIDATADIR`
-environment variable. The interpolator will also cache data in memory representing the 
+environment variable, or in a scratch directory if that environment variable has not been specified. 
+The interpolator will also cache data in memory representing the 
 data records for the times immediately before and after the current time step.
 """
 mutable struct DataSetInterpolator
