@@ -64,21 +64,6 @@ function relpath(fs::GEOSFPFileSet, t::DateTime)
     return joinpath("GEOS_$(fs.domain)/GEOS_FP/$year/$month", "GEOSFP.$(year)$(month)$day.$(fs.filetype).$(domain).nc")
 end
 
-"""
-$(SIGNATURES)
-
-Return the URL for the GEOS-FP file for the given `DateTime`.
-
-"""
-url(fs::GEOSFPFileSet, t::DateTime) = joinpath(fs.mirror, relpath(fs, t))
-
-"""
-$(SIGNATURES)
-
-Return the local path for the GEOS-FP file for the given `DateTime`.
-"""
-localpath(fs::GEOSFPFileSet, t::DateTime) = joinpath(datadir(), relpath(fs, t))
-
 # Cache to store data frequency information.
 GEOSFPDataFrequencyInfoCache = Dict{String, DataFrequencyInfo}()
 
@@ -125,9 +110,12 @@ function loadslice(fs::GEOSFPFileSet, t::DateTime, varname)::DataArray
     slices[time_index] = centerpoint_index(DataFrequencyInfo(fs, t), t)
     data = var[slices...]
 
-    units = to_unitful(var.atts["units"])
+    scale, units = to_unitful(var.atts["units"])
     description = var.atts["long_name"]
     @assert var.atts["scale_factor"] == 1.0 "Unexpected scale factor."
+    if scale != 1
+        data .*= scale
+    end
 
     DataArray(data, units, description, dimnames)
 end
@@ -195,7 +183,7 @@ we can set `coord_defaults = Dict(:lev => 1)`.
 See http://geoschemdata.wustl.edu/ExtData/ for current options.
 """
 struct GEOSFP <: EarthSciMLODESystem
-    filsets::Dict{String,GEOSFPFileSet}
+    filesets::Dict{String,GEOSFPFileSet}
     sys::ODESystem
     function GEOSFP(domain, t; coord_defaults=Dict{Symbol,Number}())
         filesets = Dict{String,GEOSFPFileSet}(
