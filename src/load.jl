@@ -22,6 +22,21 @@ abstract type FileSet end
 """
 $(SIGNATURES)
 
+Return the URL for the file for the given `DateTime`.
+
+"""
+url(fs::FileSet, t::DateTime) = joinpath(fs.mirror, relpath(fs, t))
+
+"""
+$(SIGNATURES)
+
+Return the local path for the file for the given `DateTime`.
+"""
+localpath(fs::FileSet, t::DateTime) = joinpath(download_cache, relpath(fs, t))
+
+"""
+$(SIGNATURES)
+
 Check if the specified file exists locally. If not, download it.
 """
 function maybedownload(fs::FileSet, t::DateTime)
@@ -35,18 +50,15 @@ function maybedownload(fs::FileSet, t::DateTime)
     end
     u = url(fs, t)
     try
-        # TODO(CT): Progress bar doesn't seem to be working correctly.
-        Downloads.download(u, p, progress=(total::Integer, now::Integer) -> 
-                @info("Downloading $u to $(realpath(download_cache))...",
-                    _id = :EarthSciDataDownload,
-                    progress = total > 0 ? now/total : 0.0))
+        prog = Progress(100; desc="Downloading $(basename(u)):", dt=0.1)
+        Downloads.download(u, p, progress=(total::Integer, now::Integer) -> begin
+            prog.n = total
+            update!(prog, now)
+        end)
     catch e # Delete partially downloaded file if an error occurs.
         rm(p)
-        e
+        throw(e)
     end
-    @info("Downloading $u to $(realpath(download_cache))...",
-        _id = :EarthSciDataDownload,
-        progress="done")
     return p
 end
 
@@ -75,7 +87,7 @@ struct DataFrequencyInfo
     "Beginning of time of the time series."
     start::DateTime
     "Interval between each record."
-    frequency::Union{Dates.Period, Dates.CompoundPeriod}
+    frequency::Union{Dates.Period,Dates.CompoundPeriod}
     "Time representing the temporal center of each record."
     centerpoints::AbstractVector
 end
@@ -83,7 +95,7 @@ end
 """
 Return the time endpoints correcponding to each centerpoint
 """
-endpoints(t::DataFrequencyInfo) = [(cp - t.frequency/2, cp + t.frequency/2) for cp in t.centerpoints]
+endpoints(t::DataFrequencyInfo) = [(cp - t.frequency / 2, cp + t.frequency / 2) for cp in t.centerpoints]
 
 """
 Return the index of the centerpoint closest to the given time.
@@ -116,8 +128,9 @@ mutable struct DataSetInterpolator
     data2
     time2
     currenttime
+    kwargs
 
-    DataSetInterpolator(fs::FileSet, varname) = new(fs, varname, nothing, nothing, nothing, nothing, nothing, nothing, nothing)
+    DataSetInterpolator(fs::FileSet, varname; kwargs...) = new(fs, varname, nothing, nothing, nothing, nothing, nothing, nothing, nothing, kwargs)
 end
 
 function Base.show(io::IO, itp::DataSetInterpolator)
@@ -139,20 +152,20 @@ function initialize!(itp::DataSetInterpolator, t::DateTime)
         if itp.time2 == itp.time1
             itp.itp2, itp.data2 = itp.itp1, itp.data1
         else
-            itp.itp2, itp.data2 = load_interpolator(itp.fs, t, itp.varname)
+            itp.itp2, itp.data2 = load_interpolator(itp.fs, t, itp.varname; itp.kwargs...)
         end
         ti_minus = DataFrequencyInfo(itp.fs, t - ti.frequency)
         itp.time1 = ti_minus.centerpoints[centerpoint_index(ti_minus, t - ti.frequency)]
-        itp.itp1, itp.data1 = load_interpolator(itp.fs, t - ti.frequency, itp.varname)
+        itp.itp1, itp.data1 = load_interpolator(itp.fs, t - ti.frequency, itp.varname; itp.kwargs...)
     else # Load data for current and next time step.
         itp.time1 = ti.centerpoints[centerpoint_index(ti, t)]
         if itp.time1 == itp.time2
             itp.itp1, itp.data1 = itp.itp2, itp.data2
         else
-            itp.itp1, itp.data1 = load_interpolator(itp.fs, t, itp.varname)
+            itp.itp1, itp.data1 = load_interpolator(itp.fs, t, itp.varname; itp.kwargs...)
         end
         ti_plus = DataFrequencyInfo(itp.fs, t + ti.frequency)
-        itp.itp2, itp.data2 = load_interpolator(itp.fs, t + ti.frequency, itp.varname)
+        itp.itp2, itp.data2 = load_interpolator(itp.fs, t + ti.frequency, itp.varname; itp.kwargs...)
         itp.time2 = ti_plus.centerpoints[centerpoint_index(ti_plus, t + ti.frequency)]
     end
     @assert itp.time1 < itp.time2 "Interpolator times are in wrong order"
@@ -167,7 +180,7 @@ function lazyload!(itp::DataSetInterpolator, t::DateTime)
         initialize!(itp, t)
         return
     end
-    if  t <= itp.time1 || t > itp.time2
+    if t <= itp.time1 || t > itp.time2
         @info "Updating data loader for $(itp.varname) for t = $t"
         initialize!(itp, t)
     end
@@ -178,7 +191,7 @@ $(SIGNATURES)
 
 Return the dimension names associated with this interpolator.
 """
-function dimnames(itp::DataSetInterpolator, t::DateTime) 
+function dimnames(itp::DataSetInterpolator, t::DateTime)
     lazyload!(itp, t)
     itp.data1.dimnames
 end
@@ -188,7 +201,7 @@ $(SIGNATURES)
 
 Return the units of the data associated with this interpolator.
 """
-function units(itp::DataSetInterpolator, t::DateTime) 
+function units(itp::DataSetInterpolator, t::DateTime)
     lazyload!(itp, t)
     itp.data1.units
 end
@@ -198,7 +211,7 @@ $(SIGNATURES)
 
 Return the description of the data associated with this interpolator.
 """
-function description(itp::DataSetInterpolator, t::DateTime) 
+function description(itp::DataSetInterpolator, t::DateTime)
     lazyload!(itp, t)
     itp.data1.description
 end
@@ -211,7 +224,7 @@ Return the value of the given variable from the given dataset at the given time 
 function interp!(itp::DataSetInterpolator, t::DateTime, locs...)
     lazyload!(itp, t)
     t_frac = (t - itp.time1) / (itp.time2 - itp.time1)
-    val = itp.itp2(locs...) * t_frac + itp.itp1(locs...) * (1-t_frac)
+    val = itp.itp2(locs...) * t_frac + itp.itp1(locs...) * (1 - t_frac)
 end
 """
 Interpolation with a unix timestamp.
@@ -221,7 +234,7 @@ interp!(itp::DataSetInterpolator, t::AbstractFloat, locs...) = interp!(itp, Date
 # Dummy function for unit validation. Basically ModelingToolkit 
 # will call the function with a Unitful.Quantity or an integer to 
 # get information about the type and units of the output.
-interp!(itp::Union{Unitful.Quantity, Real}, t, locs...) = itp
+interp!(itp::Union{Unitful.Quantity,Real}, t, locs...) = itp
 
 # Symbolic tracing, for different numbers of dimensions (up to three dimensions).
 @register_symbolic interp!(itp::DataSetInterpolator, t, loc1, loc2, loc3)
@@ -229,22 +242,25 @@ interp!(itp::Union{Unitful.Quantity, Real}, t, locs...) = itp
 @register_symbolic interp!(itp::DataSetInterpolator, t, loc1) false
 
 """
+$(SIGNATURES)
+
 Create an equation that interpolates the given dataset at the given time and location.
-`filename` is an identifier for the dataset, and `t` is the time variable.
+`filename` is an identifier for the dataset, and `t` is the time variable. 
+The RHS of each equation will be multiplied by the optional `scale`.
 """
-function create_interp_equation(itp::DataSetInterpolator, filename, t, sample_time, coords)
+function create_interp_equation(itp::DataSetInterpolator, filename, t, sample_time, coords, scale=1)
     desc = description(itp, sample_time)
-    uu = units(itp, sample_time)
+    uu = units(itp, sample_time) * ModelingToolkit.get_unit(scale)
     n = Symbol("$(filename)₊$(itp.varname)")
-    lhs = (@variables $n(t) [unit = uu, description = desc])[1]
+    lhs = only(@variables $n(t) [unit = uu, description = desc])
 
     # Create equation.
     if length(coords) == 3
-        return lhs ~ interp!(itp, t, coords[1], coords[2], coords[3])
+        return lhs ~ interp!(itp, t, coords[1], coords[2], coords[3]) * scale
     elseif length(coords) == 2
-        return lhs ~ interp!(itp, t, coords[1], coords[2])
+        return lhs ~ interp!(itp, t, coords[1], coords[2]) * scale
     elseif length(coords) == 1
-        return lhs ~ interp!(itp, t, coords[1])
+        return lhs ~ interp!(itp, t, coords[1]) * scale
     else
         error("Unexpected number of coordinates: $(length(coords))")
     end
