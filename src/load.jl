@@ -127,10 +127,12 @@ mutable struct DataSetInterpolator
     itp2
     data2
     time2
-    currenttime
+    @atomic currenttime
+    lock::ReentrantLock
     kwargs
 
-    DataSetInterpolator(fs::FileSet, varname; kwargs...) = new(fs, varname, nothing, nothing, nothing, nothing, nothing, nothing, nothing, kwargs)
+    DataSetInterpolator(fs::FileSet, varname; kwargs...) = new(fs, varname, nothing, nothing,
+        nothing, nothing, nothing, nothing, nothing, ReentrantLock(), kwargs)
 end
 
 function Base.show(io::IO, itp::DataSetInterpolator)
@@ -172,19 +174,22 @@ function initialize!(itp::DataSetInterpolator, t::DateTime)
 end
 
 function lazyload!(itp::DataSetInterpolator, t::DateTime)
-    if itp.currenttime == t
-        return
-    end
-    itp.currenttime = t
-    if itp.itp1 == nothing # Initialize new interpolator.
-        initialize!(itp, t)
-        return
-    end
-    if t <= itp.time1 || t > itp.time2
-        @info "Updating data loader for $(itp.varname) for t = $t"
-        initialize!(itp, t)
+    lock(itp.lock) do
+        if itp.currenttime == t
+            return
+        end
+        @atomic itp.currenttime = t
+        if itp.itp1 === nothing # Initialize new interpolator.
+            initialize!(itp, t)
+            return
+        end
+        if t <= itp.time1 || t > itp.time2
+            @info "Updating data loader for $(itp.varname) for t = $t"
+            initialize!(itp, t)
+        end
     end
 end
+lazyload!(itp::DataSetInterpolator, t::Float64) = lazyload!(itp, Dates.unix2datetime(t))
 
 """
 $(SIGNATURES)
@@ -223,13 +228,22 @@ Return the value of the given variable from the given dataset at the given time 
 """
 function interp!(itp::DataSetInterpolator, t::DateTime, locs...)
     lazyload!(itp, t)
+    interp_unsafe(itp, t, locs...)
+end
+
+"""
+Interpolate without checking if the data has been correctly loaded for the given time.
+"""
+function interp_unsafe(itp::DataSetInterpolator, t::DateTime, locs...)
     t_frac = (t - itp.time1) / (itp.time2 - itp.time1)
     val = itp.itp2(locs...) * t_frac + itp.itp1(locs...) * (1 - t_frac)
 end
+
 """
 Interpolation with a unix timestamp.
 """
 interp!(itp::DataSetInterpolator, t::AbstractFloat, locs...) = interp!(itp, Dates.unix2datetime(t), locs...)
+interp_unsafe(itp::DataSetInterpolator, t::AbstractFloat, locs...) = interp_unsafe(itp, Dates.unix2datetime(t), locs...)
 
 # Dummy function for unit validation. Basically ModelingToolkit 
 # will call the function with a Unitful.Quantity or an integer to 
