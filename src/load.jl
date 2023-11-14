@@ -127,7 +127,7 @@ mutable struct DataSetInterpolator
     itp2
     data2
     time2
-    @atomic currenttime
+    currenttime
     lock::ReentrantLock
     kwargs
 
@@ -178,7 +178,7 @@ function lazyload!(itp::DataSetInterpolator, t::DateTime)
         if itp.currenttime == t
             return
         end
-        @atomic itp.currenttime = t
+        itp.currenttime = t
         if itp.itp1 === nothing # Initialize new interpolator.
             initialize!(itp, t)
             return
