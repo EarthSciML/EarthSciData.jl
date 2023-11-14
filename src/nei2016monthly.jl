@@ -107,7 +107,8 @@ function load_interpolator(fs::NEI2016MonthlyEmisFileSet, t::DateTime, varname; 
     ny = fid.gatts["NROWS"]
     xs = x₀ + Δx / 2 .+ Δx .* (0:nx-1)
     ys = y₀ + Δy / 2 .+ Δy .* (0:ny-1)
-    itp = interpolate(slice.data[:, :, 1], BSpline(Constant(Next)))
+    d = @view slice.data[:, :, 1]
+    itp = interpolate!(d, BSpline(Constant(Next))) # This destroys slice.data.
     itp = scale(itp, (xs, ys))
     itp = extrapolate(itp, 0)
     itp_trans(x, y, z) = begin
