@@ -50,12 +50,12 @@ itp = EarthSciData.DataSetInterpolator(fs, "U")
 end
 
 #== Profile data loading and interpolation.
-fs = GEOSFPFileSet("4x5", "A3dyn")
-itp = DataSetInterpolator(fs, "U")
+fs = EarthSciData.GEOSFPFileSet("4x5", "A3dyn")
+itp = EarthSciData.DataSetInterpolator(fs, "U")
 ts = DateTime(2022, 5, 1):Hour(1):DateTime(2022, 5, 3)
 function interpfunc()
     for t ∈ ts 
-        for lon ∈ -180:1:175
+        Threads.@threads for lon ∈ -180:1:175
             for lat ∈ -90:1:85
                 interp!(itp, t, lon, lat, 1.0)
             end
