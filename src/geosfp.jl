@@ -121,6 +121,13 @@ function loadslice(fs::GEOSFPFileSet, t::DateTime, varname)::DataArray
     DataArray(data, units, description, dimnames)
 end
 
+"""Convert a vector of evenly spaced grid points to a range."""
+function knots2range(knots)
+    dx = [knots[i+1] - knots[i] for i ∈ 1:length(knots)-1]
+    @assert all(dx .≈ dx[1]) "Knots must be evenly spaced."
+    return knots[1]:dx[1]:knots[end]
+end
+
 """
 $(SIGNATURES)
 
@@ -130,8 +137,10 @@ from Interpolations.jl.
 function load_interpolator(fs::GEOSFPFileSet, t::DateTime, varname)
     fid = NetCDF.open(maybedownload(fs, t))
     slice = loadslice(fs, t, varname)
-    knots = Tuple([fid.vars[d][:] for d ∈ slice.dimnames])
-    interpolate(knots, slice.data, Gridded(Linear())), slice
+    knots = Tuple([knots2range(fid.vars[d][:]) for d ∈ slice.dimnames])
+    itp = interpolate!(slice.data, BSpline(Linear())) # This destroys slice.data.
+    itp = scale(itp, knots)
+    itp, slice
 end
 
 """
