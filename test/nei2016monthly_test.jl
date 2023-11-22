@@ -12,19 +12,19 @@ eqs = equations(emis.sys)
 
 sample_time = DateTime(2016, 5, 1)
 @testset "correct projection" begin
-    itp = EarthSciData.DataSetInterpolator(emis.fileset, "NOX"; spatial_ref="EPSG:4326")
-    @test interp!(itp, sample_time, -97, 40, 1) == 8.198218474760385e-10
+    itp = EarthSciData.DataSetInterpolator{Float32}(emis.fileset, "NOX"; spatial_ref="EPSG:4326")
+    @test interp!(itp, sample_time, -97, 40, 1) ≈ 8.198218f-10
     @test interp!(itp, sample_time, -97, 40, 2) == 0
 end
 
 @testset "incorrect projection" begin
-    itp = EarthSciData.DataSetInterpolator(emis.fileset, "NOX"; spatial_ref="EPSG:3857")
+    itp = EarthSciData.DataSetInterpolator{Float32}(emis.fileset, "NOX"; spatial_ref="EPSG:3857")
     @test interp!(itp, sample_time, -97, 40, 1) == 0.0
 end
 
 @testset "monthly frequency" begin
     sample_time = DateTime(2016, 5, 1)
-    itp = EarthSciData.DataSetInterpolator(emis.fileset, "NOX"; spatial_ref="EPSG:4326")
+    itp = EarthSciData.DataSetInterpolator{Float32}(emis.fileset, "NOX"; spatial_ref="EPSG:4326")
     EarthSciData.initialize!(itp, sample_time)
     @test_broken month(itp.time1) == 4 #TODO(CT): Fix by adding next() and previous() methods instead of adding and subtracting frequency.
     @test month(itp.time2) == 5

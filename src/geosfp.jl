@@ -118,7 +118,7 @@ function loadslice(fs::GEOSFPFileSet, t::DateTime, varname)::DataArray
         data .*= scale
     end
 
-    DataArray(data, units, description, dimnames)
+    DataArray{eltype(data)}(data, units, description, dimnames)
 end
 
 """Convert a vector of evenly spaced grid points to a range."""
@@ -152,6 +152,17 @@ function varnames(fs::GEOSFPFileSet, t::DateTime)
     filepath = maybedownload(fs, t)
     fid = NetCDF.open(filepath)
     [setdiff(keys(fid.vars), keys(fid.dim))...]
+end
+
+"""
+$(SIGNATURES)
+
+Return the data type of the given variable.
+"""
+function datatype(fs::GEOSFPFileSet, t::DateTime, varname)
+    filepath = maybedownload(fs, t)
+    fid = NetCDF.open(filepath)
+    eltype(fid[varname])
 end
 
 """
@@ -208,7 +219,8 @@ struct GEOSFP <: EarthSciMLODESystem
         eqs = []
         for (filename, fs) in filesets
             for varname ∈ varnames(fs, sample_time)
-                itp = DataSetInterpolator(fs, varname)
+                dt = datatype(fs, sample_time, varname)
+                itp = DataSetInterpolator{dt}(fs, varname)
                 dims = dimnames(itp, sample_time)
                 coords = Num[]
                 for dim ∈ dims

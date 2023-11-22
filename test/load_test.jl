@@ -20,7 +20,7 @@ dat = EarthSciData.loadslice(fs, t, "U")
 @test size(dat.data) == (72, 46, 72)
 @test dat.dimnames == ["lon", "lat", "lev"]
 
-itp = EarthSciData.DataSetInterpolator(fs, "U")
+itp = EarthSciData.DataSetInterpolator{Float32}(fs, "U")
 
 @test String(latexify(itp)) == L"$\mathrm{EarthSciData}\left( GEOSFPFileSet_{x}U_{interp} \right)$"
 

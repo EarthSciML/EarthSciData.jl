@@ -135,6 +135,17 @@ end
 """
 $(SIGNATURES)
 
+Return the data type of the given variable.
+"""
+function datatype(fs::NEI2016MonthlyEmisFileSet, t::DateTime, varname)
+    filepath = maybedownload(fs, t)
+    fid = NetCDF.open(filepath)
+    eltype(fid[varname])
+end
+
+"""
+$(SIGNATURES)
+
 A data loader for CMAQ-formatted monthly US National Emissions Inventory data for year 2016, 
 available from: https://gaftp.epa.gov/Air/emismod/2016/v1/gridded/monthly_netCDF/.
 The emissions here are monthly averages, so there is no information about diurnal variation etc.
@@ -167,7 +178,8 @@ struct NEI2016MonthlyEmis <: EarthSciMLODESystem
         eqs = []
         @assert ModelingToolkit.get_unit(Δz) == u"m" "Δz must be in units of meters."
         for varname ∈ varnames(fs, sample_time)
-            itp = DataSetInterpolator(fs, varname; spatial_ref)
+            dt = datatype(fs, sample_time, varname)
+            itp = DataSetInterpolator{dt}(fs, varname; spatial_ref)
             push!(eqs, create_interp_equation(itp, sector, t, sample_time, [x, y, lev], 1/Δz))
         end
         sys = ODESystem(eqs, t; name=:NEI2016MonthlyEmis)

@@ -67,9 +67,9 @@ An array of data.
 
 $(FIELDS)
 """
-struct DataArray
+struct DataArray{T}
     "The data."
-    data::AbstractArray
+    data::Array{T}
     "Physical units of the data, e.g. m s⁻¹."
     units::Unitful.Unitlike
     "Description of the data."
@@ -118,21 +118,25 @@ environment variable, or in a scratch directory if that environment variable has
 The interpolator will also cache data in memory representing the 
 data records for the times immediately before and after the current time step.
 """
-mutable struct DataSetInterpolator
+mutable struct DataSetInterpolator{T}
     fs::FileSet
-    varname
+    varname::AbstractString
     itp1
-    data1
-    time1
+    data1::DataArray{T}
+    time1::DateTime
     itp2
-    data2
-    time2
-    currenttime
+    data2::DataArray{T}
+    time2::DateTime
+    currenttime::DateTime
     lock::ReentrantLock
     kwargs
 
-    DataSetInterpolator(fs::FileSet, varname; kwargs...) = new(fs, varname, nothing, nothing,
-        nothing, nothing, nothing, nothing, nothing, ReentrantLock(), kwargs)
+    function DataSetInterpolator{T}(fs::FileSet, varname::AbstractString; kwargs...) where T<:Real
+        dummy_data = DataArray(zeros(T, 1), u"m/s", "", [""])
+        dummy_time = DateTime(2018,1,1)
+        new(fs, varname, nothing, dummy_data, dummy_time, 
+            nothing, dummy_data, dummy_time, dummy_time, ReentrantLock(), kwargs)
+    end
 end
 
 function Base.show(io::IO, itp::DataSetInterpolator)
@@ -226,7 +230,7 @@ $(SIGNATURES)
 
 Return the value of the given variable from the given dataset at the given time and location.
 """
-function interp!(itp::DataSetInterpolator, t::DateTime, locs...)
+function interp!(itp::DataSetInterpolator{T}, t::DateTime, locs...)::T where T<:Real
     lazyload!(itp, t)
     interp_unsafe(itp, t, locs...)
 end
@@ -234,9 +238,9 @@ end
 """
 Interpolate without checking if the data has been correctly loaded for the given time.
 """
-function interp_unsafe(itp::DataSetInterpolator, t::DateTime, locs...)
-    t_frac = (t - itp.time1) / (itp.time2 - itp.time1)
-    val = itp.itp2(locs...) * t_frac + itp.itp1(locs...) * (1 - t_frac)
+function interp_unsafe(itp::DataSetInterpolator{T}, t::DateTime, locs...)::T where T<:Real
+    t_frac = T((t - itp.time1) / (itp.time2 - itp.time1))
+    val = itp.itp2(locs...) * t_frac + itp.itp1(locs...) * (one(T) - t_frac)
 end
 
 """
