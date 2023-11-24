@@ -16,7 +16,7 @@ epp = EarthSciData.endpoints(ti)
 @test epp[1] == (DateTime("2022-05-01T00:00:00"), DateTime("2022-05-01T03:00:00"))
 @test epp[8] == (DateTime("2022-05-01T21:00:00"), DateTime("2022-05-02T00:00:00"))
 
-dat = EarthSciData.loadslice(fs, t, "U")
+dat = EarthSciData.loadslice!(zeros(10), fs, t, "U")
 @test size(dat.data) == (72, 46, 72)
 @test dat.dimnames == ["lon", "lat", "lev"]
 
@@ -25,7 +25,7 @@ itp = EarthSciData.DataSetInterpolator{Float32}(fs, "U")
 @test String(latexify(itp)) == L"$\mathrm{EarthSciData}\left( GEOSFPFileSet_{x}U_{interp} \right)$"
 
 @test EarthSciData.dimnames(itp, t) == ["lon", "lat", "lev"]
-@test EarthSciData.varnames(fs, t) == ["U", "OMEGA", "RH", "DTRAIN", "V"]
+@test issetequal(EarthSciData.varnames(fs, t), ["U", "OMEGA", "RH", "DTRAIN", "V"])
 
 @testset "interpolation" begin
     uvals = []

@@ -14,8 +14,8 @@ To satisfy this interface, a type must implement the following methods:
 - `localpath(fs::GEOSFPFileSet, t::DateTime)`
 - `DataFrequencyInfo(fs::GEOSFPFileSet, t::DateTime)::DataFrequencyInfo`
 - `loadslice(fs::GEOSFPFileSet, t::DateTime, varname)::DataArray`
-- `load_interpolator(fs::GEOSFPFileSet, t::DateTime, varname)`
-- `varnames(fs::GEOSFPFileSet, t::DateTime)`
+- `load_interpolator(fs::FileSet, t::DateTime, varname)`
+- `varnames(fs::FileSet, t::DateTime)`
 """
 abstract type FileSet end
 
@@ -133,7 +133,7 @@ mutable struct DataSetInterpolator{T}
 
     function DataSetInterpolator{T}(fs::FileSet, varname::AbstractString; kwargs...) where T<:Real
         dummy_data = DataArray(zeros(T, 1), u"m/s", "", [""])
-        dummy_time = DateTime(2018,1,1)
+        dummy_time = DateTime(0,1,1)
         new(fs, varname, nothing, dummy_data, dummy_time, 
             nothing, dummy_data, dummy_time, dummy_time, ReentrantLock(), kwargs)
     end
@@ -158,20 +158,20 @@ function initialize!(itp::DataSetInterpolator, t::DateTime)
         if itp.time2 == itp.time1
             itp.itp2, itp.data2 = itp.itp1, itp.data1
         else
-            itp.itp2, itp.data2 = load_interpolator(itp.fs, t, itp.varname; itp.kwargs...)
+            itp.itp2, itp.data2 = load_interpolator!(itp.data2.data, itp.fs, t, itp.varname; itp.kwargs...)
         end
         ti_minus = DataFrequencyInfo(itp.fs, t - ti.frequency)
         itp.time1 = ti_minus.centerpoints[centerpoint_index(ti_minus, t - ti.frequency)]
-        itp.itp1, itp.data1 = load_interpolator(itp.fs, t - ti.frequency, itp.varname; itp.kwargs...)
+        itp.itp1, itp.data1 = load_interpolator!(itp.data1.data, itp.fs, t - ti.frequency, itp.varname; itp.kwargs...)
     else # Load data for current and next time step.
         itp.time1 = ti.centerpoints[centerpoint_index(ti, t)]
         if itp.time1 == itp.time2
             itp.itp1, itp.data1 = itp.itp2, itp.data2
         else
-            itp.itp1, itp.data1 = load_interpolator(itp.fs, t, itp.varname; itp.kwargs...)
+            itp.itp1, itp.data1 = load_interpolator!(itp.data1.data, itp.fs, t, itp.varname; itp.kwargs...)
         end
         ti_plus = DataFrequencyInfo(itp.fs, t + ti.frequency)
-        itp.itp2, itp.data2 = load_interpolator(itp.fs, t + ti.frequency, itp.varname; itp.kwargs...)
+        itp.itp2, itp.data2 = load_interpolator!(itp.data2.data, itp.fs, t + ti.frequency, itp.varname; itp.kwargs...)
         itp.time2 = ti_plus.centerpoints[centerpoint_index(ti_plus, t + ti.frequency)]
     end
     @assert itp.time1 < itp.time2 "Interpolator times are in wrong order"
@@ -188,7 +188,7 @@ function lazyload!(itp::DataSetInterpolator, t::DateTime)
             return
         end
         if t <= itp.time1 || t > itp.time2
-            @info "Updating data loader for $(itp.varname) for t = $t"
+            # @info "Updating data loader for $(itp.varname) for t = $t"
             initialize!(itp, t)
         end
     end
