@@ -114,6 +114,13 @@ function knots2range(knots)
     return knots[1]:dx[1]:knots[end]
 end
 
+"""Convert a vector of evenly spaced grid points to a range."""
+function knots2range(knots)
+    dx = [knots[i+1] - knots[i] for i ∈ 1:length(knots)-1]
+    @assert all(dx .≈ dx[1]) "Knots must be evenly spaced."
+    return knots[1]:dx[1]:knots[end]
+end
+
 """
 $(SIGNATURES)
 
