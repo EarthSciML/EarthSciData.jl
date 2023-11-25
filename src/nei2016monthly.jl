@@ -140,10 +140,10 @@ emissions mass, especially if the simulation grid is coarser than the emissions 
 
 # Example
 ``` jldoctest
-using EarthSciData, ModelingToolkit, Unitful
-@parameters t lat lon lev
-@parameters Δz = 60 [unit=u"m"]
-emis = NEI2016MonthlyEmis("mrggrid_withbeis_withrwc", t, lon, lat, lev, Δz)
+julia> using EarthSciData, ModelingToolkit, Unitful
+julia> @parameters t lat lon lev
+julia> @parameters Δz = 60 [unit=u"m"]
+julia> emis = NEI2016MonthlyEmis{Float32}("mrggrid_withbeis_withrwc", t, lon, lat, lev, Δz)
 ```
 """
 struct NEI2016MonthlyEmis{T} <: EarthSciMLODESystem
