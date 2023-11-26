@@ -3,6 +3,7 @@ using Dates
 using ModelingToolkit
 using Random
 using Latexify, LaTeXStrings
+using AllocCheck
 
 fs = EarthSciData.GEOSFPFileSet("4x5", "A3dyn")
 t = DateTime(2022, 5, 1)
@@ -20,7 +21,7 @@ dat = EarthSciData.loadslice!(zeros(10), fs, t, "U")
 @test size(dat.data) == (72, 46, 72)
 @test dat.dimnames == ["lon", "lat", "lev"]
 
-itp = EarthSciData.DataSetInterpolator{Float32}(fs, "U")
+itp = EarthSciData.DataSetInterpolator{Float32}(fs, "U", t)
 
 @test String(latexify(itp)) == L"$\mathrm{EarthSciData}\left( GEOSFPFileSet_{x}U_{interp} \right)$"
 
@@ -31,22 +32,36 @@ itp = EarthSciData.DataSetInterpolator{Float32}(fs, "U")
     uvals = []
     times = DateTime(2022, 5, 1):Hour(1):DateTime(2022, 5, 3)
     for t ∈ times
-        push!(uvals, interp!(itp, t, 1.0, 0.0, 1.0))
+        push!(uvals, interp!(itp, t, 1.0f0, 0.0f0, 1.0f0))
     end
     for i ∈ 4:3:length(uvals)-1
         @test uvals[i] ≈ (uvals[i-1] + uvals[i+1]) / 2
     end
-    want_uvals = [-0.0474265694618225, 0.06403500636418662, 0.1116628348827362, 0.0954569160938263, 0.07925099730491639, 
-                -0.011302002271016437, -0.1762020826339722, -0.34110216299692797, -0.5013981193304062, -0.6570899516344071]
+    want_uvals = [-0.0474265694618225, 0.06403500636418662, 0.1116628348827362, 0.0954569160938263, 0.07925099730491639,
+        -0.011302002271016437, -0.1762020826339722, -0.34110216299692797, -0.5013981193304062, -0.6570899516344071]
     @test uvals[1:10] ≈ want_uvals
 
     # Test that shuffling the times doesn't change the results.
     uvals2 = []
     idx = randperm(length(times))
     for t ∈ times[idx]
-        push!(uvals2, interp!(itp, t, 1.0, 0.0, 1.0))
+        push!(uvals2, interp!(itp, t, 1.0f0, 0.0f0, 1.0f0))
     end
     @test uvals2 ≈ uvals[idx]
+end
+
+@testset "allocations" begin
+    itp = EarthSciData.DataSetInterpolator{Float64}(fs, "U", t)
+    tt = DateTime(2022, 5, 1)
+    interp!(itp, tt, 1.0, 0.0, 1.0)
+
+    @check_allocs checkf(itp, t, loc1, loc2, loc3) = EarthSciData.interp_unsafe(itp, t, loc1, loc2, loc3)
+
+    checkf(itp, tt, 1.0, 0.0, 1.0)
+
+    itp2 = EarthSciData.DataSetInterpolator{Float32}(fs, "U", t)
+    interp!(itp2, tt, 1.0f0, 0.0f0, 1.0f0)
+    checkf(itp2, tt, 1.0f0, 0.0f0, 1.0f0)
 end
 
 #== Profile data loading and interpolation.

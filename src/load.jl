@@ -67,9 +67,9 @@ An array of data.
 
 $(FIELDS)
 """
-struct DataArray{T}
+struct DataArray{T,N}
     "The data."
-    data::Array{T}
+    data::Array{T,N}
     "Physical units of the data, e.g. m s⁻¹."
     units::Unitful.Unitlike
     "Description of the data."
@@ -117,25 +117,31 @@ during the simulation and cached on the hard drive at the path specified by the 
 environment variable, or in a scratch directory if that environment variable has not been specified. 
 The interpolator will also cache data in memory representing the 
 data records for the times immediately before and after the current time step.
+
+`varname` is the name of the variable to interpolate. `default_time` is the time to use when initializing
+the interpolator.
 """
-mutable struct DataSetInterpolator{T}
+mutable struct DataSetInterpolator{To,N,ITP}
     fs::FileSet
     varname::AbstractString
-    itp1
-    data1::DataArray{T}
+    itp1::ITP
+    data1::DataArray{To,N}
     time1::DateTime
-    itp2
-    data2::DataArray{T}
+    itp2::ITP
+    data2::DataArray{To,N}
     time2::DateTime
     currenttime::DateTime
     lock::ReentrantLock
+    initialized::Bool
     kwargs
 
-    function DataSetInterpolator{T}(fs::FileSet, varname::AbstractString; kwargs...) where T<:Real
-        dummy_data = DataArray(zeros(T, 1), u"m/s", "", [""])
-        dummy_time = DateTime(0,1,1)
-        new(fs, varname, nothing, dummy_data, dummy_time, 
-            nothing, dummy_data, dummy_time, dummy_time, ReentrantLock(), kwargs)
+    function DataSetInterpolator{To}(fs::FileSet, varname::AbstractString, default_time::DateTime; kwargs...) where {To<:Real}
+        dummy_data = zeros(To, 1)
+        itp, data = load_interpolator!(dummy_data, fs, default_time, varname; kwargs...)
+        N = ndims(data.data)
+        ITP = typeof(itp)
+        new{To,N,ITP}(fs, varname, itp, data, DateTime(0, 1, 1),
+            itp, data, DateTime(0, 2, 1), DateTime(1, 1, 1), ReentrantLock(), false, kwargs)
     end
 end
 
@@ -183,8 +189,9 @@ function lazyload!(itp::DataSetInterpolator, t::DateTime)
             return
         end
         itp.currenttime = t
-        if itp.itp1 === nothing # Initialize new interpolator.
+        if !itp.initialized # Initialize new interpolator.
             initialize!(itp, t)
+            itp.initialized = true
             return
         end
         if t <= itp.time1 || t > itp.time2
@@ -230,7 +237,7 @@ $(SIGNATURES)
 
 Return the value of the given variable from the given dataset at the given time and location.
 """
-function interp!(itp::DataSetInterpolator{T}, t::DateTime, locs...)::T where T<:Real
+function interp!(itp::DataSetInterpolator{T,N,ITP}, t::DateTime, locs::Vararg{T,N})::T where {T,N,ITP}
     lazyload!(itp, t)
     interp_unsafe(itp, t, locs...)
 end
@@ -238,7 +245,7 @@ end
 """
 Interpolate without checking if the data has been correctly loaded for the given time.
 """
-function interp_unsafe(itp::DataSetInterpolator{T}, t::DateTime, locs...)::T where T<:Real
+function interp_unsafe(itp::DataSetInterpolator{T,N,ITP}, t::DateTime, locs::Vararg{T,N})::T where {T,N,ITP}
     t_frac = T((t - itp.time1) / (itp.time2 - itp.time1))
     val = itp.itp2(locs...) * t_frac + itp.itp1(locs...) * (one(T) - t_frac)
 end
@@ -246,8 +253,12 @@ end
 """
 Interpolation with a unix timestamp.
 """
-interp!(itp::DataSetInterpolator, t::AbstractFloat, locs...) = interp!(itp, Dates.unix2datetime(t), locs...)
-interp_unsafe(itp::DataSetInterpolator, t::AbstractFloat, locs...) = interp_unsafe(itp, Dates.unix2datetime(t), locs...)
+function interp!(itp::DataSetInterpolator{T,N,ITP}, t::T, locs::Vararg{T,N})::T where {T,N,ITP}
+    interp!(itp, Dates.unix2datetime(t), locs...)
+end
+function interp_unsafe(itp::DataSetInterpolator{T,N,ITP}, t::T, locs::Vararg{T,N})::T where {T,N,ITP}
+    interp_unsafe(itp, Dates.unix2datetime(t), locs...)
+end
 
 # Dummy function for unit validation. Basically ModelingToolkit 
 # will call the function with a Unitful.Quantity or an integer to 

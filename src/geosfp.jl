@@ -104,14 +104,7 @@ function loadslice!(data::Array{T}, fs::GEOSFPFileSet, t::DateTime, varname)::Da
         data .*= scale
     end
 
-    DataArray{T}(data, units, description, dims)
-end
-
-"""Convert a vector of evenly spaced grid points to a range."""
-function knots2range(knots)
-    dx = [knots[i+1] - knots[i] for i ∈ 1:length(knots)-1]
-    @assert all(dx .≈ dx[1]) "Knots must be evenly spaced."
-    return knots[1]:dx[1]:knots[end]
+    DataArray{T, ndims(data)}(data, units, description, dims)
 end
 
 """Convert a vector of evenly spaced grid points to a range."""
@@ -201,7 +194,7 @@ struct GEOSFP{T} <: EarthSciMLODESystem
         eqs = []
         for (filename, fs) in filesets
             for varname ∈ varnames(fs, sample_time)
-                itp = DataSetInterpolator{T}(fs, varname)
+                itp = DataSetInterpolator{T}(fs, varname, sample_time)
                 dims = dimnames(itp, sample_time)
                 coords = Num[]
                 for dim ∈ dims

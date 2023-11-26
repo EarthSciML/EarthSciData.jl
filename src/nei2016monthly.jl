@@ -99,9 +99,9 @@ function load_interpolator!(cache::Array{T}, fs::NEI2016MonthlyEmisFileSet, t::D
     itp = interpolate!(d, BSpline(Constant(Next))) # This destroys slice.data.
     itp = scale(itp, (xs, ys))
     itp = extrapolate(itp, 0)
-    itp_trans(x, y, z) = begin
+    function itp_trans(x::T, y::T, z::T)::T
         if z >= 2 # We're only considering ground level emissions
-            return 0.0
+            return zero(T)
         end
         x, y = trans(x, y)
         itp(x, y)
@@ -140,10 +140,14 @@ emissions mass, especially if the simulation grid is coarser than the emissions 
 
 # Example
 ``` jldoctest
-julia> using EarthSciData, ModelingToolkit, Unitful
-julia> @parameters t lat lon lev
-julia> @parameters Δz = 60 [unit=u"m"]
-julia> emis = NEI2016MonthlyEmis{Float32}("mrggrid_withbeis_withrwc", t, lon, lat, lev, Δz)
+using EarthSciData, ModelingToolkit, Unitful
+@parameters t lat lon lev
+@parameters Δz = 60 [unit=u"m"]
+emis = NEI2016MonthlyEmis{Float32}("mrggrid_withbeis_withrwc", t, lon, lat, lev, Δz)
+" "
+
+# output
+" "
 ```
 """
 struct NEI2016MonthlyEmis{T} <: EarthSciMLODESystem
@@ -155,7 +159,7 @@ struct NEI2016MonthlyEmis{T} <: EarthSciMLODESystem
         eqs = []
         @assert ModelingToolkit.get_unit(Δz) == u"m" "Δz must be in units of meters."
         for varname ∈ varnames(fs, sample_time)
-            itp = DataSetInterpolator{T}(fs, varname; spatial_ref)
+            itp = DataSetInterpolator{T}(fs, varname, sample_time; spatial_ref)
             push!(eqs, create_interp_equation(itp, sector, t, sample_time, [x, y, lev], 1/Δz))
         end
         sys = ODESystem(eqs, t; name=:NEI2016MonthlyEmis)
