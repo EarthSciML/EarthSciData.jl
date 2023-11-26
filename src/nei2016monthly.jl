@@ -139,15 +139,11 @@ center for the underlying emissions grid, so it may not exactly conserve the tot
 emissions mass, especially if the simulation grid is coarser than the emissions grid.
 
 # Example
-``` jldoctest
+``` julia
 using EarthSciData, ModelingToolkit, Unitful
 @parameters t lat lon lev
 @parameters Δz = 60 [unit=u"m"]
 emis = NEI2016MonthlyEmis{Float32}("mrggrid_withbeis_withrwc", t, lon, lat, lev, Δz)
-" "
-
-# output
-" "
 ```
 """
 struct NEI2016MonthlyEmis{T} <: EarthSciMLODESystem
