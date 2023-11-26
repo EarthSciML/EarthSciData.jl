@@ -7,7 +7,7 @@ using Dates, Plots
 
 # Set up system
 @parameters t lev lon lat
-geosfp = GEOSFP("4x5", t)
+geosfp = GEOSFP{Float64}("4x5", t)
 
 struct Example <: EarthSciMLODESystem
     sys

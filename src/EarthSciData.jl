@@ -1,7 +1,7 @@
 module EarthSciData
 using Dates, Downloads, Printf
 using DocStringExtensions
-using NetCDF, Interpolations, ModelingToolkit, Symbolics, Proj
+using NCDatasets, Interpolations, ModelingToolkit, Symbolics, Proj
 using EarthSciMLBase
 using Unitful, Latexify, ProgressMeter
 using Scratch
@@ -11,6 +11,7 @@ include("load.jl")
 include("utils.jl")
 
 # Specific data sets
+include("netcdf.jl")
 include("geosfp.jl")
 include("nei2016monthly.jl")
 

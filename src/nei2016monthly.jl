@@ -49,35 +49,23 @@ $(SIGNATURES)
 
 Load the data for the given variable name at the given time.
 """
-function loadslice(fs::NEI2016MonthlyEmisFileSet, t::DateTime, varname)::DataArray
+function loadslice!(data::Array{T}, fs::NEI2016MonthlyEmisFileSet, t::DateTime, varname)::DataArray where T<:Number
     filepath = maybedownload(fs, t)
-    fid = NetCDF.open(filepath)
-    var = fid[varname]
-    dims = Dict{String,Int}()
-    dimids = Dict{Int,String}()
-    for k in keys(fid.dim)
-        dims[k] = fid.dim[k].dimid
-        dimids[fid.dim[k].dimid] = k
-    end
-    dimnames = [dimids[id] for id ∈ var.dimids]
-    time_index = findfirst(isequal("TSTEP"), dimnames)
-    deleteat!(dimnames, time_index) # Remove the time dimension.
-    @assert "TSTEP" ∈ keys(dims) "File $filepath does not have a dimension named 'TSTEP'."
-    # Load only one time step, but the full array for everything else.
-    slices = repeat(Any[:], var.ndim)
-    slices[time_index] = centerpoint_index(DataFrequencyInfo(fs, t), t)
-    data = var[slices...]
+    ds = NCDataset(filepath)
+    var = ds[varname]
+    dims = collect(NCDatasets.dimnames(var))
+    var, dims, data = loadslice!(data, fs, ds, t, varname, "TSTEP")
 
-    Δx = fid.gatts["XCELL"]
-    Δy = fid.gatts["YCELL"]
-    scale, units = to_unitful(var.atts["units"])
+    Δx = ds.attrib["XCELL"]
+    Δy = ds.attrib["YCELL"]
+    scale, units = to_unitful(var.attrib["units"])
     if scale != 1
         data .*= scale / (Δx * Δy)
         units /= u"m^2"
     end
-    description = var.atts["var_desc"]
+    description = var.attrib["var_desc"]
 
-    DataArray(data, units, description, dimnames)
+    DataArray(data, units, description, dims)
 end
 
 """
@@ -87,33 +75,33 @@ Load the data for the given `DateTime` and variable name as an interpolator
 from Interpolations.jl. `spatial_ref` should be the spatial reference system that 
 the simulation will be using.
 """
-function load_interpolator(fs::NEI2016MonthlyEmisFileSet, t::DateTime, varname; spatial_ref="EPSG:4326")
-    fid = NetCDF.open(maybedownload(fs, t))
-    slice = loadslice(fs, t, varname)
+function load_interpolator!(cache::Array{T}, fs::NEI2016MonthlyEmisFileSet, t::DateTime, varname; spatial_ref="EPSG:4326") where T<:Number
+    ds = NCDataset(maybedownload(fs, t))
+    slice = loadslice!(cache, fs, t, varname)
 
-    p_alp = fid.gatts["P_ALP"]
-    p_bet = fid.gatts["P_BET"]
-    #p_gam = fid.gatts["P_GAM"] # Don't think this is used for anything.
-    x_cent = fid.gatts["XCENT"]
-    y_cent = fid.gatts["YCENT"]
+    p_alp = ds.attrib["P_ALP"]
+    p_bet = ds.attrib["P_BET"]
+    #p_gam = ds.attrib["P_GAM"] # Don't think this is used for anything.
+    x_cent = ds.attrib["XCENT"]
+    y_cent = ds.attrib["YCENT"]
     native_sr = "+proj=lcc +lat_1=$(p_alp) +lat_2=$(p_bet) +lat_0=$(y_cent) +lon_0=$(x_cent) +x_0=0 +y_0=0 +a=6370997.000000 +b=6370997.000000 +to_meter=1"
     trans = Proj.Transformation(spatial_ref, native_sr, always_xy=true)
 
-    x₀ = fid.gatts["XORIG"]
-    y₀ = fid.gatts["YORIG"]
-    Δx = fid.gatts["XCELL"]
-    Δy = fid.gatts["YCELL"]
-    nx = fid.gatts["NCOLS"]
-    ny = fid.gatts["NROWS"]
+    x₀ = ds.attrib["XORIG"]
+    y₀ = ds.attrib["YORIG"]
+    Δx = ds.attrib["XCELL"]
+    Δy = ds.attrib["YCELL"]
+    nx = ds.attrib["NCOLS"]
+    ny = ds.attrib["NROWS"]
     xs = x₀ + Δx / 2 .+ Δx .* (0:nx-1)
     ys = y₀ + Δy / 2 .+ Δy .* (0:ny-1)
     d = @view slice.data[:, :, 1]
     itp = interpolate!(d, BSpline(Constant(Next))) # This destroys slice.data.
     itp = scale(itp, (xs, ys))
     itp = extrapolate(itp, 0)
-    itp_trans(x, y, z) = begin
+    function itp_trans(x::T, y::T, z::T)::T
         if z >= 2 # We're only considering ground level emissions
-            return 0.0
+            return zero(T)
         end
         x, y = trans(x, y)
         itp(x, y)
@@ -128,8 +116,8 @@ Return the variable names associated with this FileSet.
 """
 function varnames(fs::NEI2016MonthlyEmisFileSet, t::DateTime)
     filepath = maybedownload(fs, t)
-    fid = NetCDF.open(filepath)
-    [setdiff(keys(fid.vars), ["TFLAG"; keys(fid.dim)])...]
+    ds = NCDataset(filepath)
+    [setdiff(keys(ds), ["TFLAG"; keys(ds.dim)])...]
 end
 
 """
@@ -151,23 +139,23 @@ center for the underlying emissions grid, so it may not exactly conserve the tot
 emissions mass, especially if the simulation grid is coarser than the emissions grid.
 
 # Example
-``` jldoctest
+``` julia
 using EarthSciData, ModelingToolkit, Unitful
 @parameters t lat lon lev
 @parameters Δz = 60 [unit=u"m"]
-emis = NEI2016MonthlyEmis("mrggrid_withbeis_withrwc", t, lon, lat, lev, Δz)
+emis = NEI2016MonthlyEmis{Float32}("mrggrid_withbeis_withrwc", t, lon, lat, lev, Δz)
 ```
 """
-struct NEI2016MonthlyEmis <: EarthSciMLODESystem
+struct NEI2016MonthlyEmis{T} <: EarthSciMLODESystem
     fileset::NEI2016MonthlyEmisFileSet
     sys::ODESystem
-    function NEI2016MonthlyEmis(sector, t, x, y, lev, Δz; spatial_ref="EPSG:4326")
+    function NEI2016MonthlyEmis{T}(sector, t, x, y, lev, Δz; spatial_ref="EPSG:4326") where T<:Number
         fs = NEI2016MonthlyEmisFileSet(sector)
         sample_time = DateTime(2016, 5, 1) # Dummy time to get variable names and dimensions from data.
         eqs = []
         @assert ModelingToolkit.get_unit(Δz) == u"m" "Δz must be in units of meters."
         for varname ∈ varnames(fs, sample_time)
-            itp = DataSetInterpolator(fs, varname; spatial_ref)
+            itp = DataSetInterpolator{T}(fs, varname, sample_time; spatial_ref)
             push!(eqs, create_interp_equation(itp, sector, t, sample_time, [x, y, lev], 1/Δz))
         end
         sys = ODESystem(eqs, t; name=:NEI2016MonthlyEmis)

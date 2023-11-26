@@ -66,22 +66,22 @@ function relpath(fs::GEOSFPFileSet, t::DateTime)
 end
 
 # Cache to store data frequency information.
-GEOSFPDataFrequencyInfoCache = Dict{String, DataFrequencyInfo}()
+GEOSFPDataFrequencyInfoCache = Dict{String,DataFrequencyInfo}()
 
 function DataFrequencyInfo(fs::GEOSFPFileSet, t::DateTime)::DataFrequencyInfo
     filepath = maybedownload(fs, t)
     if haskey(GEOSFPDataFrequencyInfoCache, filepath)
         return GEOSFPDataFrequencyInfoCache[filepath]
     end
-    fid = NetCDF.open(filepath)
-    sd = fid.gatts["Start_Date"]
-    st = fid.gatts["Start_Time"]
-    dt = fid.gatts["Delta_Time"]
+    ds = NCDataset(filepath)
+    sd = ds.attrib["Start_Date"]
+    st = ds.attrib["Start_Time"]
+    dt = ds.attrib["Delta_Time"]
 
-    start = DateTime(sd*" "*st, dateformat"yyyymmdd HH:MM:SS.s")
-    frequency = Second(parse(Int64, dt[1:2]))*3600 + Second(parse(Int64, dt[3:4]))*60 + 
-                        Second(parse(Int64, dt[5:6]))
-    centerpoints = start .+ Second.(fid["time"][:]) * 60
+    start = DateTime(sd * " " * st, dateformat"yyyymmdd HH:MM:SS.s")
+    frequency = Second(parse(Int64, dt[1:2])) * 3600 + Second(parse(Int64, dt[3:4])) * 60 +
+                Second(parse(Int64, dt[5:6]))
+    centerpoints = ds["time"][:]
     di = DataFrequencyInfo(start, frequency, centerpoints)
     GEOSFPDataFrequencyInfoCache[filepath] = di
     return di
@@ -92,33 +92,19 @@ $(SIGNATURES)
 
 Load the data for the given variable name at the given time.
 """
-function loadslice(fs::GEOSFPFileSet, t::DateTime, varname)::DataArray
+function loadslice!(data::Array{T}, fs::GEOSFPFileSet, t::DateTime, varname)::DataArray{T} where {T<:Number}
     filepath = maybedownload(fs, t)
-    fid = NetCDF.open(filepath)
-    var = fid[varname]
-    dims = Dict{String,Int}()
-    dimids = Dict{Int, String}()
-    for k in keys(fid.dim)
-        dims[k] = fid.dim[k].dimid
-        dimids[fid.dim[k].dimid] = k
-    end
-    dimnames = [dimids[id] for id ∈ var.dimids]
-    time_index = findfirst(isequal("time"), dimnames)
-    deleteat!(dimnames, time_index) # Remove the time dimension.
-    @assert "time" ∈ keys(dims) "File $filepath does not have a dimension named 'time'."  
-    # Load only one time step, but the full array for everything else.
-    slices = repeat(Any[:], var.ndim)
-    slices[time_index] = centerpoint_index(DataFrequencyInfo(fs, t), t)
-    data = var[slices...]
+    ds = NCDataset(filepath)
+    var, dims, data = loadslice!(data, fs, ds, t, varname, "time")
 
-    scale, units = to_unitful(var.atts["units"])
-    description = var.atts["long_name"]
-    @assert var.atts["scale_factor"] == 1.0 "Unexpected scale factor."
+    scale, units = to_unitful(var.attrib["units"])
+    description = var.attrib["long_name"]
+    @assert var.attrib["scale_factor"] == 1.0 "Unexpected scale factor."
     if scale != 1
         data .*= scale
     end
 
-    DataArray(data, units, description, dimnames)
+    DataArray{T, ndims(data)}(data, units, description, dims)
 end
 
 """Convert a vector of evenly spaced grid points to a range."""
@@ -134,10 +120,10 @@ $(SIGNATURES)
 Load the data for the given `DateTime` and variable name as an interpolator
 from Interpolations.jl.
 """
-function load_interpolator(fs::GEOSFPFileSet, t::DateTime, varname)
-    fid = NetCDF.open(maybedownload(fs, t))
-    slice = loadslice(fs, t, varname)
-    knots = Tuple([knots2range(fid.vars[d][:]) for d ∈ slice.dimnames])
+function load_interpolator!(cache::Array{T}, fs::GEOSFPFileSet, t::DateTime, varname) where {T<:Number}
+    ds = NCDataset.(maybedownload(fs, t))
+    slice = loadslice!(cache, fs, t, varname)
+    knots = Tuple([knots2range(ds[d][:]) for d ∈ slice.dimnames])
     itp = interpolate!(slice.data, BSpline(Linear())) # This destroys slice.data.
     itp = scale(itp, knots)
     itp, slice
@@ -150,8 +136,8 @@ Return the variable names associated with this FileSet.
 """
 function varnames(fs::GEOSFPFileSet, t::DateTime)
     filepath = maybedownload(fs, t)
-    fid = NetCDF.open(filepath)
-    [setdiff(keys(fid.vars), keys(fid.dim))...]
+    ds = NCDataset(filepath)
+    [setdiff(keys(ds), keys(ds.dim))...]
 end
 
 """
@@ -192,10 +178,10 @@ we can set `coord_defaults = Dict(:lev => 1)`.
 
 See http://geoschemdata.wustl.edu/ExtData/ for current options.
 """
-struct GEOSFP <: EarthSciMLODESystem
+struct GEOSFP{T} <: EarthSciMLODESystem
     filesets::Dict{String,GEOSFPFileSet}
     sys::ODESystem
-    function GEOSFP(domain, t; coord_defaults=Dict{Symbol,Number}())
+    function GEOSFP{T}(domain, t; coord_defaults=Dict{Symbol,Number}()) where {T<:Number}
         filesets = Dict{String,GEOSFPFileSet}(
             "A1" => GEOSFPFileSet(domain, "A1"),
             "A3cld" => GEOSFPFileSet(domain, "A3cld"),
@@ -208,7 +194,7 @@ struct GEOSFP <: EarthSciMLODESystem
         eqs = []
         for (filename, fs) in filesets
             for varname ∈ varnames(fs, sample_time)
-                itp = DataSetInterpolator(fs, varname)
+                itp = DataSetInterpolator{T}(fs, varname, sample_time)
                 dims = dimnames(itp, sample_time)
                 coords = Num[]
                 for dim ∈ dims
@@ -234,10 +220,10 @@ function Base.:(+)(mw::EarthSciMLBase.MeanWind, g::GEOSFP)::ComposedEarthSciMLSy
     # Only add the number of dimensions present in the mean wind system.
     length(states(mw.sys)) > 1 ? push!(eqs, mw.sys.v_lat ~ g.sys.A3dyn₊V) : nothing
     length(states(mw.sys)) > 2 ? push!(eqs, mw.sys.v_lev ~ g.sys.A3dyn₊OMEGA) : nothing
-    
+
     ComposedEarthSciMLSystem(AbstractEarthSciMLSystem[ConnectorSystem(
-        eqs,
-        mw, g,
-    )], nothing, [(sys)->prune!(sys, "GEOSFP₊")]) # Prune extra data interpolators before running to save cost.
+            eqs,
+            mw, g,
+        )], nothing, [(sys) -> prune!(sys, "GEOSFP₊")]) # Prune extra data interpolators before running to save cost.
 end
 Base.:(+)(g::GEOSFP, mw::EarthSciMLBase.MeanWind)::ComposedEarthSciMLSystem = mw + g

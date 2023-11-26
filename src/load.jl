@@ -14,8 +14,8 @@ To satisfy this interface, a type must implement the following methods:
 - `localpath(fs::GEOSFPFileSet, t::DateTime)`
 - `DataFrequencyInfo(fs::GEOSFPFileSet, t::DateTime)::DataFrequencyInfo`
 - `loadslice(fs::GEOSFPFileSet, t::DateTime, varname)::DataArray`
-- `load_interpolator(fs::GEOSFPFileSet, t::DateTime, varname)`
-- `varnames(fs::GEOSFPFileSet, t::DateTime)`
+- `load_interpolator(fs::FileSet, t::DateTime, varname)`
+- `varnames(fs::FileSet, t::DateTime)`
 """
 abstract type FileSet end
 
@@ -67,9 +67,9 @@ An array of data.
 
 $(FIELDS)
 """
-struct DataArray
+struct DataArray{T,N}
     "The data."
-    data::AbstractArray
+    data::Array{T,N}
     "Physical units of the data, e.g. m s⁻¹."
     units::Unitful.Unitlike
     "Description of the data."
@@ -117,22 +117,32 @@ during the simulation and cached on the hard drive at the path specified by the 
 environment variable, or in a scratch directory if that environment variable has not been specified. 
 The interpolator will also cache data in memory representing the 
 data records for the times immediately before and after the current time step.
+
+`varname` is the name of the variable to interpolate. `default_time` is the time to use when initializing
+the interpolator.
 """
-mutable struct DataSetInterpolator
+mutable struct DataSetInterpolator{To,N,ITP}
     fs::FileSet
-    varname
-    itp1
-    data1
-    time1
-    itp2
-    data2
-    time2
-    currenttime
+    varname::AbstractString
+    itp1::ITP
+    data1::DataArray{To,N}
+    time1::DateTime
+    itp2::ITP
+    data2::DataArray{To,N}
+    time2::DateTime
+    currenttime::DateTime
     lock::ReentrantLock
+    initialized::Bool
     kwargs
 
-    DataSetInterpolator(fs::FileSet, varname; kwargs...) = new(fs, varname, nothing, nothing,
-        nothing, nothing, nothing, nothing, nothing, ReentrantLock(), kwargs)
+    function DataSetInterpolator{To}(fs::FileSet, varname::AbstractString, default_time::DateTime; kwargs...) where {To<:Real}
+        dummy_data = zeros(To, 1)
+        itp, data = load_interpolator!(dummy_data, fs, default_time, varname; kwargs...)
+        N = ndims(data.data)
+        ITP = typeof(itp)
+        new{To,N,ITP}(fs, varname, itp, data, DateTime(0, 1, 1),
+            itp, data, DateTime(0, 2, 1), DateTime(1, 1, 1), ReentrantLock(), false, kwargs)
+    end
 end
 
 function Base.show(io::IO, itp::DataSetInterpolator)
@@ -154,20 +164,20 @@ function initialize!(itp::DataSetInterpolator, t::DateTime)
         if itp.time2 == itp.time1
             itp.itp2, itp.data2 = itp.itp1, itp.data1
         else
-            itp.itp2, itp.data2 = load_interpolator(itp.fs, t, itp.varname; itp.kwargs...)
+            itp.itp2, itp.data2 = load_interpolator!(itp.data2.data, itp.fs, t, itp.varname; itp.kwargs...)
         end
         ti_minus = DataFrequencyInfo(itp.fs, t - ti.frequency)
         itp.time1 = ti_minus.centerpoints[centerpoint_index(ti_minus, t - ti.frequency)]
-        itp.itp1, itp.data1 = load_interpolator(itp.fs, t - ti.frequency, itp.varname; itp.kwargs...)
+        itp.itp1, itp.data1 = load_interpolator!(itp.data1.data, itp.fs, t - ti.frequency, itp.varname; itp.kwargs...)
     else # Load data for current and next time step.
         itp.time1 = ti.centerpoints[centerpoint_index(ti, t)]
         if itp.time1 == itp.time2
             itp.itp1, itp.data1 = itp.itp2, itp.data2
         else
-            itp.itp1, itp.data1 = load_interpolator(itp.fs, t, itp.varname; itp.kwargs...)
+            itp.itp1, itp.data1 = load_interpolator!(itp.data1.data, itp.fs, t, itp.varname; itp.kwargs...)
         end
         ti_plus = DataFrequencyInfo(itp.fs, t + ti.frequency)
-        itp.itp2, itp.data2 = load_interpolator(itp.fs, t + ti.frequency, itp.varname; itp.kwargs...)
+        itp.itp2, itp.data2 = load_interpolator!(itp.data2.data, itp.fs, t + ti.frequency, itp.varname; itp.kwargs...)
         itp.time2 = ti_plus.centerpoints[centerpoint_index(ti_plus, t + ti.frequency)]
     end
     @assert itp.time1 < itp.time2 "Interpolator times are in wrong order"
@@ -179,12 +189,13 @@ function lazyload!(itp::DataSetInterpolator, t::DateTime)
             return
         end
         itp.currenttime = t
-        if itp.itp1 === nothing # Initialize new interpolator.
+        if !itp.initialized # Initialize new interpolator.
             initialize!(itp, t)
+            itp.initialized = true
             return
         end
         if t <= itp.time1 || t > itp.time2
-            @info "Updating data loader for $(itp.varname) for t = $t"
+            # @info "Updating data loader for $(itp.varname) for t = $t"
             initialize!(itp, t)
         end
     end
@@ -226,7 +237,7 @@ $(SIGNATURES)
 
 Return the value of the given variable from the given dataset at the given time and location.
 """
-function interp!(itp::DataSetInterpolator, t::DateTime, locs...)
+function interp!(itp::DataSetInterpolator{T,N,ITP}, t::DateTime, locs::Vararg{T,N})::T where {T,N,ITP}
     lazyload!(itp, t)
     interp_unsafe(itp, t, locs...)
 end
@@ -234,16 +245,20 @@ end
 """
 Interpolate without checking if the data has been correctly loaded for the given time.
 """
-function interp_unsafe(itp::DataSetInterpolator, t::DateTime, locs...)
-    t_frac = (t - itp.time1) / (itp.time2 - itp.time1)
-    val = itp.itp2(locs...) * t_frac + itp.itp1(locs...) * (1 - t_frac)
+function interp_unsafe(itp::DataSetInterpolator{T,N,ITP}, t::DateTime, locs::Vararg{T,N})::T where {T,N,ITP}
+    t_frac = T((t - itp.time1) / (itp.time2 - itp.time1))
+    val = itp.itp2(locs...) * t_frac + itp.itp1(locs...) * (one(T) - t_frac)
 end
 
 """
 Interpolation with a unix timestamp.
 """
-interp!(itp::DataSetInterpolator, t::AbstractFloat, locs...) = interp!(itp, Dates.unix2datetime(t), locs...)
-interp_unsafe(itp::DataSetInterpolator, t::AbstractFloat, locs...) = interp_unsafe(itp, Dates.unix2datetime(t), locs...)
+function interp!(itp::DataSetInterpolator{T,N,ITP}, t::T, locs::Vararg{T,N})::T where {T,N,ITP}
+    interp!(itp, Dates.unix2datetime(t), locs...)
+end
+function interp_unsafe(itp::DataSetInterpolator{T,N,ITP}, t::T, locs::Vararg{T,N})::T where {T,N,ITP}
+    interp_unsafe(itp, Dates.unix2datetime(t), locs...)
+end
 
 # Dummy function for unit validation. Basically ModelingToolkit 
 # will call the function with a Unitful.Quantity or an integer to 
