@@ -1,5 +1,6 @@
+using EarthSciData
 using Test
-using EarthSciData, Unitful, EarthSciMLBase, ModelingToolkit
+using Unitful, EarthSciMLBase, ModelingToolkit
 using Dates
 using AllocCheck
 
@@ -37,24 +38,14 @@ end
 end
 
 @testset "allocations" begin
+    @check_allocs checkf(itp, t, loc1, loc2, loc3) = EarthSciData.interp_unsafe(itp, t, loc1, loc2, loc3)
+    
     sample_time = DateTime(2016, 5, 1)
     itp = EarthSciData.DataSetInterpolator{Float32}(emis.fileset, "NOX", sample_time; spatial_ref="EPSG:4326")
     interp!(itp, sample_time, -97.0f0, 40.0f0, 1.0f0)
-
-    @check_allocs checkf(itp, t, loc1, loc2, loc3) = EarthSciData.interp_unsafe(itp, t, loc1, loc2, loc3)
-
-    # TODO(CT): Not sure @check_allocs is working correctly here. Try again when it is more mature.
-    @test_broken checkf(itp, sample_time, -97.0f0, 40.0f0, 1.0f0)
-
-    EarthSciData.interp_unsafe(itp, sample_time, -97.0f0, 40.0f0, 1.0f0)
-    @test (@allocated EarthSciData.interp_unsafe(itp, sample_time, -97.0f0, 40.0f0, 1.0f0)) < 200
-    @test (@allocations EarthSciData.interp_unsafe(itp, sample_time, -97.0f0, 40.0f0, 1.0f0)) < 10
+    @test_nowarn checkf(itp, sample_time, -97.0f0, 40.0f0, 1.0f0)
 
     itp2 = EarthSciData.DataSetInterpolator{Float64}(emis.fileset, "NOX", sample_time; spatial_ref="EPSG:4326")
     interp!(itp2, sample_time, -97.0, 40.0, 1.0)
-    @test_broken checkf(itp2, sample_time, -97.0, 40.0, 1.0)
-
-    EarthSciData.interp_unsafe(itp2, sample_time, -97.0, 40.0, 1.0)
-    @test (@allocated EarthSciData.interp_unsafe(itp2, sample_time, -97.0, 40.0, 1.0)) < 200
-    @test (@allocations EarthSciData.interp_unsafe(itp2, sample_time, -97.0, 40.0, 1.0)) < 10
+    @test_nowarn checkf(itp2, sample_time, -97.0, 40.0, 1.0)
 end

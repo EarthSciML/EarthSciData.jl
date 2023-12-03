@@ -69,6 +69,27 @@ function loadslice!(data::Array{T}, fs::NEI2016MonthlyEmisFileSet, t::DateTime, 
 end
 
 """
+Create an interpolator that returns zero whenever z > 1, and otherwise
+first peforms a coordinate transformation before interpolating the data.
+"""
+struct ITPTransGroundLevel{ITPType}
+    itp::ITPType
+    trans::Proj.Transformation
+    function ITPTransGroundLevel(itp, trans::Proj.Transformation)
+        new{typeof(itp)}(itp, trans)
+    end
+end
+
+""" Perform the coordinate transformation and interpolation. """
+function (i::ITPTransGroundLevel)(x::T, y::T, z::T)::T where T
+    if z >= 2 # We're only considering ground level emissions
+        return zero(T)
+    end
+    x, y = i.trans(x, y)
+    i.itp(x, y)
+end
+
+"""
 $(SIGNATURES)
 
 Load the data for the given `DateTime` and variable name as an interpolator
@@ -99,14 +120,7 @@ function load_interpolator!(cache::Array{T}, fs::NEI2016MonthlyEmisFileSet, t::D
     itp = interpolate!(d, BSpline(Constant(Next))) # This destroys slice.data.
     itp = scale(itp, (xs, ys))
     itp = extrapolate(itp, 0)
-    function itp_trans(x::T, y::T, z::T)::T
-        if z >= 2 # We're only considering ground level emissions
-            return zero(T)
-        end
-        x, y = trans(x, y)
-        itp(x, y)
-    end
-    itp_trans, slice
+    ITPTransGroundLevel(itp, trans), slice
 end
 
 """
