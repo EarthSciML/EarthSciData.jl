@@ -1,0 +1,11 @@
+url_path,views_total,views_unique
+/EarthSciML/EarthSciData.jl/tree/main/docs,8,1
+/EarthSciML/EarthSciData.jl,6,2
+/EarthSciML/EarthSciData.jl/blob/main/docs/make.jl,6,1
+/EarthSciML/EarthSciData.jl/blob/main/.github/workflows/CI.yml,6,1
+/EarthSciML/EarthSciData.jl/blob/main/docs/src/geosfp.md,4,1
+/EarthSciML/EarthSciData.jl/tree/main/docs/src,4,1
+/EarthSciML/EarthSciData.jl/blob/main/Project.toml,2,2
+/EarthSciML/EarthSciData.jl/blob/c7674e53f4bf1f3faf73cf8f93ba909918cf89ca/src/nei2016monthly.jl,2,1
+/EarthSciML/EarthSciData.jl/blob/main/docs/Project.toml,2,1
+/EarthSciML/EarthSciData.jl/blob/main/docs/src/index.md,2,1
