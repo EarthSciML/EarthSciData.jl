@@ -253,10 +253,10 @@ end
 """
 Interpolation with a unix timestamp.
 """
-function interp!(itp::DataSetInterpolator{T,N,ITP}, t::T, locs::Vararg{T,N})::T where {T,N,ITP}
+function interp!(itp::DataSetInterpolator{T,N,ITP}, t, locs::Vararg{T,N})::T where {T,N,ITP}
     interp!(itp, Dates.unix2datetime(t), locs...)
 end
-function interp_unsafe(itp::DataSetInterpolator{T,N,ITP}, t::T, locs::Vararg{T,N})::T where {T,N,ITP}
+function interp_unsafe(itp::DataSetInterpolator{T,N,ITP}, t, locs::Vararg{T,N})::T where {T,N,ITP}
     interp_unsafe(itp, Dates.unix2datetime(t), locs...)
 end
 

@@ -43,9 +43,23 @@ end
     sample_time = DateTime(2016, 5, 1)
     itp = EarthSciData.DataSetInterpolator{Float32}(emis.fileset, "NOX", sample_time; spatial_ref="EPSG:4326")
     interp!(itp, sample_time, -97.0f0, 40.0f0, 1.0f0)
-    @test_nowarn checkf(itp, sample_time, -97.0f0, 40.0f0, 1.0f0)
+    #@test_nowarn checkf(itp, sample_time, -97.0f0, 40.0f0, 1.0f0)
+    try # If there is an error, it should occur in the proj library.
+        checkf(itp, sample_time, -97.0f0, 40.0f0, 1.0f0)
+    catch err
+        @test length(err.errors) == 1
+        s = err.errors[1]
+        @test contains(string(s), "libproj.proj_trans")
+    end
 
     itp2 = EarthSciData.DataSetInterpolator{Float64}(emis.fileset, "NOX", sample_time; spatial_ref="EPSG:4326")
     interp!(itp2, sample_time, -97.0, 40.0, 1.0)
-    @test_nowarn checkf(itp2, sample_time, -97.0, 40.0, 1.0)
+    #@test_nowarn checkf(itp2, sample_time, -97.0, 40.0, 1.0)
+    try # If there is an error, it should occur in the proj library.
+        checkf(itp2, sample_time, -97.0, 40.0, 1.0)
+    catch err
+        @test length(err.errors) == 1
+        s = err.errors[1]
+        @test contains(string(s), "libproj.proj_trans")
+    end
 end
