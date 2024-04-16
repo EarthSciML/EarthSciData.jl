@@ -2,6 +2,7 @@ using EarthSciData
 using Test
 using Unitful, EarthSciMLBase, ModelingToolkit
 using Dates
+using DifferentialEquations
 using AllocCheck
 
 @parameters t lat lon lev
@@ -35,6 +36,16 @@ end
     EarthSciData.initialize!(itp, sample_time)
     @test month(itp.time1) == 5
     @test_broken month(itp.time2) == 6
+end
+
+@testset "run" begin
+    eq = Differential(t)(emis.sys.mrggrid_withbeis_withrwc₊ACET) ~ equations(emis.sys)[1].rhs * 1e10
+    sys = extend(ODESystem([eq], t, [], []; name=:test_sys), emis.sys)
+    sys = structural_simplify(sys)
+    tt = Dates.datetime2unix(sample_time)
+    prob = ODEProblem(sys, zeros(1), (tt, tt+60.0), [lat=>40.0, lon=>-97.0, lev=>1.0])
+    sol = solve(prob)
+    @test 2 > sol[end][end] > 1
 end
 
 @testset "allocations" begin

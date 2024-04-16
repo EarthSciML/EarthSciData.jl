@@ -1,7 +1,7 @@
 name = "EarthSciData"
 uuid = "a293c155-435f-439d-9c11-a083b6b47337"
 authors = ["EarthSciML Authors"]
-version = "0.4.3"
+version = "0.4.4"
 
 [deps]
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
@@ -22,6 +22,7 @@ Unitful = "1986cc42-f94f-5a68-af5c-568840ba703d"
 [compat]
 AllocCheck = "0.1"
 DocStringExtensions = "0.9"
+DifferentialEquations = "7"
 Downloads = "1"
 EarthSciMLBase = "0.5, 0.6, 0.8"
 Interpolations = "0.14, 0.15"
@@ -38,6 +39,7 @@ julia = "1.6"
 
 [extras]
 AllocCheck = "9b6a8646-10ed-4001-bbdc-1d2f46dfbb1a"
+DifferentialEquations = "0c46a032-eb83-5123-abaf-570d42b7fbaa"
 DomainSets = "5b8099bc-c8ec-5219-889f-1d9e522a28bf"
 LaTeXStrings = "b964fa9f-0449-5b57-a5c2-d3ea65f4040f"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
@@ -45,4 +47,4 @@ SafeTestsets = "1bc83da4-3b8d-516f-aca4-4fe02f6d838f"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
-test = ["Test", "SafeTestsets", "DomainSets", "LaTeXStrings", "Random", "AllocCheck"]
+test = ["Test", "SafeTestsets", "DifferentialEquations", "DomainSets", "LaTeXStrings", "Random", "AllocCheck"]
