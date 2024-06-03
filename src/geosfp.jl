@@ -176,12 +176,12 @@ Domain options (as of 2022-01-30):
 domain. For example if we want to perform a 2D simulation with a vertical dimension,
 we can set `coord_defaults = Dict(:lev => 1)`.
 
+`dtype` represents the desired data type of the interpolated values. The native data type
+for this dataset is Float32.
+
 See http://geoschemdata.wustl.edu/ExtData/ for current options.
 """
-struct GEOSFP{T} <: EarthSciMLODESystem
-    filesets::Dict{String,GEOSFPFileSet}
-    sys::ODESystem
-    function GEOSFP{T}(domain, t; coord_defaults=Dict{Symbol,Number}()) where {T<:Number}
+    function GEOSFP(domain, t; coord_defaults=Dict{Symbol,Number}(), dtype=Float32)
         filesets = Dict{String,GEOSFPFileSet}(
             "A1" => GEOSFPFileSet(domain, "A1"),
             "A3cld" => GEOSFPFileSet(domain, "A3cld"),
@@ -194,7 +194,7 @@ struct GEOSFP{T} <: EarthSciMLODESystem
         eqs = []
         for (filename, fs) in filesets
             for varname ∈ varnames(fs, sample_time)
-                itp = DataSetInterpolator{T}(fs, varname, sample_time)
+                itp = DataSetInterpolator{dtype}(fs, varname, sample_time)
                 dims = dimnames(itp, sample_time)
                 coords = Num[]
                 for dim ∈ dims
@@ -209,21 +209,18 @@ struct GEOSFP{T} <: EarthSciMLODESystem
                 push!(eqs, create_interp_equation(itp, filename, t, sample_time, coords))
             end
         end
-        sys = ODESystem(eqs, t, name=:GEOSFP)
-
-        new(filesets, sys)
-    end
+        ODESystem(eqs, t, name=:EarthSciData₊GEOSFP)
 end
 
-function Base.:(+)(mw::EarthSciMLBase.MeanWind, g::GEOSFP)::ComposedEarthSciMLSystem
-    eqs = [mw.sys.v_lon ~ g.sys.A3dyn₊U]
+@parameters t # TODO(CT) Remove when updating to MTK v9.
+EarthSciMLBase.register_coupling(EarthSciMLBase.MeanWind(t), GEOSFP("4x5", t)) do mw, g
+    eqs = [mw.v_lon ~ g.A3dyn₊U]
     # Only add the number of dimensions present in the mean wind system.
-    length(states(mw.sys)) > 1 ? push!(eqs, mw.sys.v_lat ~ g.sys.A3dyn₊V) : nothing
-    length(states(mw.sys)) > 2 ? push!(eqs, mw.sys.v_lev ~ g.sys.A3dyn₊OMEGA) : nothing
+    length(states(mw.sys)) > 1 ? push!(eqs, mw.v_lat ~ g.A3dyn₊V) : nothing
+    length(states(mw.sys)) > 2 ? push!(eqs, mw.v_lev ~ g.A3dyn₊OMEGA) : nothing
 
-    ComposedEarthSciMLSystem(AbstractEarthSciMLSystem[ConnectorSystem(
+    ConnectorSystem(
             eqs,
             mw, g,
-        )], nothing, [(sys) -> prune!(sys, "GEOSFP₊")]) # Prune extra data interpolators before running to save cost.
+    )
 end
-Base.:(+)(g::GEOSFP, mw::EarthSciMLBase.MeanWind)::ComposedEarthSciMLSystem = mw + g
