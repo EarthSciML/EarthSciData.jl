@@ -12,6 +12,7 @@ makedocs(;
         prettyurls=get(ENV, "CI", "false") == "true",
         canonical="https://earthsciml.github.io/EarthSciData.jl",
         assets=String[],
+        repolink="https://github.com/EarthSciML/EarthSciData.jl"
     ),
     pages=[
         "Home" => "index.md",
