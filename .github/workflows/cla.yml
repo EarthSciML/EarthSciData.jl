@@ -14,7 +14,7 @@ jobs:
         # Pin to a specific version - this third-party action uses a personal access token
         uses: cla-assistant/github-action@948230deb0d44dd38957592f08c6bd934d96d0cf
         env:
-          GITHUB_TOKEN: ${{ secrets.CLA_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PERSONAL_ACCESS_TOKEN : ${{ secrets.CLA_PERSONAL_ACCESS_TOKEN }}
         with:
           # Signatures are stored in https://github.com/EarthSciML/cla
