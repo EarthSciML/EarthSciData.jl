@@ -149,10 +149,6 @@ function Base.show(io::IO, itp::DataSetInterpolator)
     print(io, "DataSetInterpolator{$(typeof(itp.fs)), $(itp.varname)}")
 end
 
-Latexify.@latexrecipe function f(itp::EarthSciData.DataSetInterpolator)
-    return "$(typeof(itp.fs))ₓ$(itp.varname)_interp"
-end
-
 """ Return the units of the data. """
 ModelingToolkit.get_unit(itp::DataSetInterpolator) = itp.data1.units
 
@@ -293,4 +289,8 @@ function create_interp_equation(itp::DataSetInterpolator, filename, t, sample_ti
     else
         error("Unexpected number of coordinates: $(length(coords))")
     end
+end
+
+Latexify.@latexrecipe function f(itp::EarthSciData.DataSetInterpolator)
+    return "$(typeof(itp.fs))ₓ$(itp.varname)_interp"
 end

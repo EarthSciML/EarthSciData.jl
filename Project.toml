@@ -1,7 +1,7 @@
 name = "EarthSciData"
 uuid = "a293c155-435f-439d-9c11-a083b6b47337"
 authors = ["EarthSciML Authors"]
-version = "0.4.4"
+version = "0.5.0"
 
 [deps]
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
@@ -24,8 +24,8 @@ AllocCheck = "0.1"
 DocStringExtensions = "0.9"
 DifferentialEquations = "7"
 Downloads = "1"
-EarthSciMLBase = "0.5, 0.6, 0.8"
-Interpolations = "0.14, 0.15"
+EarthSciMLBase = "0.10"
+Interpolations = "0.15"
 LaTeXStrings = "1"
 Latexify = "0.11, 0.12, 0.13, 0.14, 0.15, 0.16"
 ModelingToolkit = "8"

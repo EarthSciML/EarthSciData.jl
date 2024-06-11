@@ -148,6 +148,9 @@ values of the given `spatial_ref`,
 and the `lev` represents the variable for the vertical grid level.
 Δx and Δy must be in units of meters, and x and y must be in the same units as `spatial_ref`.
 
+`dtype` represents the desired data type of the interpolated values. The native data type
+for this dataset is Float32.
+
 NOTE: This is an interpolator that returns the emissions value of the nearest grid cell 
 center for the underlying emissions grid, so it may not exactly conserve the total 
 emissions mass, especially if the simulation grid is coarser than the emissions grid.
@@ -160,19 +163,14 @@ using EarthSciData, ModelingToolkit, Unitful
 emis = NEI2016MonthlyEmis{Float32}("mrggrid_withbeis_withrwc", t, lon, lat, lev, Δz)
 ```
 """
-struct NEI2016MonthlyEmis{T} <: EarthSciMLODESystem
-    fileset::NEI2016MonthlyEmisFileSet
-    sys::ODESystem
-    function NEI2016MonthlyEmis{T}(sector, t, x, y, lev, Δz; spatial_ref="EPSG:4326") where T<:Number
-        fs = NEI2016MonthlyEmisFileSet(sector)
-        sample_time = DateTime(2016, 5, 1) # Dummy time to get variable names and dimensions from data.
-        eqs = []
-        @assert ModelingToolkit.get_unit(Δz) == u"m" "Δz must be in units of meters."
-        for varname ∈ varnames(fs, sample_time)
-            itp = DataSetInterpolator{T}(fs, varname, sample_time; spatial_ref)
-            push!(eqs, create_interp_equation(itp, sector, t, sample_time, [x, y, lev], 1/Δz))
-        end
-        sys = ODESystem(eqs, t; name=:NEI2016MonthlyEmis)
-        new(fs, sys)
+function NEI2016MonthlyEmis(sector, t, x, y, lev, Δz; spatial_ref="EPSG:4326", dtype=Float32)
+    fs = NEI2016MonthlyEmisFileSet(sector)
+    sample_time = DateTime(2016, 5, 1) # Dummy time to get variable names and dimensions from data.
+    eqs = []
+    @assert ModelingToolkit.get_unit(Δz) == u"m" "Δz must be in units of meters."
+    for varname ∈ varnames(fs, sample_time)
+        itp = DataSetInterpolator{dtype}(fs, varname, sample_time; spatial_ref)
+        push!(eqs, create_interp_equation(itp, sector, t, sample_time, [x, y, lev], 1/Δz))
     end
+    ODESystem(eqs, t; name=:NEI2016MonthlyEmis)
 end

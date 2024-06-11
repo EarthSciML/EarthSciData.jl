@@ -1,44 +1,57 @@
 # Using data from GEOS-FP
 
-``` example 1
+This example demonstrates how to use the GEOS-FP data loader in the EarthSciML ecosystem. The GEOS-FP data loader is used to load data from the [GEOS-FP](https://gmao.gsfc.nasa.gov/GMAO_products/NRT_products.php) dataset.
+
+First, let's initialize some packages and set up the [GEOS-FP](@ref GEOSFP) equation system.
+
+```@example geosfp
 using EarthSciData, EarthSciMLBase
-using DomainSets, ModelingToolkit, MethodOfLines, DifferentialEquations
+using DomainSets, ModelingToolkit, MethodOfLines#, DifferentialEquations
 using Dates, Plots
 
 # Set up system
 @parameters t lev lon lat
-geosfp = GEOSFP{Float64}("4x5", t)
+geosfp = GEOSFP("4x5", t)
+```
 
-struct Example <: EarthSciMLODESystem
-    sys
-    function Example(t; name)
-        @variables c(t) = 5.0
-        D = Differential(t)
-        new(ODESystem([D(c) ~ sin(lat * π / 180.0 * 6) + sin(lon * π / 180 * 6)], t, name=name))
-    end
+We can see above the different variables that are available in the GEOS-FP dataset.
+
+The GEOS-FP equation system isn't an ordinary differential equation (ODE) system, so we can't run it by itself.
+To fix this, we create another equation system that is an ODE. 
+(We don't actually end up using this system for anything, it's just necessary to get the system to compile.)
+
+```@example geosfp
+function Example(t)
+    @variables c(t) = 5.0
+    D = Differential(t)
+    ODESystem([D(c) ~ sin(lat * π / 180.0 * 6) + sin(lon * π / 180 * 6)], t, name=:Docs₊Example)
 end
-@named examplesys = Example(t)
+examplesys = Example(t)
+```
 
+Now, let's couple these two systems together, and also add in advection and some information about the domain:
+
+```@example geosfp
 domain = DomainInfo(
     partialderivatives_lonlat2xymeters,
     constIC(0.0, t ∈ Interval(Dates.datetime2unix(DateTime(2022, 1, 1)), Dates.datetime2unix(DateTime(2022, 1, 3)))),
-    zerogradBC(lat ∈ Interval(-85.0f0, 85.0f0)),
-    periodicBC(lon ∈ Interval(-180.0f0, 175.0f0)),
-    zerogradBC(lev ∈ Interval(1.0f0, 10.0f0)),
+    zerogradBC(lat ∈ Interval(-80.0f0, 80.0f0)),
+    periodicBC(lon ∈ Interval(-180.0f0, 180.0f0)),
+    zerogradBC(lev ∈ Interval(1.0f0, 11.0f0)),
 )
 
-composed_sys = examplesys + domain + Advection() + geosfp;
+composed_sys = couple(examplesys, domain, geosfp)
 pde_sys = get_mtk(composed_sys)
+```
 
-# Solve
-discretization = MOLFiniteDifference([lat => 6, lon => 6, lev => 6], t, approx_order=2)
+Now, finally, we can run the simulation and plot the GEOS-FP wind fields in the result:
+
+```@example geosfp
+discretization = MOLFiniteDifference([lat => 10, lon => 10, lev => 10], t, approx_order=2)
 @time pdeprob = discretize(pde_sys, discretization)
 
-#@run pdesol = solve(pdeprob, Tsit5(), saveat=3600.0)
-@profview pdesol = solve(pdeprob, Tsit5(), saveat=36000.0)
-@time pdesol = solve(pdeprob, Tsit5(), saveat=3600.0)
+pdesol = solve(pdeprob, Tsit5(), saveat=3600.0)
 
-# Plot
 discrete_lon = pdesol[lon]
 discrete_lat = pdesol[lat]
 discrete_lev = pdesol[lev]
@@ -56,7 +69,7 @@ anim = @animate for k in 1:length(discrete_t)
             title="U")
     p3 = heatmap(discrete_lon, discrete_lat, sol_v[k, 1:end, 1:end, 2], clim=(minimum(sol_v[:, :, :, 2]), maximum(sol_v[:, :, :, 2])),
             title="V")
-    plot(p1, p2, p3, size=(1200, 700))
+    plot(p1, p2, p3, size=(800, 500))
 end
 gif(anim, "animation.gif", fps = 8)
 ```
