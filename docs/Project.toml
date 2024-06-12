@@ -12,6 +12,7 @@ Unitful = "1986cc42-f94f-5a68-af5c-568840ba703d"
 [compat]
 DifferentialEquations = "7"
 DomainSets = "0.5, 0.6"
+EarthSciData = "0.5"
 MethodOfLines = "0.11"
 ModelingToolkit = "8"
 Unitful = "1"
