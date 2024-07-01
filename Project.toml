@@ -4,8 +4,10 @@ authors = ["EarthSciML Authors"]
 version = "0.5.0"
 
 [deps]
+DataInterpolations = "82cc6244-b520-54b8-b5a6-8a565e85f1d0"
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
 DocStringExtensions = "ffbed154-4ef7-542d-bbb7-c09d3a79fcae"
+DomainSets = "5b8099bc-c8ec-5219-889f-1d9e522a28bf"
 Downloads = "f43a241f-c20a-4ad4-852c-f6b1247861c6"
 EarthSciMLBase = "e53f1632-a13c-4728-9402-0c66d48804b0"
 Interpolations = "a98d9a8b-a2ab-59e6-89dd-64a1c18fca59"
@@ -21,10 +23,11 @@ Unitful = "1986cc42-f94f-5a68-af5c-568840ba703d"
 
 [compat]
 AllocCheck = "0.1"
-DocStringExtensions = "0.9"
+DataInterpolations = "5"
 DifferentialEquations = "7"
+DocStringExtensions = "0.9"
 Downloads = "1"
-EarthSciMLBase = "0.10"
+EarthSciMLBase = "0.11"
 Interpolations = "0.15"
 LaTeXStrings = "1"
 Latexify = "0.11, 0.12, 0.13, 0.14, 0.15, 0.16"
