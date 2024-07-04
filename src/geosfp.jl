@@ -66,25 +66,45 @@ function relpath(fs::GEOSFPFileSet, t::DateTime)
 end
 
 # Cache to store data frequency information.
-GEOSFPDataFrequencyInfoCache = Dict{String,DataFrequencyInfo}()
+const GEOSFPDataFrequencyInfoCache = Dict{String,DataFrequencyInfo}()
+const GEOSFPDataFrequencyInfoLock = ReentrantLock()
 
 function DataFrequencyInfo(fs::GEOSFPFileSet, t::DateTime)::DataFrequencyInfo
-    filepath = maybedownload(fs, t)
-    if haskey(GEOSFPDataFrequencyInfoCache, filepath)
-        return GEOSFPDataFrequencyInfoCache[filepath]
-    end
-    ds = NCDataset(filepath)
-    sd = ds.attrib["Start_Date"]
-    st = ds.attrib["Start_Time"]
-    dt = ds.attrib["Delta_Time"]
+    lock(GEOSFPDataFrequencyInfoLock) do
+        filepath = maybedownload(fs, t)
+        if haskey(GEOSFPDataFrequencyInfoCache, filepath)
+            return GEOSFPDataFrequencyInfoCache[filepath]
+        end
+        ds = NCDataset(filepath)
+        sd = ds.attrib["Start_Date"]
+        st = ds.attrib["Start_Time"]
+        dt = ds.attrib["Delta_Time"]
 
-    start = DateTime(sd * " " * st, dateformat"yyyymmdd HH:MM:SS.s")
-    frequency = Second(parse(Int64, dt[1:2])) * 3600 + Second(parse(Int64, dt[3:4])) * 60 +
-                Second(parse(Int64, dt[5:6]))
-    centerpoints = ds["time"][:]
-    di = DataFrequencyInfo(start, frequency, centerpoints)
-    GEOSFPDataFrequencyInfoCache[filepath] = di
-    return di
+        start = DateTime(sd * " " * st, dateformat"yyyymmdd HH:MM:SS.s")
+        frequency = Second(parse(Int64, dt[1:2])) * 3600 + Second(parse(Int64, dt[3:4])) * 60 +
+                    Second(parse(Int64, dt[5:6]))
+        centerpoints = ds["time"][:]
+        di = DataFrequencyInfo(start, frequency, centerpoints)
+        GEOSFPDataFrequencyInfoCache[filepath] = di
+        return di
+    end
+end
+
+"""
+$(SIGNATURES)
+
+Load the data in place for the given variable name at the given time.
+"""
+function loadslice!(data::AbstractArray, fs::GEOSFPFileSet, t::DateTime, varname)
+    filepath = maybedownload(fs, t)
+    ds = NCDataset(filepath)
+    var = loadslice!(data, fs, ds, t, varname, "time") # Load data from NetCDF file.
+
+    scale, _ = to_unitful(var.attrib["units"])
+    if scale != 1
+        data .*= scale
+    end
+    nothing
 end
 
 """
@@ -92,10 +112,10 @@ $(SIGNATURES)
 
 Load the data for the given variable name at the given time.
 """
-function loadslice!(data::Array{T}, fs::GEOSFPFileSet, t::DateTime, varname)::DataArray{T} where {T<:Number}
+function loadslice(fs::GEOSFPFileSet, t::DateTime, varname)
     filepath = maybedownload(fs, t)
     ds = NCDataset(filepath)
-    var, dims, data = loadslice!(data, fs, ds, t, varname, "time")
+    var, dims, data = loadslice(fs, ds, t, varname, "time") # Load data from NetCDF file.
 
     scale, units = to_unitful(var.attrib["units"])
     description = var.attrib["long_name"]
@@ -103,30 +123,14 @@ function loadslice!(data::Array{T}, fs::GEOSFPFileSet, t::DateTime, varname)::Da
     if scale != 1
         data .*= scale
     end
+    coords = [ds[d][:] for d ∈ dims]
 
-    DataArray{T,ndims(data)}(data, units, description, dims)
-end
+    xdim = findfirst((x) -> x == "lon", dims)
+    ydim = findfirst((x) -> x == "lat", dims)
+    @assert xdim > 0 "GEOSFP `lon` dimension not found"
+    @assert ydim > 0 "GEOSFP `lat` dimension not found"
 
-"""Convert a vector of evenly spaced grid points to a range."""
-function knots2range(knots)
-    dx = [knots[i+1] - knots[i] for i ∈ 1:length(knots)-1]
-    @assert all(dx .≈ dx[1]) "Knots must be evenly spaced."
-    return knots[1]:dx[1]:knots[end]
-end
-
-"""
-$(SIGNATURES)
-
-Load the data for the given `DateTime` and variable name as an interpolator
-from Interpolations.jl.
-"""
-function load_interpolator!(cache::Array{T}, fs::GEOSFPFileSet, t::DateTime, varname) where {T<:Number}
-    ds = NCDataset.(maybedownload(fs, t))
-    slice = loadslice!(cache, fs, t, varname)
-    knots = Tuple([knots2range(ds[d][:]) for d ∈ slice.dimnames])
-    itp = interpolate!(slice.data, BSpline(Linear())) # This destroys slice.data.
-    itp = scale(itp, knots)
-    itp, slice
+    data, MetaData(coords, units, description, dims, "EPSG:4326", xdim, ydim)
 end
 
 """
@@ -212,7 +216,7 @@ for this dataset is Float32.
 
 See http://geoschemdata.wustl.edu/ExtData/ for current options.
 """
-function GEOSFP(domain, t; coord_defaults=Dict{Symbol,Number}(), dtype=Float32)
+function GEOSFP(domain, t; coord_defaults=Dict{Symbol,Number}(), spatial_ref="EPSG:4326", dtype=Float32)
     filesets = Dict{String,GEOSFPFileSet}(
         "A1" => GEOSFPFileSet(domain, "A1"),
         "A3cld" => GEOSFPFileSet(domain, "A3cld"),
@@ -225,7 +229,7 @@ function GEOSFP(domain, t; coord_defaults=Dict{Symbol,Number}(), dtype=Float32)
     eqs = []
     for (filename, fs) in filesets
         for varname ∈ varnames(fs, sample_time)
-            itp = DataSetInterpolator{dtype}(fs, varname, sample_time)
+            itp = DataSetInterpolator{dtype}(fs, varname, sample_time; spatial_ref)
             dims = dimnames(itp, sample_time)
             coords = Num[]
             for dim ∈ dims
@@ -279,7 +283,7 @@ to convert a variable named `u` from δ(u)/δ(lev)` to `δ(u)/δ(P)`,
 i.e. from vertical level number to pressure in hPa.
 The return format is `coordinate_index => conversion_factor`.
 """
-function partialderivatives_δPδlev_geosfp(geosfp; default_lev = 1.0)
+function partialderivatives_δPδlev_geosfp(geosfp; default_lev=1.0)
     # Find index for surface pressure.
     ii = findfirst((x) -> x == :I3₊PS, [Symbolics.tosymbol(eq.lhs, escape=false) for eq in equations(geosfp)])
     # Get interpolator for surface pressure.

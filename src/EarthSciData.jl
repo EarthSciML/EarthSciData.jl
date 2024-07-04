@@ -1,7 +1,7 @@
 module EarthSciData
 using Dates, Downloads, Printf
 using DocStringExtensions
-using Interpolations, DataInterpolations
+using GridInterpolations, DataInterpolations, StaticArrays
 using NCDatasets, ModelingToolkit, Symbolics, Proj
 using EarthSciMLBase
 using Unitful, Latexify, ProgressMeter
