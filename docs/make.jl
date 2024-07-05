@@ -17,6 +17,7 @@ makedocs(;
     pages=[
         "Home" => "index.md",
         "GEOS-FP" => "geosfp.md",
+        "2016 NEI" => "nei2016.md",
         "API" => "api.md",
     ],
 )
