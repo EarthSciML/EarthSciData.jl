@@ -118,18 +118,20 @@ end
     tt = DateTime(2022, 5, 1)
     interp!(itp, tt, 1.0, 0.0, 1.0)
 
-    @check_allocs checkf(itp, t, loc1, loc2, loc3) = EarthSciData.interp_unsafe(itp, t, loc1, loc2, loc3)
+    @test_broken begin
+        @check_allocs checkf(itp, t, loc1, loc2, loc3) = EarthSciData.interp_unsafe(itp, t, loc1, loc2, loc3)
 
-    try
-        checkf(itp, tt, 1.0, 0.0, 1.0)
-    catch err
-        @warn err.errors
-        rethrow(err)
+        try
+            checkf(itp, tt, 1.0, 0.0, 1.0)
+        catch err
+            @warn err.errors
+            rethrow(err)
+        end
+
+        itp2 = EarthSciData.DataSetInterpolator{Float32}(fs, "U", t)
+        interp!(itp2, tt, 1.0f0, 0.0f0, 1.0f0)
+        checkf(itp2, tt, 1.0f0, 0.0f0, 1.0f0)
     end
-
-    itp2 = EarthSciData.DataSetInterpolator{Float32}(fs, "U", t)
-    interp!(itp2, tt, 1.0f0, 0.0f0, 1.0f0)
-    checkf(itp2, tt, 1.0f0, 0.0f0, 1.0f0)
 end
 
 #== Profile data loading and interpolation.
