@@ -44,6 +44,8 @@ jobs:
   docs:
     name: Documentation
     runs-on: ubuntu-latest
+    env:
+      JULIA_NO_VERIFY_HOSTS: 'gaftp.epa.gov'
     steps:
       - uses: actions/checkout@v3
       - uses: julia-actions/setup-julia@v1
