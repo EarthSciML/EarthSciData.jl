@@ -44,7 +44,7 @@ Load the data in place for the given variable name at the given time.
 function loadslice!(data::AbstractArray, fs::NEI2016MonthlyEmisFileSet, t::DateTime, varname)
     lock(fs.lock) do
         filepath = maybedownload(fs, t)
-        ds = NCDataset(filepath)
+        ds = getnc(filepath)
         var = loadslice!(data, fs, ds, t, varname, "TSTEP")
 
         Δx = ds.attrib["XCELL"]
@@ -66,7 +66,7 @@ Load the data for the given variable name at the given time.
 function loadslice(fs::NEI2016MonthlyEmisFileSet, t::DateTime, varname)
     lock(fs.lock) do
         filepath = maybedownload(fs, t)
-        ds = NCDataset(filepath)
+        ds = getnc(filepath)
         var, dims, data = loadslice(fs, ds, t, varname, "TSTEP")
 
         Δx = ds.attrib["XCELL"]
@@ -116,7 +116,7 @@ Return the variable names associated with this FileSet.
 function varnames(fs::NEI2016MonthlyEmisFileSet, t::DateTime)
     lock(fs.lock) do
         filepath = maybedownload(fs, t)
-        ds = NCDataset(filepath)
+        ds = getnc(filepath)
         return [setdiff(keys(ds), ["TFLAG"; keys(ds.dim)])...]
     end
 end

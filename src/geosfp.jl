@@ -69,7 +69,7 @@ end
 function DataFrequencyInfo(fs::GEOSFPFileSet, t::DateTime)::DataFrequencyInfo
     lock(fs.lock) do
         filepath = maybedownload(fs, t)
-        ds = NCDataset(filepath)
+        ds = getnc(filepath)
         sd = ds.attrib["Start_Date"]
         st = ds.attrib["Start_Time"]
         dt = ds.attrib["Delta_Time"]
@@ -90,7 +90,7 @@ Load the data in place for the given variable name at the given time.
 function loadslice!(data::AbstractArray, fs::GEOSFPFileSet, t::DateTime, varname)
     lock(fs.lock) do
         filepath = maybedownload(fs, t)
-        ds = NCDataset(filepath)
+        ds = getnc(filepath)
         var = loadslice!(data, fs, ds, t, varname, "time") # Load data from NetCDF file.
 
         scale, _ = to_unitful(var.attrib["units"])
@@ -109,7 +109,7 @@ Load the data for the given variable name at the given time.
 function loadslice(fs::GEOSFPFileSet, t::DateTime, varname)
     lock(fs.lock) do
         filepath = maybedownload(fs, t)
-        ds = NCDataset(filepath)
+        ds = getnc(filepath)
         var, dims, data = loadslice(fs, ds, t, varname, "time") # Load data from NetCDF file.
 
         scale, units = to_unitful(var.attrib["units"])
@@ -137,7 +137,7 @@ Return the variable names associated with this FileSet.
 function varnames(fs::GEOSFPFileSet, t::DateTime)
     lock(fs.lock) do
         filepath = maybedownload(fs, t)
-        ds = NCDataset(filepath)
+        ds = getnc(filepath)
         return [setdiff(keys(ds), keys(ds.dim))...]
     end
 end

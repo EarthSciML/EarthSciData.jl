@@ -27,7 +27,7 @@ function loadslice!(data::AbstractArray{T}, fs::FileSet, ds::NCDataset, t::DateT
     var
 end
 
-function loadslice(fs::FileSet, ds::NCDataset, t::DateTime, varname::AbstractString, timedim::AbstractString)::Tuple{Any, Any, Array}
+function loadslice(fs::FileSet, ds::NCDataset, t::DateTime, varname::AbstractString, timedim::AbstractString)::Tuple{Any,Any,Array}
     var = ds[varname]
     dims = collect(NCDatasets.dimnames(var))
     @assert timedim ∈ dims "Variable $varname does not have a dimension named '$timedim'."
@@ -37,4 +37,27 @@ function loadslice(fs::FileSet, ds::NCDataset, t::DateTime, varname::AbstractStr
     slices[time_index] = centerpoint_index(DataFrequencyInfo(fs, t), t)
     data = var[slices...]
     return (var, deleteat!(dims, time_index), data)
+end
+
+const ncfiledict = Dict{String,NCDataset}()
+const ncfilelist = Vector{String}()
+const nclock = ReentrantLock()
+
+" Get the NCDataset for the given file path, caching the last 20 files. "
+function getnc(filepath::String)::NCDataset
+    lock(nclock) do
+        if haskey(ncfiledict, filepath)
+            return ncfiledict[filepath]
+        else
+            ds = NCDataset(filepath)
+            push!(ncfilelist, filepath)
+            ncfiledict[filepath] = ds
+            # if length(ncfilelist) > 20 #TODO(CT): Tests fail when this is uncommented, don't know why.
+            #     fname = popfirst!(ncfilelist)
+            #     close(ncfiledict[fname])
+            #     delete!(ncfiledict, fname)
+            # end
+            return ds
+        end
+    end
 end
