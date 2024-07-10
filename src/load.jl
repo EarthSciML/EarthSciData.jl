@@ -56,8 +56,8 @@ function maybedownload(fs::FileSet, t::DateTime)
             update!(prog, now)
         end)
     catch e # Delete partially downloaded file if an error occurs.
-        rm(p)
-        throw(e)
+        rm(p, force=true)
+        rethrow(e)
     end
     return p
 end
@@ -126,6 +126,7 @@ data records for the times immediately before and after the current time step.
 
 `varname` is the name of the variable to interpolate. `default_time` is the time to use when initializing
 the interpolator. `spatial_ref` is the spatial reference system that the simulation will be using.
+`cache_size` is the number of time steps that should be held in the cache at any given time (default=2).
 """
 mutable struct DataSetInterpolator{To,N,N2,FT}
     fs::FileSet
@@ -134,20 +135,25 @@ mutable struct DataSetInterpolator{To,N,N2,FT}
     gridmin::SVector{N2,To}
     gridmax::SVector{N2,To}
     data::Array{To,N}
+    load_cache::Array{To,N2}
     metadata::MetaData
     times::Vector{DateTime}
     currenttime::DateTime
     coord_trans::FT
+    loadrequest::Channel{DateTime}
+    loadresult::Channel{Int}
+    copyfinish::Channel{Int}
     lock::ReentrantLock
     initialized::Bool
     kwargs
 
-    function DataSetInterpolator{To}(fs::FileSet, varname::AbstractString, default_time::DateTime; spatial_ref="EPSG:4326", kwargs...) where {To<:Real}
+    function DataSetInterpolator{To}(fs::FileSet, varname::AbstractString, default_time::DateTime; spatial_ref="EPSG:4326", cache_size=2, kwargs...) where {To<:Real}
         data, metadata = loadslice(fs, default_time, varname; kwargs...)
-        data = cat(data, data, dims=ndims(data) + 1) # Add a dimesion for time.
+        load_cache = data
+        data = cat([data for _ ∈ 1:cache_size]..., dims=ndims(data) + 1) # Add a dimesion for time.
         N = ndims(data)
         N2 = N - 1
-        times = [DateTime(0, 1, 1), DateTime(0, 2, 1)]
+        times = [DateTime(0, i, 1) for i ∈ 1:cache_size]
         grid = RectangleGrid(metadata.coords..., datetime2unix.(times))
         gridmin = minimum.(grid.cutPoints[1:end-1])
         gridmax = maximum.(grid.cutPoints[1:end-1])
@@ -163,12 +169,16 @@ mutable struct DataSetInterpolator{To,N,N2,FT}
         end
         FT = typeof(coord_trans)
 
-        new{To,N,N2,FT}(fs, varname, grid, gridmin, gridmax, data, metadata, times,
-            DateTime(1, 1, 1), coord_trans, ReentrantLock(), false, kwargs)
+        itp = new{To,N,N2,FT}(fs, varname, grid, gridmin, gridmax, data, load_cache, metadata, times,
+            DateTime(1, 1, 1), coord_trans,
+            Channel{DateTime}(0), Channel{Int}(0), Channel{Int}(0),
+            ReentrantLock(), false, kwargs)
+        Threads.@spawn async_loader(itp)
+        itp
     end
 end
 
-function replace_in_tuple(t::NTuple{N, T}, index1::Int, v1::T, index2::Int, v2::T) where {T,N}
+function replace_in_tuple(t::NTuple{N,T}, index1::Int, v1::T, index2::Int, v2::T) where {T,N}
     ntuple(i -> i == index1 ? v1 : i == index2 ? v2 : t[i], N)
 end
 
@@ -179,36 +189,104 @@ end
 """ Return the units of the data. """
 ModelingToolkit.get_unit(itp::DataSetInterpolator) = itp.metadata.units
 
-function initialize!(itp::DataSetInterpolator, t::DateTime)
+" Return the next interpolation time point for this interpolator. "
+function nexttimepoint(itp::DataSetInterpolator, t::DateTime)
     ti = DataFrequencyInfo(itp.fs, t)
-    centerpoint = ti.centerpoints[centerpoint_index(ti, t)]
-    N = ndims(itp.data)
-    if t < centerpoint # Load data for current and previous time step.
-        itp.times[2] = ti.centerpoints[centerpoint_index(ti, t)]
-        if itp.times[2] == itp.times[1]
-            selectdim(itp.data, N, 2) .= selectdim(itp.data, N, 1)
-        else
-            d = selectdim(itp.data, N, 2)
-            loadslice!(d, itp.fs, t, itp.varname; itp.kwargs...)
-        end
-        ti_minus = DataFrequencyInfo(itp.fs, t - ti.frequency)
-        itp.times[1] = ti_minus.centerpoints[centerpoint_index(ti_minus, t - ti.frequency)]
-        d = selectdim(itp.data, N, 1)
-        loadslice!(d, itp.fs, t - ti.frequency, itp.varname; itp.kwargs...)
-    else # Load data for current and next time step.
-        itp.times[1] = ti.centerpoints[centerpoint_index(ti, t)]
-        if itp.times[1] == itp.times[2]
-            selectdim(itp.data, N, 1) .= selectdim(itp.data, N, 2)
-        else
-            d = selectdim(itp.data, N, 1)
-            loadslice!(d, itp.fs, t, itp.varname; itp.kwargs...)
-        end
-        ti_plus = DataFrequencyInfo(itp.fs, t + ti.frequency)
-        d = selectdim(itp.data, N, 2)
-        loadslice!(d, itp.fs, t + ti.frequency, itp.varname; itp.kwargs...)
-        itp.times[2] = ti_plus.centerpoints[centerpoint_index(ti_plus, t + ti.frequency)]
+    ci = centerpoint_index(ti, t)
+    if ci != length(ti.centerpoints)
+        return ti.centerpoints[ci+1]
     end
+    tt = t + ti.frequency * 0.75 # Just go most of the way because some months etc. have different lengths.
+    ti = DataFrequencyInfo(itp.fs, tt)
+    ti.centerpoints[centerpoint_index(ti, tt)]
+end
+
+" Return the previous interpolation time point for this interpolator. "
+function prevtimepoint(itp::DataSetInterpolator, t::DateTime)
+    ti = DataFrequencyInfo(itp.fs, t)
+    ci = centerpoint_index(ti, t)
+    if ci != 1
+        return ti.centerpoints[ci-1]
+    end
+    tt = t - ti.frequency * 0.75 # Just go most of the way because some months etc. have different lengths.
+    ti = DataFrequencyInfo(itp.fs, tt)
+    ti.centerpoints[centerpoint_index(ti, tt)]
+end
+
+" Return the previous interpolation time point for this interpolator. "
+function currenttimepoint(itp::DataSetInterpolator, t::DateTime)
+    ti = DataFrequencyInfo(itp.fs, t)
+    ti.centerpoints[centerpoint_index(ti, t)]
+end
+
+" Load the time points that should be cached in this interpolator. "
+function interp_cache_times!(itp::DataSetInterpolator, t::DateTime)
+    cache_size = length(itp.times)
+    times = Vector{DateTime}(undef, cache_size)
+    centerpoint = currenttimepoint(itp, t)
+    # Currently assuming we're going forwards in time.
+    if t < centerpoint  # Load data starting with current time step.
+        tt = prevtimepoint(itp, t)
+    else  # Load data starting with previous time step.
+        tt = centerpoint
+    end
+    for i in 1:cache_size
+        times[i] = tt
+        tt = nexttimepoint(itp, tt)
+    end
+    times
+end
+
+" Asynchronously load data, anticipating which time will be requested next. "
+function async_loader(itp::DataSetInterpolator)
+    tt = DateTime(0, 1, 10)
+    for t ∈ itp.loadrequest
+        if t != tt
+            try
+                loadslice!(itp.load_cache, itp.fs, t, itp.varname; itp.kwargs...)
+            catch err
+                @warn err
+                rethrow(err)
+            end
+            tt = t
+        end
+        put!(itp.loadresult, 0) # Let the requestor know that we've finished.
+        # Anticipate what the next request is going to be for and load that data.
+        take!(itp.copyfinish)
+        # tt = nexttimepoint(itp, tt)
+        # try
+        #     loadslice!(itp.load_cache, itp.fs, tt, itp.varname; itp.kwargs...)
+        # catch err
+        #     @warn err
+        #     rethrow(err)
+        # end
+    end
+end
+
+function initialize!(itp::DataSetInterpolator, t::DateTime)
+    times = interp_cache_times!(itp, t) # Figure out which times we need.
+
+    # Figure out the overlap between the times we have and the times we need.
+    times_in_cache = intersect(times, itp.times)
+    idxs_in_cache = [findfirst(x -> x == times_in_cache[i], itp.times) for i in eachindex(times_in_cache)]
+    idxs_in_times = [findfirst(x -> x == times_in_cache[i], times) for i in eachindex(times_in_cache)]
+    idxs_not_in_times = setdiff(eachindex(times), idxs_in_times)
+
+    # Move data we already have to where it should be.
+    N = ndims(itp.data)
+    selectdim(itp.data, N, idxs_in_times) .= selectdim(itp.data, N, idxs_in_cache)
+
+    # Load the additional times we need
+    for idx in idxs_not_in_times
+        d = selectdim(itp.data, N, idx)
+        put!(itp.loadrequest, times[idx]) # Request next data
+        take!(itp.loadresult) # Wait for results
+        d .= itp.load_cache # Copy results to correct location
+        put!(itp.copyfinish, 0) # Let the loader know we've finished copying
+    end
+    itp.times = times
     itp.grid = RectangleGrid(itp.metadata.coords..., datetime2unix.(itp.times))
+    itp.currenttime = t
     @assert issorted(itp.times) "Interpolator times are in wrong order"
 end
 
@@ -217,13 +295,12 @@ function lazyload!(itp::DataSetInterpolator, t::DateTime)
         if itp.currenttime == t
             return
         end
-        itp.currenttime = t
         if !itp.initialized # Initialize new interpolator.
             initialize!(itp, t)
             itp.initialized = true
             return
         end
-        if t <= itp.times[1] || t > itp.times[2]
+        if t <= itp.times[begin] || t > itp.times[end]
             # @info "Updating data loader for $(itp.varname) for t = $t"
             initialize!(itp, t)
         end

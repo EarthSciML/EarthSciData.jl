@@ -17,7 +17,7 @@ eqs = equations(emis)
 sample_time = DateTime(2016, 5, 1)
 @testset "correct projection" begin
     itp = EarthSciData.DataSetInterpolator{Float32}(fileset, "NOX", sample_time; spatial_ref="EPSG:4326")
-    @test interp!(itp, sample_time, -97.0f0, 40.0f0, 1.0f0) ≈ 9.192145f-10
+    @test interp!(itp, sample_time, -97.0f0, 40.0f0, 1.0f0) ≈ 9.211331f-10
     @test interp!(itp, sample_time, -97.0f0, 40.0f0, 2.0f0) == 0.0f0
 end
 
@@ -30,13 +30,14 @@ end
     sample_time = DateTime(2016, 5, 1)
     itp = EarthSciData.DataSetInterpolator{Float32}(fileset, "NOX", sample_time; spatial_ref="EPSG:4326")
     EarthSciData.initialize!(itp, sample_time)
-    @test_broken month(itp.times[1]) == 4 #TODO(CT): Fix by adding next() and previous() methods instead of adding and subtracting frequency.
+    ti = EarthSciData.DataFrequencyInfo(itp.fs, sample_time)
+    @test month(itp.times[1]) == 4
     @test month(itp.times[2]) == 5
 
     sample_time = DateTime(2016, 5, 31)
     EarthSciData.initialize!(itp, sample_time)
     @test month(itp.times[1]) == 5
-    @test_broken month(itp.times[2]) == 6
+    @test month(itp.times[2]) == 6
 end
 
 @testset "run" begin
@@ -44,14 +45,14 @@ end
     sys = extend(ODESystem([eq], t, [], []; name=:test_sys), emis)
     sys = structural_simplify(sys)
     tt = Dates.datetime2unix(sample_time)
-    prob = ODEProblem(sys, zeros(1), (tt, tt+60.0), [lat=>40.0, lon=>-97.0, lev=>1.0])
+    prob = ODEProblem(sys, zeros(1), (tt, tt + 60.0), [lat => 40.0, lon => -97.0, lev => 1.0])
     sol = solve(prob)
     @test 2 > sol[end][end] > 1
 end
 
 @testset "allocations" begin
     @check_allocs checkf(itp, t, loc1, loc2, loc3) = EarthSciData.interp_unsafe(itp, t, loc1, loc2, loc3)
-    
+
     sample_time = DateTime(2016, 5, 1)
     itp = EarthSciData.DataSetInterpolator{Float32}(fileset, "NOX", sample_time; spatial_ref="EPSG:4326")
     interp!(itp, sample_time, -97.0f0, 40.0f0, 1.0f0)

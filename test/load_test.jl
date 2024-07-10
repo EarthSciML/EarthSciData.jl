@@ -80,7 +80,7 @@ end
 
     fs = DummyFileSet(DateTime(2022, 4, 30), DateTime(2022, 5, 4))
 
-    itp = EarthSciData.DataSetInterpolator{Float32}(fs, "U", fs.start)
+    itp = EarthSciData.DataSetInterpolator{Float32}(fs, "U", fs.start; cache_size=5)
     dfi = EarthSciData.DataFrequencyInfo(fs, t)
 
     answerdata = [tv(fs, t) * v for t ∈ dfi.centerpoints, v ∈ [1.0, 0.5, 2.0]]
@@ -99,6 +99,11 @@ end
     end
 
     @test uvals ≈ answers
+
+    @test length(itp.times) == 5
+    @test itp.times == [DateTime("2022-05-02T22:30:00"), DateTime("2022-05-03T01:30:00"), 
+        DateTime("2022-05-03T04:30:00"), DateTime("2022-05-03T07:30:00"), 
+        DateTime("2022-05-03T10:30:00")]
 
     uvals = zeros(Float32, length(times), length(xs))
     answers = zeros(Float32, length(times), length(xs))
