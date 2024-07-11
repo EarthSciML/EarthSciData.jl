@@ -215,7 +215,7 @@ function prevtimepoint(itp::DataSetInterpolator, t::DateTime)
     ti.centerpoints[centerpoint_index(ti, tt)]
 end
 
-" Return the previous interpolation time point for this interpolator. "
+" Return the current interpolation time point for this interpolator. "
 function currenttimepoint(itp::DataSetInterpolator, t::DateTime)
     ti = DataFrequencyInfo(itp.fs, t)
     ti.centerpoints[centerpoint_index(ti, t)]
