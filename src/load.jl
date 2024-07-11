@@ -11,10 +11,10 @@ An interface for types describing a dataset, potentially comprised of multiple f
 To satisfy this interface, a type must implement the following methods:
 - `relpath(fs::FileSet, t::DateTime)`
 - `url(fs::FileSet, t::DateTime)`
-- `localpath(fs::GEOSFPFileSet, t::DateTime)`
-- `DataFrequencyInfo(fs::GEOSFPFileSet, t::DateTime)::DataFrequencyInfo`
-- `loadslice(fs::GEOSFPFileSet, t::DateTime, varname)::DataArray`
-- `load_interpolator(fs::FileSet, t::DateTime, varname)`
+- `localpath(fs::FileSet, t::DateTime)`
+- `DataFrequencyInfo(fs::FileSet, t::DateTime)::DataFrequencyInfo`
+- `loadmetadata(fs::FileSet, t::DateTime, varname)::MetaData`
+- `loadslice!(cache::AbstractArray, fs::FileSet, t::DateTime, varname)`
 - `varnames(fs::FileSet, t::DateTime)`
 """
 abstract type FileSet end
@@ -56,26 +56,34 @@ function maybedownload(fs::FileSet, t::DateTime)
             update!(prog, now)
         end)
     catch e # Delete partially downloaded file if an error occurs.
-        rm(p)
-        throw(e)
+        rm(p, force=true)
+        rethrow(e)
     end
     return p
 end
 
 """
-An array of data.
+Information about a data array.
 
 $(FIELDS)
 """
-struct DataArray{T,N}
-    "The data."
-    data::Array{T,N}
+struct MetaData
+    "The locations associated with each data point in the array."
+    coords::Vector{Vector{Float64}}
     "Physical units of the data, e.g. m s⁻¹."
     units::Unitful.Unitlike
     "Description of the data."
     description::AbstractString
     "Dimensions of the data, e.g. (lat, lon, layer)."
     dimnames::AbstractVector
+    "Dimension sizes of the data, e.g. (180, 360, 30)."
+    varsize::AbstractVector
+    "The spatial reference system of the data, e.g. \"EPSG:4326\" for lat-lon data."
+    native_sr::AbstractString
+    "The index number of the x-dimension (e.g. longitude)"
+    xdim::Int
+    "The index number of the y-dimension (e.g. latitude)"
+    ydim::Int
 end
 
 """
@@ -103,7 +111,7 @@ Return the index of the centerpoint closest to the given time.
 function centerpoint_index(t_info::DataFrequencyInfo, t)
     eps = endpoints(t_info)
     t_index = ((ep) -> ep[1] <= t < ep[2]).(eps)
-    @assert sum(t_index) == 1 "Expected exactly one time step to match."
+    @assert sum(t_index) == 1 "Expected exactly one time step to match, instead $(sum(t_index)) timesteps match."
     argmax(t_index)
 end
 
@@ -119,30 +127,61 @@ The interpolator will also cache data in memory representing the
 data records for the times immediately before and after the current time step.
 
 `varname` is the name of the variable to interpolate. `default_time` is the time to use when initializing
-the interpolator.
+the interpolator. `spatial_ref` is the spatial reference system that the simulation will be using.
+`cache_size` is the number of time steps that should be held in the cache at any given time (default=2).
 """
-mutable struct DataSetInterpolator{To,N,ITP}
+mutable struct DataSetInterpolator{To,N,N2,FT}
     fs::FileSet
     varname::AbstractString
-    itp1::ITP
-    data1::DataArray{To,N}
-    time1::DateTime
-    itp2::ITP
-    data2::DataArray{To,N}
-    time2::DateTime
+    grid::GridInterpolations.RectangleGrid{N}
+    gridmin::SVector{N2,To}
+    gridmax::SVector{N2,To}
+    data::Array{To,N}
+    load_cache::Array{To,N2}
+    metadata::MetaData
+    times::Vector{DateTime}
     currenttime::DateTime
+    coord_trans::FT
+    loadrequest::Channel{DateTime}
+    loadresult::Channel{Int}
+    copyfinish::Channel{Int}
     lock::ReentrantLock
     initialized::Bool
     kwargs
 
-    function DataSetInterpolator{To}(fs::FileSet, varname::AbstractString, default_time::DateTime; kwargs...) where {To<:Real}
-        dummy_data = zeros(To, 1)
-        itp, data = load_interpolator!(dummy_data, fs, default_time, varname; kwargs...)
-        N = ndims(data.data)
-        ITP = typeof(itp)
-        new{To,N,ITP}(fs, varname, itp, data, DateTime(0, 1, 1),
-            itp, data, DateTime(0, 2, 1), DateTime(1, 1, 1), ReentrantLock(), false, kwargs)
+    function DataSetInterpolator{To}(fs::FileSet, varname::AbstractString, default_time::DateTime; spatial_ref="EPSG:4326", cache_size=2, kwargs...) where {To<:Real}
+        metadata = loadmetadata(fs, default_time, varname; kwargs...)
+        load_cache = zeros(To, repeat([1], length(metadata.varsize))...)
+        data = zeros(To, repeat([1], length(metadata.varsize))..., cache_size) # Add a dimension for time.
+        N = ndims(data)
+        N2 = N - 1
+        times = [DateTime(0, i, 1) for i ∈ 1:cache_size]
+        grid = RectangleGrid(metadata.coords..., datetime2unix.(times))
+        gridmin = minimum.(grid.cutPoints[1:end-1])
+        gridmax = maximum.(grid.cutPoints[1:end-1])
+
+        if spatial_ref == metadata.native_sr
+            coord_trans = (x) -> x # No transformation needed.
+        else
+            t = Proj.Transformation(spatial_ref, metadata.native_sr, always_xy=true)
+            coord_trans = (locs) -> begin
+                x, y = t(locs[metadata.xdim], locs[metadata.ydim])
+                replace_in_tuple(locs, metadata.xdim, To(x), metadata.ydim, To(y))
+            end
+        end
+        FT = typeof(coord_trans)
+
+        itp = new{To,N,N2,FT}(fs, varname, grid, gridmin, gridmax, data, load_cache, metadata, times,
+            DateTime(1, 1, 1), coord_trans,
+            Channel{DateTime}(0), Channel{Int}(0), Channel{Int}(0),
+            ReentrantLock(), false, kwargs)
+        Threads.@spawn async_loader(itp)
+        itp
     end
+end
+
+function replace_in_tuple(t::NTuple{N,T}, index1::Int, v1::T, index2::Int, v2::T) where {T,N}
+    ntuple(i -> i == index1 ? v1 : i == index2 ? v2 : t[i], N)
 end
 
 function Base.show(io::IO, itp::DataSetInterpolator)
@@ -150,33 +189,112 @@ function Base.show(io::IO, itp::DataSetInterpolator)
 end
 
 """ Return the units of the data. """
-ModelingToolkit.get_unit(itp::DataSetInterpolator) = itp.data1.units
+ModelingToolkit.get_unit(itp::DataSetInterpolator) = itp.metadata.units
+
+" Return the next interpolation time point for this interpolator. "
+function nexttimepoint(itp::DataSetInterpolator, t::DateTime)
+    ti = DataFrequencyInfo(itp.fs, t)
+    ci = centerpoint_index(ti, t)
+    if ci != length(ti.centerpoints)
+        return ti.centerpoints[ci+1]
+    end
+    tt = t + ti.frequency * 0.75 # Just go most of the way because some months etc. have different lengths.
+    ti = DataFrequencyInfo(itp.fs, tt)
+    ti.centerpoints[centerpoint_index(ti, tt)]
+end
+
+" Return the previous interpolation time point for this interpolator. "
+function prevtimepoint(itp::DataSetInterpolator, t::DateTime)
+    ti = DataFrequencyInfo(itp.fs, t)
+    ci = centerpoint_index(ti, t)
+    if ci != 1
+        return ti.centerpoints[ci-1]
+    end
+    tt = t - ti.frequency * 0.75 # Just go most of the way because some months etc. have different lengths.
+    ti = DataFrequencyInfo(itp.fs, tt)
+    ti.centerpoints[centerpoint_index(ti, tt)]
+end
+
+" Return the previous interpolation time point for this interpolator. "
+function currenttimepoint(itp::DataSetInterpolator, t::DateTime)
+    ti = DataFrequencyInfo(itp.fs, t)
+    ti.centerpoints[centerpoint_index(ti, t)]
+end
+
+" Load the time points that should be cached in this interpolator. "
+function interp_cache_times!(itp::DataSetInterpolator, t::DateTime)
+    cache_size = length(itp.times)
+    times = Vector{DateTime}(undef, cache_size)
+    centerpoint = currenttimepoint(itp, t)
+    # Currently assuming we're going forwards in time.
+    if t < centerpoint  # Load data starting with current time step.
+        tt = prevtimepoint(itp, t)
+    else  # Load data starting with previous time step.
+        tt = centerpoint
+    end
+    for i in 1:cache_size
+        times[i] = tt
+        tt = nexttimepoint(itp, tt)
+    end
+    times
+end
+
+" Asynchronously load data, anticipating which time will be requested next. "
+function async_loader(itp::DataSetInterpolator)
+    tt = DateTime(0, 1, 10)
+    for t ∈ itp.loadrequest
+        if t != tt
+            try
+                loadslice!(itp.load_cache, itp.fs, t, itp.varname; itp.kwargs...)
+            catch err
+                @warn err
+                rethrow(err)
+            end
+            tt = t
+        end
+        put!(itp.loadresult, 0) # Let the requestor know that we've finished.
+        # Anticipate what the next request is going to be for and load that data.
+        take!(itp.copyfinish)
+        tt = nexttimepoint(itp, tt)
+        try
+            loadslice!(itp.load_cache, itp.fs, tt, itp.varname; itp.kwargs...)
+        catch err
+            @warn err
+            rethrow(err)
+        end
+    end
+end
 
 function initialize!(itp::DataSetInterpolator, t::DateTime)
-    ti = DataFrequencyInfo(itp.fs, t)
-    centerpoint = ti.centerpoints[centerpoint_index(ti, t)]
-    if t < centerpoint # Load data for current and previous time step.
-        itp.time2 = ti.centerpoints[centerpoint_index(ti, t)]
-        if itp.time2 == itp.time1
-            itp.itp2, itp.data2 = itp.itp1, itp.data1
-        else
-            itp.itp2, itp.data2 = load_interpolator!(itp.data2.data, itp.fs, t, itp.varname; itp.kwargs...)
-        end
-        ti_minus = DataFrequencyInfo(itp.fs, t - ti.frequency)
-        itp.time1 = ti_minus.centerpoints[centerpoint_index(ti_minus, t - ti.frequency)]
-        itp.itp1, itp.data1 = load_interpolator!(itp.data1.data, itp.fs, t - ti.frequency, itp.varname; itp.kwargs...)
-    else # Load data for current and next time step.
-        itp.time1 = ti.centerpoints[centerpoint_index(ti, t)]
-        if itp.time1 == itp.time2
-            itp.itp1, itp.data1 = itp.itp2, itp.data2
-        else
-            itp.itp1, itp.data1 = load_interpolator!(itp.data1.data, itp.fs, t, itp.varname; itp.kwargs...)
-        end
-        ti_plus = DataFrequencyInfo(itp.fs, t + ti.frequency)
-        itp.itp2, itp.data2 = load_interpolator!(itp.data2.data, itp.fs, t + ti.frequency, itp.varname; itp.kwargs...)
-        itp.time2 = ti_plus.centerpoints[centerpoint_index(ti_plus, t + ti.frequency)]
+    if itp.initialized == false
+        itp.load_cache = zeros(eltype(itp.load_cache), itp.metadata.varsize...)
+        itp.data = zeros(eltype(itp.data), itp.metadata.varsize..., size(itp.data, length(size(itp.data)))) # Add a dimension for time.
+        itp.initialized = true
     end
-    @assert itp.time1 < itp.time2 "Interpolator times are in wrong order"
+    times = interp_cache_times!(itp, t) # Figure out which times we need.
+
+    # Figure out the overlap between the times we have and the times we need.
+    times_in_cache = intersect(times, itp.times)
+    idxs_in_cache = [findfirst(x -> x == times_in_cache[i], itp.times) for i in eachindex(times_in_cache)]
+    idxs_in_times = [findfirst(x -> x == times_in_cache[i], times) for i in eachindex(times_in_cache)]
+    idxs_not_in_times = setdiff(eachindex(times), idxs_in_times)
+
+    # Move data we already have to where it should be.
+    N = ndims(itp.data)
+    selectdim(itp.data, N, idxs_in_times) .= selectdim(itp.data, N, idxs_in_cache)
+
+    # Load the additional times we need
+    for idx in idxs_not_in_times
+        d = selectdim(itp.data, N, idx)
+        put!(itp.loadrequest, times[idx]) # Request next data
+        take!(itp.loadresult) # Wait for results
+        d .= itp.load_cache # Copy results to correct location
+        put!(itp.copyfinish, 0) # Let the loader know we've finished copying
+    end
+    itp.times = times
+    itp.grid = RectangleGrid(itp.metadata.coords..., datetime2unix.(itp.times))
+    itp.currenttime = t
+    @assert issorted(itp.times) "Interpolator times are in wrong order"
 end
 
 function lazyload!(itp::DataSetInterpolator, t::DateTime)
@@ -184,13 +302,11 @@ function lazyload!(itp::DataSetInterpolator, t::DateTime)
         if itp.currenttime == t
             return
         end
-        itp.currenttime = t
         if !itp.initialized # Initialize new interpolator.
             initialize!(itp, t)
-            itp.initialized = true
             return
         end
-        if t <= itp.time1 || t > itp.time2
+        if t <= itp.times[begin] || t > itp.times[end]
             # @info "Updating data loader for $(itp.varname) for t = $t"
             initialize!(itp, t)
         end
@@ -205,7 +321,7 @@ Return the dimension names associated with this interpolator.
 """
 function dimnames(itp::DataSetInterpolator, t::DateTime)
     lazyload!(itp, t)
-    itp.data1.dimnames
+    itp.metadata.dimnames
 end
 
 """
@@ -215,7 +331,7 @@ Return the units of the data associated with this interpolator.
 """
 function units(itp::DataSetInterpolator, t::DateTime)
     lazyload!(itp, t)
-    itp.data1.units
+    itp.metadata.units
 end
 
 """
@@ -225,7 +341,7 @@ Return the description of the data associated with this interpolator.
 """
 function description(itp::DataSetInterpolator, t::DateTime)
     lazyload!(itp, t)
-    itp.data1.description
+    itp.metadata.description
 end
 
 """
@@ -233,7 +349,7 @@ $(SIGNATURES)
 
 Return the value of the given variable from the given dataset at the given time and location.
 """
-function interp!(itp::DataSetInterpolator{T,N,ITP}, t::DateTime, locs::Vararg{T,N})::T where {T,N,ITP}
+function interp!(itp::DataSetInterpolator{T,N,N2,FT}, t::DateTime, locs::Vararg{T,N2})::T where {T,N,N2,FT}
     lazyload!(itp, t)
     interp_unsafe(itp, t, locs...)
 end
@@ -241,18 +357,29 @@ end
 """
 Interpolate without checking if the data has been correctly loaded for the given time.
 """
-function interp_unsafe(itp::DataSetInterpolator{T,N,ITP}, t::DateTime, locs::Vararg{T,N})::T where {T,N,ITP}
-    t_frac = T((t - itp.time1) / (itp.time2 - itp.time1))
-    val = itp.itp2(locs...) * t_frac + itp.itp1(locs...) * (one(T) - t_frac)
+@generated function interp_unsafe(itp::DataSetInterpolator{T,N,N2,FT}, t::DateTime, locs::Vararg{T,N2})::T where {T,N,N2,FT}
+    if N2 == N - 1 # Number of locs has to be one less than the number of data dimensions so we can add the time in.
+        quote
+            locs = itp.coord_trans(locs)
+            if any(locs .< itp.gridmin) || any(locs .> itp.gridmax)
+                # Return zero if extrapolating.
+                return zero(eltype(itp.data))
+            end
+            locs = SVector{N,T}(locs..., datetime2unix(t)) # Add time to the location.
+            interpolate(itp.grid, itp.data, locs)
+        end
+    else
+        throw(ArgumentError("N2 must be equal to N-1"))
+    end
 end
 
 """
 Interpolation with a unix timestamp.
 """
-function interp!(itp::DataSetInterpolator, t, locs::Vararg{T,N})::T where {T,N}
+function interp!(itp::DataSetInterpolator, t::Real, locs::Vararg{T,N})::T where {T,N}
     interp!(itp, Dates.unix2datetime(t), locs...)
 end
-function interp_unsafe(itp::DataSetInterpolator, t, locs::Vararg{T,N})::T where {T,N}
+function interp_unsafe(itp::DataSetInterpolator, t::Real, locs::Vararg{T,N})::T where {T,N}
     interp_unsafe(itp, Dates.unix2datetime(t), locs...)
 end
 
@@ -271,24 +398,27 @@ $(SIGNATURES)
 
 Create an equation that interpolates the given dataset at the given time and location.
 `filename` is an identifier for the dataset, and `t` is the time variable. 
-The RHS of each equation will be multiplied by the optional `scale`.
+`wrapper_f` can specify a function to wrap the interpolated value, for example `eq -> eq / 2`
+to divide the interpolated value by 2.
 """
-function create_interp_equation(itp::DataSetInterpolator, filename, t, sample_time, coords, scale=1)
-    desc = description(itp, sample_time)
-    uu = units(itp, sample_time) * ModelingToolkit.get_unit(scale)
-    n = Symbol("$(filename)₊$(itp.varname)")
-    lhs = only(@variables $n(t) [unit = uu, description = desc])
-
-    # Create equation.
+function create_interp_equation(itp::DataSetInterpolator, filename, t, sample_time, coords; wrapper_f=v -> v)
+    # Create right hand side of equation.
     if length(coords) == 3
-        return lhs ~ interp!(itp, t, coords[1], coords[2], coords[3]) * scale
+        rhs = wrapper_f(interp!(itp, t, coords[1], coords[2], coords[3]))
     elseif length(coords) == 2
-        return lhs ~ interp!(itp, t, coords[1], coords[2]) * scale
+        rhs = wrapper_f(interp!(itp, t, coords[1], coords[2]))
     elseif length(coords) == 1
-        return lhs ~ interp!(itp, t, coords[1]) * scale
+        rhs = wrapper_f(interp!(itp, t, coords[1]))
     else
         error("Unexpected number of coordinates: $(length(coords))")
     end
+
+    # Create left hand side of equation.
+    desc = description(itp, sample_time)
+    uu = ModelingToolkit.get_unit(rhs)
+    n = Symbol("$(filename)₊$(itp.varname)")
+    lhs = only(@variables $n(t) [unit = uu, description = desc])
+    lhs ~ rhs
 end
 
 Latexify.@latexrecipe function f(itp::EarthSciData.DataSetInterpolator)
