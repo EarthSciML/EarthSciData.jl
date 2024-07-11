@@ -45,19 +45,17 @@ const nclock = ReentrantLock()
 
 " Get the NCDataset for the given file path, caching the last 20 files. "
 function getnc(filepath::String)::NCDataset
-    lock(nclock) do
-        if haskey(ncfiledict, filepath)
-            return ncfiledict[filepath]
-        else
-            ds = NCDataset(filepath)
-            push!(ncfilelist, filepath)
-            ncfiledict[filepath] = ds
-            # if length(ncfilelist) > 20 #TODO(CT): Tests fail when this is uncommented, don't know why.
-            #     fname = popfirst!(ncfilelist)
-            #     close(ncfiledict[fname])
-            #     delete!(ncfiledict, fname)
-            # end
-            return ds
-        end
+    if haskey(ncfiledict, filepath)
+        return ncfiledict[filepath]
+    else
+        ds = NCDataset(filepath)
+        push!(ncfilelist, filepath)
+        ncfiledict[filepath] = ds
+        # if length(ncfilelist) > 20 #TODO(CT): Tests fail when this is uncommented, don't know why.
+        #     fname = popfirst!(ncfilelist)
+        #     close(ncfiledict[fname])
+        #     delete!(ncfiledict, fname)
+        # end
+        return ds
     end
 end

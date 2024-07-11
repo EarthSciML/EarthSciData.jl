@@ -47,8 +47,7 @@ struct GEOSFPFileSet <: FileSet
     mirror::AbstractString
     domain
     filetype
-    lock::ReentrantLock
-    GEOSFPFileSet(domain, filetype) = new("http://geoschemdata.wustl.edu/ExtData/", domain, filetype, ReentrantLock())
+    GEOSFPFileSet(domain, filetype) = new("http://geoschemdata.wustl.edu/ExtData/", domain, filetype)
 end
 
 """
@@ -67,7 +66,7 @@ function relpath(fs::GEOSFPFileSet, t::DateTime)
 end
 
 function DataFrequencyInfo(fs::GEOSFPFileSet, t::DateTime)::DataFrequencyInfo
-    lock(fs.lock) do
+    lock(nclock) do
         filepath = maybedownload(fs, t)
         ds = getnc(filepath)
         sd = ds.attrib["Start_Date"]
@@ -88,7 +87,7 @@ $(SIGNATURES)
 Load the data in place for the given variable name at the given time.
 """
 function loadslice!(data::AbstractArray, fs::GEOSFPFileSet, t::DateTime, varname)
-    lock(fs.lock) do
+    lock(nclock) do
         filepath = maybedownload(fs, t)
         ds = getnc(filepath)
         var = loadslice!(data, fs, ds, t, varname, "time") # Load data from NetCDF file.
@@ -107,7 +106,7 @@ $(SIGNATURES)
 Load the data for the given variable name at the given time.
 """
 function loadslice(fs::GEOSFPFileSet, t::DateTime, varname)
-    lock(fs.lock) do
+    lock(nclock) do
         filepath = maybedownload(fs, t)
         ds = getnc(filepath)
         var, dims, data = loadslice(fs, ds, t, varname, "time") # Load data from NetCDF file.
@@ -135,7 +134,7 @@ $(SIGNATURES)
 Return the variable names associated with this FileSet.
 """
 function varnames(fs::GEOSFPFileSet, t::DateTime)
-    lock(fs.lock) do
+    lock(nclock) do
         filepath = maybedownload(fs, t)
         ds = getnc(filepath)
         return [setdiff(keys(ds), keys(ds.dim))...]

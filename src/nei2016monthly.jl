@@ -10,8 +10,7 @@ Currently, only data for year 2016 is available.
 struct NEI2016MonthlyEmisFileSet <: FileSet
     mirror::AbstractString
     sector
-    lock::ReentrantLock
-    NEI2016MonthlyEmisFileSet(sector) = new("https://gaftp.epa.gov/Air/", sector, ReentrantLock())
+    NEI2016MonthlyEmisFileSet(sector) = new("https://gaftp.epa.gov/Air/", sector)
 end
 
 """
@@ -42,7 +41,7 @@ $(SIGNATURES)
 Load the data in place for the given variable name at the given time.
 """
 function loadslice!(data::AbstractArray, fs::NEI2016MonthlyEmisFileSet, t::DateTime, varname)
-    lock(fs.lock) do
+    lock(nclock) do
         filepath = maybedownload(fs, t)
         ds = getnc(filepath)
         var = loadslice!(data, fs, ds, t, varname, "TSTEP")
@@ -64,7 +63,7 @@ $(SIGNATURES)
 Load the data for the given variable name at the given time.
 """
 function loadslice(fs::NEI2016MonthlyEmisFileSet, t::DateTime, varname)
-    lock(fs.lock) do
+    lock(nclock) do
         filepath = maybedownload(fs, t)
         ds = getnc(filepath)
         var, dims, data = loadslice(fs, ds, t, varname, "TSTEP")
@@ -114,7 +113,7 @@ $(SIGNATURES)
 Return the variable names associated with this FileSet.
 """
 function varnames(fs::NEI2016MonthlyEmisFileSet, t::DateTime)
-    lock(fs.lock) do
+    lock(nclock) do
         filepath = maybedownload(fs, t)
         ds = getnc(filepath)
         return [setdiff(keys(ds), ["TFLAG"; keys(ds.dim)])...]

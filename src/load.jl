@@ -253,13 +253,13 @@ function async_loader(itp::DataSetInterpolator)
         put!(itp.loadresult, 0) # Let the requestor know that we've finished.
         # Anticipate what the next request is going to be for and load that data.
         take!(itp.copyfinish)
-        # tt = nexttimepoint(itp, tt)
-        # try
-        #     loadslice!(itp.load_cache, itp.fs, tt, itp.varname; itp.kwargs...)
-        # catch err
-        #     @warn err
-        #     rethrow(err)
-        # end
+        tt = nexttimepoint(itp, tt)
+        try
+            loadslice!(itp.load_cache, itp.fs, tt, itp.varname; itp.kwargs...)
+        catch err
+            @warn err
+            rethrow(err)
+        end
     end
 end
 
