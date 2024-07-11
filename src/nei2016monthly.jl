@@ -62,19 +62,22 @@ $(SIGNATURES)
 
 Load the data for the given variable name at the given time.
 """
-function loadslice(fs::NEI2016MonthlyEmisFileSet, t::DateTime, varname)
+function loadmetadata(fs::NEI2016MonthlyEmisFileSet, t::DateTime, varname)::MetaData
     lock(nclock) do
         filepath = maybedownload(fs, t)
         ds = getnc(filepath)
-        var, dims, data = loadslice(fs, ds, t, varname, "TSTEP")
+
+        timedim = "TSTEP"
+        var = ds[varname]
+        dims = collect(NCDatasets.dimnames(var))
+        @assert timedim ∈ dims "Variable $varname does not have a dimension named '$timedim'."
+        time_index = findfirst(isequal(timedim), dims)
+        dims = deleteat!(dims, time_index)
+        varsize = deleteat!(collect(size(var)), time_index)
 
         Δx = ds.attrib["XCELL"]
         Δy = ds.attrib["YCELL"]
-        scale, units = to_unitful(var.attrib["units"])
-        if scale != 1
-            data .*= scale
-        end
-        data ./= (Δx * Δy)
+        _, units = to_unitful(var.attrib["units"])
         units /= u"m^2"
         description = var.attrib["var_desc"]
 
@@ -96,14 +99,14 @@ function loadslice(fs::NEI2016MonthlyEmisFileSet, t::DateTime, varname)
         y_cent = ds.attrib["YCENT"]
         native_sr = "+proj=lcc +lat_1=$(p_alp) +lat_2=$(p_bet) +lat_0=$(y_cent) +lon_0=$(x_cent) +x_0=0 +y_0=0 +a=6370997.000000 +b=6370997.000000 +to_meter=1"
 
-        @assert size(data, 3) == 1 "Only 2D data is supported."
+        @assert varsize[3] == 1 "Only 2D data is supported."
 
         xdim = findfirst((x) -> x == "COL", dims)
         ydim = findfirst((x) -> x == "ROW", dims)
         @assert xdim > 0 "NEI2016 `COL` dimension not found"
         @assert ydim > 0 "NEI2016 `ROW` dimension not found"
 
-        return data, MetaData(coords, units, description, dims, native_sr, xdim, ydim)
+        return MetaData(coords, units, description, dims, varsize, native_sr, xdim, ydim)
     end
 end
 

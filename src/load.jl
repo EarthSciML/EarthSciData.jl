@@ -13,7 +13,7 @@ To satisfy this interface, a type must implement the following methods:
 - `url(fs::FileSet, t::DateTime)`
 - `localpath(fs::FileSet, t::DateTime)`
 - `DataFrequencyInfo(fs::FileSet, t::DateTime)::DataFrequencyInfo`
-- `loadslice(fs::FileSet, t::DateTime, varname)::(AbstractArray, MetaData)`
+- `loadmetadata(fs::FileSet, t::DateTime, varname)::MetaData`
 - `loadslice!(cache::AbstractArray, fs::FileSet, t::DateTime, varname)`
 - `varnames(fs::FileSet, t::DateTime)`
 """
@@ -76,6 +76,8 @@ struct MetaData
     description::AbstractString
     "Dimensions of the data, e.g. (lat, lon, layer)."
     dimnames::AbstractVector
+    "Dimension sizes of the data, e.g. (180, 360, 30)."
+    varsize::AbstractVector
     "The spatial reference system of the data, e.g. \"EPSG:4326\" for lat-lon data."
     native_sr::AbstractString
     "The index number of the x-dimension (e.g. longitude)"
@@ -148,9 +150,9 @@ mutable struct DataSetInterpolator{To,N,N2,FT}
     kwargs
 
     function DataSetInterpolator{To}(fs::FileSet, varname::AbstractString, default_time::DateTime; spatial_ref="EPSG:4326", cache_size=2, kwargs...) where {To<:Real}
-        data, metadata = loadslice(fs, default_time, varname; kwargs...)
-        load_cache = data
-        data = cat([data for _ ∈ 1:cache_size]..., dims=ndims(data) + 1) # Add a dimesion for time.
+        metadata = loadmetadata(fs, default_time, varname; kwargs...)
+        load_cache = zeros(To, repeat([1], length(metadata.varsize))...)
+        data = zeros(To, repeat([1], length(metadata.varsize))..., cache_size) # Add a dimension for time.
         N = ndims(data)
         N2 = N - 1
         times = [DateTime(0, i, 1) for i ∈ 1:cache_size]
@@ -264,6 +266,11 @@ function async_loader(itp::DataSetInterpolator)
 end
 
 function initialize!(itp::DataSetInterpolator, t::DateTime)
+    if itp.initialized == false
+        itp.load_cache = zeros(eltype(itp.load_cache), itp.metadata.varsize...)
+        itp.data = zeros(eltype(itp.data), itp.metadata.varsize..., size(itp.data, length(size(itp.data)))) # Add a dimension for time.
+        itp.initialized = true
+    end
     times = interp_cache_times!(itp, t) # Figure out which times we need.
 
     # Figure out the overlap between the times we have and the times we need.
@@ -297,7 +304,6 @@ function lazyload!(itp::DataSetInterpolator, t::DateTime)
         end
         if !itp.initialized # Initialize new interpolator.
             initialize!(itp, t)
-            itp.initialized = true
             return
         end
         if t <= itp.times[begin] || t > itp.times[end]

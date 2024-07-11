@@ -27,18 +27,6 @@ function loadslice!(data::AbstractArray{T}, fs::FileSet, ds::NCDataset, t::DateT
     var
 end
 
-function loadslice(fs::FileSet, ds::NCDataset, t::DateTime, varname::AbstractString, timedim::AbstractString)::Tuple{Any,Any,Array}
-    var = ds[varname]
-    dims = collect(NCDatasets.dimnames(var))
-    @assert timedim ∈ dims "Variable $varname does not have a dimension named '$timedim'."
-    time_index = findfirst(isequal(timedim), dims)
-    # Load only one time step, but the full array for everything else.
-    slices = repeat(Any[:], length(dims))
-    slices[time_index] = centerpoint_index(DataFrequencyInfo(fs, t), t)
-    data = var[slices...]
-    return (var, deleteat!(dims, time_index), data)
-end
-
 const ncfiledict = Dict{String,NCDataset}()
 const ncfilelist = Vector{String}()
 const nclock = ReentrantLock()

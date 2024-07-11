@@ -19,8 +19,8 @@ epp = EarthSciData.endpoints(ti)
 @test epp[1] == (DateTime("2022-05-01T00:00:00"), DateTime("2022-05-01T03:00:00"))
 @test epp[8] == (DateTime("2022-05-01T21:00:00"), DateTime("2022-05-02T00:00:00"))
 
-dat, metadata = EarthSciData.loadslice(fs, t, "U")
-@test size(dat) == (72, 46, 72)
+metadata = EarthSciData.loadmetadata(fs, t, "U")
+@test metadata.varsize == [72, 46, 72]
 @test metadata.dimnames == ["lon", "lat", "lev"]
 
 itp = EarthSciData.DataSetInterpolator{Float32}(fs, "U", t)
@@ -72,10 +72,8 @@ end
         v = tv(fs, tt)
         cache .= [v, v * 0.5, v * 2.0]
     end
-    function EarthSciData.loadslice(fs::DummyFileSet, t::DateTime, varname)
-        cache = zeros(3)
-        EarthSciData.loadslice!(cache, fs, t, varname)
-        return cache, EarthSciData.MetaData([[0.0, 0.5, 1.0]], u"m", "description", ["x"], "EPSG:4326", 1, 1)
+    function EarthSciData.loadmetadata(fs::DummyFileSet, t::DateTime, varname)
+        return EarthSciData.MetaData([[0.0, 0.5, 1.0]], u"m", "description", ["x"], [3], "EPSG:4326", 1, 1)
     end
 
     fs = DummyFileSet(DateTime(2022, 4, 30), DateTime(2022, 5, 4))
