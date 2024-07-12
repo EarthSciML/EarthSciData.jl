@@ -128,7 +128,9 @@ data records for the times immediately before and after the current time step.
 
 `varname` is the name of the variable to interpolate. `default_time` is the time to use when initializing
 the interpolator. `spatial_ref` is the spatial reference system that the simulation will be using.
-`cache_size` is the number of time steps that should be held in the cache at any given time (default=2).
+`cache_size` is the number of time steps that should be held in the cache at any given time (default=3).
+(For gridded simulations where all grid cells are computed synchronously, a `cache_size` of 2 is best,
+but if the grid cells are not all time stepping together, a `cache_size` of 3 or more is best.)
 """
 mutable struct DataSetInterpolator{To,N,N2,FT}
     fs::FileSet
@@ -149,7 +151,7 @@ mutable struct DataSetInterpolator{To,N,N2,FT}
     initialized::Bool
     kwargs
 
-    function DataSetInterpolator{To}(fs::FileSet, varname::AbstractString, default_time::DateTime; spatial_ref="EPSG:4326", cache_size=2, kwargs...) where {To<:Real}
+    function DataSetInterpolator{To}(fs::FileSet, varname::AbstractString, default_time::DateTime; spatial_ref="EPSG:4326", cache_size=3, kwargs...) where {To<:Real}
         metadata = loadmetadata(fs, default_time, varname; kwargs...)
         load_cache = zeros(To, repeat([1], length(metadata.varsize))...)
         data = zeros(To, repeat([1], length(metadata.varsize))..., cache_size) # Add a dimension for time.
