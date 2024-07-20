@@ -15,5 +15,6 @@ include("utils.jl")
 include("netcdf.jl")
 include("geosfp.jl")
 include("nei2016monthly.jl")
+include("netcdf_output.jl")
 
 end
