@@ -3,6 +3,7 @@ export interp!
 download_cache = ("EARTHSCIDATADIR" ∈ keys(ENV)) ? ENV["EARTHSCIDATADIR"] : @get_scratch!("earthsci_data")
 function __init__()
     global download_cache = ("EARTHSCIDATADIR" ∈ keys(ENV)) ? ENV["EARTHSCIDATADIR"] : @get_scratch!("earthsci_data")
+    [delete!(ncfiledict, key) for key in keys(ncfiledict)] # Remove any files opened during precompilation because they're not valid any more.
 end
 
 """
