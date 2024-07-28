@@ -69,8 +69,10 @@ Write the current state of the `Simulator` to the NetCDF file.
 function EarthSciMLBase.run!(nc::NetCDFOutputter, s::EarthSciMLBase.Simulator, t, timestep)
     start, finish = EarthSciMLBase.time_range(s.domaininfo)
     output_times = start:nc.time_interval:finish
-    h = findfirst(t .== output_times)
-    @assert !isnothing(h) "Time $t is not in the output times ($(nc.output_times))."
+    h = findfirst(t .≈ output_times)
+    if isnothing(h)
+        return false
+    end
     for j in eachindex(states(s.sys_mtk))
         v = nc.vars[j]
         v[:, :, :, h] = s.u[j, :, :, :]
