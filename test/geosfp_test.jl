@@ -61,7 +61,7 @@ end
 @testset "GEOS-FP pressure levels" begin
     @parameters t [unit = u"s"]
     @parameters lat lon lev
-    geosfp = GEOSFP("4x5", t; dtype=Float64, 
+    geosfp = GEOSFP("4x5", t; dtype=Float64,
         coord_defaults=Dict(:lev => 1.0, :lat => 39.1, :lon => -155.7))
 
     # Rearrange pressure equation so it can be evaluated for P.
@@ -92,4 +92,19 @@ end
     δP_levels = [myf([DateTime(2022, 5, 1), -155.7, 39.1, lev]) for lev in [1, 1.5, 2, 71.5, 72, 72.5]]
     @test 1.0 ./ δP_levels ≈ [-15.32535287950509, -15.325352879504862, -15.466211527927955,
         -0.012699999999999994, -0.010000000000000002, -0.009999999999999998] .* 100.0
+end
+
+@testset "GEOS-FP new day" begin
+    @parameters lon = 0.0 lat = 0.0 lev = 1.0 t
+    starttime = datetime2unix(DateTime(2022, 5, 1, 23, 58))
+    endtime = datetime2unix(DateTime(2022, 5, 2, 0, 3))
+
+    geosfp = GEOSFP("4x5", t; dtype=Float64,
+        coord_defaults=Dict(:lon => 0.0, :lat => 0.0, :lev => 1.0))
+
+    iips = findfirst((x) -> x == :I3₊PS, [Symbolics.tosymbol(eq.lhs, escape=false) for eq in equations(geosfp)])
+    pseq = equations(geosfp)[iips]
+    PS_expr = build_function(pseq.rhs, t, lon, lat, lev)
+    psf = eval(PS_expr)
+    psf(starttime, 0.0, 0.0, 1.0)
 end

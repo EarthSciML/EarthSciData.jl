@@ -111,6 +111,9 @@ Return the index of the centerpoint closest to the given time.
 """
 function centerpoint_index(t_info::DataFrequencyInfo, t)
     eps = endpoints(t_info)
+    if t > eps[end][2]
+        return length(eps) + 1
+    end
     t_index = ((ep) -> ep[1] <= t < ep[2]).(eps)
     @assert sum(t_index) == 1 "Expected exactly one time step to match, instead $(sum(t_index)) timesteps match."
     argmax(t_index)
@@ -197,13 +200,7 @@ ModelingToolkit.get_unit(itp::DataSetInterpolator) = itp.metadata.units
 " Return the next interpolation time point for this interpolator. "
 function nexttimepoint(itp::DataSetInterpolator, t::DateTime)
     ti = DataFrequencyInfo(itp.fs, t)
-    ci = centerpoint_index(ti, t)
-    if ci != length(ti.centerpoints)
-        return ti.centerpoints[ci+1]
-    end
-    tt = t + ti.frequency * 0.75 # Just go most of the way because some months etc. have different lengths.
-    ti = DataFrequencyInfo(itp.fs, tt)
-    ti.centerpoints[centerpoint_index(ti, tt)]
+    currenttimepoint(itp, t + ti.frequency)
 end
 
 " Return the previous interpolation time point for this interpolator. "
@@ -221,7 +218,13 @@ end
 " Return the current interpolation time point for this interpolator. "
 function currenttimepoint(itp::DataSetInterpolator, t::DateTime)
     ti = DataFrequencyInfo(itp.fs, t)
-    ti.centerpoints[centerpoint_index(ti, t)]
+    ci = centerpoint_index(ti, t)
+    if ci <= length(ti.centerpoints)
+        return ti.centerpoints[ci]
+    end
+    tt = t + ti.frequency * 0.75 # Just go most of the way because some months etc. have different lengths.
+    ti = DataFrequencyInfo(itp.fs, tt)
+    ti.centerpoints[centerpoint_index(ti, tt)]
 end
 
 " Load the time points that should be cached in this interpolator. "
