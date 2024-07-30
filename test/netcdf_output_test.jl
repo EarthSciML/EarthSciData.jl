@@ -12,11 +12,12 @@ y = GlobalScope(y)
 lev = GlobalScope(lev)
 @variables u(t) = 1.0 [unit = u"kg", description = "u value"]
 @variables v(t) = 2.0 [unit = u"kg", description = "v value"]
+@constants c = 1.0 [unit = u"kg^2"]
 @constants p = 1.0 [unit = u"kg/s"]
 D = Differential(t)
 
 eqs = [
-    D(u) ~ p + 1e-20*lev*p*x/y # Need to make sure all coordinates are included in model.
+    D(u) ~ p + 1e-20*lev*p*x*y/c # Need to make sure all coordinates are included in model.
     v ~ (x + y) * lev
 ]
 
