@@ -47,7 +47,7 @@ struct GEOSFPFileSet <: FileSet
     mirror::AbstractString
     domain
     filetype
-    GEOSFPFileSet(domain, filetype) = new("http://geoschemdata.wustl.edu/ExtData/", domain, filetype)
+    GEOSFPFileSet(domain, filetype) = new("https://gcgrid.s3.amazonaws.com/", domain, filetype)
 end
 
 """
