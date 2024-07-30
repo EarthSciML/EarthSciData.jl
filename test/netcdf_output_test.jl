@@ -16,7 +16,7 @@ lev = GlobalScope(lev)
 D = Differential(t)
 
 eqs = [
-    D(u) ~ p
+    D(u) ~ p + 1e-14*lev
     v ~ (x + y) * lev
 ]
 
