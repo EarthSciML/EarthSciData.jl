@@ -16,7 +16,7 @@ lev = GlobalScope(lev)
 D = Differential(t)
 
 eqs = [
-    D(u) ~ p + 1e-20*lev*p*x*y # Need to make sure all coordinates are included in model.
+    D(u) ~ p + 1e-20*lev*p*x/y # Need to make sure all coordinates are included in model.
     v ~ (x + y) * lev
 ]
 
