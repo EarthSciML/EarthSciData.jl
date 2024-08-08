@@ -3,7 +3,7 @@ using Dates, Downloads, Printf
 using DocStringExtensions
 using GridInterpolations, DataInterpolations, StaticArrays
 using NCDatasets, ModelingToolkit, Symbolics, Proj
-using EarthSciMLBase
+using EarthSciMLBase, DiffEqCallbacks
 using Unitful, Latexify, ProgressMeter
 using Scratch
 
