@@ -28,7 +28,7 @@ Unitful = "1986cc42-f94f-5a68-af5c-568840ba703d"
 [compat]
 AllocCheck = "0.1"
 DataInterpolations = "3,4,5"
-DiffEqCallbacks = "2"
+DiffEqCallbacks = "2, 3"
 DifferentialEquations = "7"
 DocStringExtensions = "0.9"
 DomainSets = "0.6"
