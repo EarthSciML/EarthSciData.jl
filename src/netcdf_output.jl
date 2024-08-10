@@ -97,7 +97,7 @@ function affect!(nc::NetCDFOutputter, integrator)
             for (i, c1) ∈ enumerate(nc.grid[1])
                 for (j, c2) ∈ enumerate(nc.grid[2])
                     for (k, c3) ∈ enumerate(nc.grid[3])
-                        u[i, j, k] = f(t, c1, c2, c3)
+                        u[i, j, k] = f(integrator.t, c1, c2, c3)
                     end
                 end
             end

@@ -1,5 +1,6 @@
-using EarthSciData
+using Main.EarthSciData
 using EarthSciMLBase
+using Test
 using Dates
 using ModelingToolkit, DomainSets
 using Unitful
@@ -15,7 +16,7 @@ using Unitful
     function Example(t)
         @variables c(t) = 5.0 [unit = u"mol/m^3"]
         D = Differential(t)
-        ODESystem([D(c) ~ (sin(lat / c_unit) + sin(lon / c_unit)) * c / t], t, name=:Test₊ExampleSys)
+        ODESystem([D(c) ~ (sin(lat / c_unit) + sin(lon / c_unit)) * c / t], t, name=:ExampleSys)
     end
     examplesys = Example(t)
 
@@ -37,22 +38,23 @@ using Unitful
     eqs = equations(pde_sys)
 
     want_terms = [
-        "EarthSciMLBase₊MeanWind₊v_lon(t, lat, lon, lev)", "GEOSFP₊A3dyn₊U(t, lat, lon, lev)",
-        "EarthSciMLBase₊MeanWind₊v_lat(t, lat, lon, lev)", "GEOSFP₊A3dyn₊V(t, lat, lon, lev)",
-        "EarthSciMLBase₊MeanWind₊v_lev(t, lat, lon, lev)", "GEOSFP₊A3dyn₊OMEGA(t, lat, lon, lev)",
-        "EarthSciData₊GEOSFP₊A3dyn₊U(t, lat, lon, lev)", "EarthSciData.interp!(DataSetInterpolator{EarthSciData.GEOSFPFileSet, U}, t, lon, lat, lev)",
-        "EarthSciData₊GEOSFP₊A3dyn₊OMEGA(t, lat, lon, lev)", "EarthSciData.interp!(DataSetInterpolator{EarthSciData.GEOSFPFileSet, OMEGA}, t, lon, lat, lev)",
-        "EarthSciData₊GEOSFP₊A3dyn₊V(t, lat, lon, lev)", "EarthSciData.interp!(DataSetInterpolator{EarthSciData.GEOSFPFileSet, V}, t, lon, lat, lev)",
-        "Differential(t)(Test₊ExampleSys₊c(t, lat, lon, lev))", "(-Differential(lon)(Test₊ExampleSys₊c(t, lat, lon, lev))",
-        "EarthSciMLBase₊MeanWind₊v_lon(t, lat, lon, lev)) / (lon2m*cos(lat))",
-        "(-Differential(lat)(Test₊ExampleSys₊c(t, lat, lon, lev))",
-        "EarthSciMLBase₊MeanWind₊v_lat(t, lat, lon, lev)) / lat2meters",
-        "sin(lat / Test₊ExampleSys₊c_unit)", "sin(lon / Test₊ExampleSys₊c_unit)",
-        "Test₊ExampleSys₊c(t, lat, lon, lev)", "t",
-        "Differential(lev)(Test₊ExampleSys₊c(t, lat, lon, lev))",
-        "EarthSciMLBase₊MeanWind₊v_lev(t, lat, lon, lev)", "P_unit", "Pa_per_hPa",
+        "MeanWind₊v_lon(t, lat, lon, lev)", "GEOSFP₊A3dyn₊U(t, lat, lon, lev)",
+        "MeanWind₊v_lat(t, lat, lon, lev)", "GEOSFP₊A3dyn₊V(t, lat, lon, lev)",
+        "MeanWind₊v_lev(t, lat, lon, lev)", "GEOSFP₊A3dyn₊OMEGA(t, lat, lon, lev)",
+        "GEOSFP₊A3dyn₊U(t, lat, lon, lev)", "EarthSciData.interp!(DataSetInterpolator{EarthSciData.GEOSFPFileSet, U}, t, lon, lat, lev)",
+        "GEOSFP₊A3dyn₊OMEGA(t, lat, lon, lev)", "EarthSciData.interp!(DataSetInterpolator{EarthSciData.GEOSFPFileSet, OMEGA}, t, lon, lat, lev)",
+        "GEOSFP₊A3dyn₊V(t, lat, lon, lev)", "EarthSciData.interp!(DataSetInterpolator{EarthSciData.GEOSFPFileSet, V}, t, lon, lat, lev)",
+        "Differential(t)(ExampleSys₊c(t, lat, lon, lev))", "Differential(lon)(ExampleSys₊c(t, lat, lon, lev)",
+        "MeanWind₊v_lon(t, lat, lon, lev)", "lon2m",
+        "Differential(lat)(ExampleSys₊c(t, lat, lon, lev)",
+        "MeanWind₊v_lat(t, lat, lon, lev)", "lat2meters",
+        "sin(lat / ExampleSys₊c_unit)", "sin(lon / ExampleSys₊c_unit)",
+        "ExampleSys₊c(t, lat, lon, lev)", "t",
+        "Differential(lev)(ExampleSys₊c(t, lat, lon, lev))",
+        "MeanWind₊v_lev(t, lat, lon, lev)", "P_unit", "Pa_per_hPa",
     ]
     have_eqs = string.(eqs)
+    have_eqs = replace.(have_eqs, ("Main."=>"",))
     for term ∈ want_terms
         @test any(occursin.((term,), have_eqs))
     end

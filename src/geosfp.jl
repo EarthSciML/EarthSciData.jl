@@ -176,6 +176,8 @@ const Bp = DataInterpolations.LinearInterpolation([
         0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00,
         0.000000e+00], 1:73)
 
+struct GEOSFPCoupler sys end
+
 """
 $(SIGNATURES)
 
@@ -217,7 +219,7 @@ for this dataset is Float32.
 
 See http://geoschemdata.wustl.edu/ExtData/ for current options.
 """
-function GEOSFP(domain, t; coord_defaults=Dict{Symbol,Number}(), spatial_ref="EPSG:4326", dtype=Float32, kwargs...)
+function GEOSFP(domain, t; coord_defaults=Dict{Symbol,Number}(), spatial_ref="EPSG:4326", dtype=Float32, name=:GEOSFP, kwargs...)
     filesets = Dict{String,GEOSFPFileSet}(
         "A1" => GEOSFPFileSet(domain, "A1"),
         "A3cld" => GEOSFPFileSet(domain, "A3cld"),
@@ -259,11 +261,12 @@ function GEOSFP(domain, t; coord_defaults=Dict{Symbol,Number}(), spatial_ref="EP
     pressure_eq = P ~ P_unit * Ap(lev) + Bp(lev) * I3₊PS
     push!(eqs, pressure_eq)
 
-    ODESystem(eqs, t, name=:EarthSciData₊GEOSFP)
+    ODESystem(eqs, t, name=name,
+        metadata=Dict(:coupletype=>GEOSFPCoupler))
 end
 
-@parameters t # TODO(CT) Remove when updating to MTK v9.
-EarthSciMLBase.register_coupling(EarthSciMLBase.MeanWind(t), GEOSFP("4x5", t)) do mw, g
+function EarthSciMLBase.couple2(mw::EarthSciMLBase.MeanWindCoupler, g::GEOSFPCoupler)
+    mw, g = mw.sys, g.sys
     eqs = [mw.v_lon ~ g.A3dyn₊U]
     # Only add the number of dimensions present in the mean wind system.
     length(states(mw)) > 1 ? push!(eqs, mw.v_lat ~ g.A3dyn₊V) : nothing

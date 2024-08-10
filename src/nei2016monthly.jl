@@ -123,6 +123,8 @@ function varnames(fs::NEI2016MonthlyEmisFileSet, t::DateTime)
     end
 end
 
+struct NEI2016MonthlyEmisCoupler sys end
+
 """
 $(SIGNATURES)
 
@@ -152,7 +154,7 @@ using EarthSciData, ModelingToolkit, Unitful
 emis = NEI2016MonthlyEmis("mrggrid_withbeis_withrwc", t, lon, lat, lev, Δz)
 ```
 """
-function NEI2016MonthlyEmis(sector, t, x, y, lev, Δz; spatial_ref="EPSG:4326", dtype=Float32, kwargs...)
+function NEI2016MonthlyEmis(sector, t, x, y, lev, Δz; spatial_ref="EPSG:4326", dtype=Float32, name=:NEI2016MonthlyEmis, kwargs...)
     fs = NEI2016MonthlyEmisFileSet(sector)
     sample_time = DateTime(2016, 5, 1) # Dummy time to get variable names and dimensions from data.
     eqs = []
@@ -165,5 +167,6 @@ function NEI2016MonthlyEmis(sector, t, x, y, lev, Δz; spatial_ref="EPSG:4326", 
         )
         push!(eqs, eq)
     end
-    ODESystem(eqs, t; name=:NEI2016MonthlyEmis)
+    ODESystem(eqs, t; name=name,
+        metadata=Dict(:coupletype=>NEI2016MonthlyEmisCoupler))
 end
