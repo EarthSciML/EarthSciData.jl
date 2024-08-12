@@ -142,6 +142,8 @@ x and y must be in the same units as `spatial_ref`.
 `dtype` represents the desired data type of the interpolated values. The native data type
 for this dataset is Float32.
 
+`scale` is a scaling factor to apply to the emissions data. The default value is 1.0.
+
 NOTE: This is an interpolator that returns an emissions value by interpolating between the
 centers of the nearest grid cells in the underlying emissions grid, so it may not exactly conserve the total 
 emissions mass, especially if the simulation grid is coarser than the emissions grid.
@@ -154,16 +156,18 @@ using EarthSciData, ModelingToolkit, Unitful
 emis = NEI2016MonthlyEmis("mrggrid_withbeis_withrwc", t, lon, lat, lev, Δz)
 ```
 """
-function NEI2016MonthlyEmis(sector, t, x, y, lev, Δz; spatial_ref="EPSG:4326", dtype=Float32, name=:NEI2016MonthlyEmis, kwargs...)
+function NEI2016MonthlyEmis(sector, t, x, y, lev; spatial_ref="EPSG:4326", dtype=Float32, scale=1.0, name=:NEI2016MonthlyEmis, kwargs...)
     fs = NEI2016MonthlyEmisFileSet(sector)
     sample_time = DateTime(2016, 5, 1) # Dummy time to get variable names and dimensions from data.
     eqs = []
-    @assert ModelingToolkit.get_unit(Δz) == u"m" "Δz must be in units of meters."
+    @parameters(
+        Δz = 60.0, [unit = u"m", description = "Height of the first vertical grid layer"],
+    )
     for varname ∈ varnames(fs, sample_time)
         itp = DataSetInterpolator{dtype}(fs, varname, sample_time; spatial_ref, kwargs...)
         @constants zero_emis = 0 [unit = units(itp, sample_time) / u"m"]
-        eq = create_interp_equation(itp, sector, t, sample_time, [x, y, 1.0],
-            wrapper_f=(eq) -> ifelse(lev < 2, eq / Δz, zero_emis),
+        eq = create_interp_equation(itp, "", t, sample_time, [x, y, 1.0],
+            wrapper_f=(eq) -> ifelse(lev < 2, eq / Δz * scale, zero_emis),
         )
         push!(eqs, eq)
     end

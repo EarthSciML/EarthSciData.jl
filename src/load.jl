@@ -422,7 +422,7 @@ function create_interp_equation(itp::DataSetInterpolator, filename, t, sample_ti
     # Create left hand side of equation.
     desc = description(itp, sample_time)
     uu = ModelingToolkit.get_unit(rhs)
-    n = Symbol("$(filename)₊$(itp.varname)")
+    n = length(filename) > 0 ? Symbol("$(filename)₊$(itp.varname)") : Symbol("$(itp.varname)")
     lhs = only(@variables $n(t) [unit = uu, description = desc])
     lhs ~ rhs
 end

@@ -6,8 +6,7 @@ using DifferentialEquations
 using AllocCheck
 
 @parameters t lat lon lev
-@parameters Δz = 60 [unit = u"m"]
-emis = NEI2016MonthlyEmis("mrggrid_withbeis_withrwc", t, lon, lat, lev, Δz; dtype=Float64)
+emis = NEI2016MonthlyEmis("mrggrid_withbeis_withrwc", t, lon, lat, lev; dtype=Float64)
 fileset = EarthSciData.NEI2016MonthlyEmisFileSet("mrggrid_withbeis_withrwc")
 
 eqs = equations(emis)
@@ -41,7 +40,7 @@ end
 end
 
 @testset "run" begin
-    eq = Differential(t)(emis.mrggrid_withbeis_withrwc₊ACET) ~ equations(emis)[1].rhs * 1e10
+    eq = Differential(t)(emis.ACET) ~ equations(emis)[1].rhs * 1e10
     sys = extend(ODESystem([eq], t, [], []; name=:test_sys), emis)
     sys = structural_simplify(sys)
     tt = Dates.datetime2unix(sample_time)
