@@ -9,7 +9,7 @@ using GridInterpolations
 
 fs = EarthSciData.GEOSFPFileSet("4x5", "A3dyn")
 t = DateTime(2022, 5, 1)
-@test EarthSciData.url(fs, t) == "https://gcgrid.s3.amazonaws.com/GEOS_4x5/GEOS_FP/2022/05/GEOSFP.20220501.A3dyn.4x5.nc"
+@test EarthSciData.url(fs, t) == "http://geoschemdata.wustl.edu/ExtData/GEOS_4x5/GEOS_FP/2022/05/GEOSFP.20220501.A3dyn.4x5.nc"
 
 @test endswith(EarthSciData.localpath(fs, t), joinpath("GEOS_4x5", "GEOS_FP", "2022", "05", "GEOSFP.20220501.A3dyn.4x5.nc"))
 

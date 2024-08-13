@@ -149,7 +149,7 @@ mutable struct DataSetInterpolator{To,N,N2,FT}
     currenttime::DateTime
     coord_trans::FT
     loadrequest::Channel{DateTime}
-    loadresult::Channel{Int}
+    loadresult::Channel
     copyfinish::Channel{Int}
     lock::ReentrantLock
     initialized::Bool
@@ -179,7 +179,7 @@ mutable struct DataSetInterpolator{To,N,N2,FT}
 
         itp = new{To,N,N2,FT}(fs, varname, grid, gridmin, gridmax, data, load_cache, metadata, times,
             DateTime(1, 1, 1), coord_trans,
-            Channel{DateTime}(0), Channel{Int}(0), Channel{Int}(0),
+            Channel{DateTime}(0), Channel(1), Channel{Int}(0),
             ReentrantLock(), false, kwargs)
         Threads.@spawn async_loader(itp)
         itp
@@ -252,20 +252,21 @@ function async_loader(itp::DataSetInterpolator)
         if t != tt
             try
                 loadslice!(itp.load_cache, itp.fs, t, itp.varname; itp.kwargs...)
+                tt = t
             catch err
-                @warn err
+                @error err
+                put!(itp.loadresult, err)
                 rethrow(err)
             end
-            tt = t
         end
         put!(itp.loadresult, 0) # Let the requestor know that we've finished.
         # Anticipate what the next request is going to be for and load that data.
         take!(itp.copyfinish)
-        tt = nexttimepoint(itp, tt)
         try
+            tt = nexttimepoint(itp, tt)
             loadslice!(itp.load_cache, itp.fs, tt, itp.varname; itp.kwargs...)
         catch err
-            @warn err
+            @error err
             rethrow(err)
         end
     end
@@ -293,7 +294,10 @@ function initialize!(itp::DataSetInterpolator, t::DateTime)
     for idx in idxs_not_in_times
         d = selectdim(itp.data, N, idx)
         put!(itp.loadrequest, times[idx]) # Request next data
-        take!(itp.loadresult) # Wait for results
+        r = take!(itp.loadresult) # Wait for results
+        if r != 0
+            throw(r)
+        end
         d .= itp.load_cache # Copy results to correct location
         put!(itp.copyfinish, 0) # Let the loader know we've finished copying
     end

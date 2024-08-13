@@ -17,4 +17,7 @@ include("geosfp.jl")
 include("nei2016monthly.jl")
 include("netcdf_output.jl")
 
+# Coupling
+include("coupling.jl")
+
 end

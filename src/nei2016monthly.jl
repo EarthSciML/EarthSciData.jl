@@ -19,17 +19,15 @@ $(SIGNATURES)
 File path on the server relative to the host root; also path on local disk relative to `ENV["EARTHSCIDATADIR"]`.
 """
 function relpath(fs::NEI2016MonthlyEmisFileSet, t::DateTime)
-    year = Dates.format(t, "Y")
-    if year != "2016"
-        @warn "Only 2016 emissions data is available."
-    end
+    @assert Dates.year(t) == 2016 "Only 2016 emissions data is available with `NEI2016MonthlyEmis`."
     month = @sprintf("%.2d", Dates.month(t))
     return "emismod/2016/v1/gridded/monthly_netCDF/2016fh_16j_$(fs.sector)_12US1_month_$(month).ncf"
 end
 
 function DataFrequencyInfo(fs::NEI2016MonthlyEmisFileSet, t::DateTime)::DataFrequencyInfo
     month = Dates.month(t)
-    start = Dates.DateTime(2016, month, 1)
+    year = Dates.year(t)
+    start = Dates.DateTime(year, month, 1)
     frequency = ((start + Dates.Month(1)) - start)
     centerpoints = [start + frequency / 2]
     return DataFrequencyInfo(start, frequency, centerpoints)
@@ -123,7 +121,9 @@ function varnames(fs::NEI2016MonthlyEmisFileSet, t::DateTime)
     end
 end
 
-struct NEI2016MonthlyEmisCoupler sys end
+struct NEI2016MonthlyEmisCoupler
+    sys
+end
 
 """
 $(SIGNATURES)
@@ -172,5 +172,5 @@ function NEI2016MonthlyEmis(sector, t, x, y, lev; spatial_ref="EPSG:4326", dtype
         push!(eqs, eq)
     end
     ODESystem(eqs, t; name=name,
-        metadata=Dict(:coupletype=>NEI2016MonthlyEmisCoupler))
+        metadata=Dict(:coupletype => NEI2016MonthlyEmisCoupler))
 end

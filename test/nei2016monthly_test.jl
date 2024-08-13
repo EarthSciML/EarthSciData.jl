@@ -1,4 +1,4 @@
-using EarthSciData
+using Main.EarthSciData
 using Test
 using Unitful, EarthSciMLBase, ModelingToolkit
 using Dates
@@ -75,5 +75,25 @@ end
         @test_broken length(err.errors) == 1
         s = err.errors[1]
         contains(string(s), "libproj.proj_trans")
+    end
+end
+
+@testset "Coupling with GEOS-FP" begin
+    gfp = GEOSFP("4x5", t; dtype=Float64,
+        coord_defaults=Dict(:lon => 0.0, :lat => 0.0, :lev => 1.0))
+
+    eqs = equations(EarthSciMLBase.get_mtk_ode(couple(emis, gfp)))
+
+    @test occursin("NEI2016MonthlyEmis₊lat(t) ~ GEOSFP₊lat", string(eqs))
+end
+
+@testset "wrong year" begin
+    sample_time = DateTime(2016, 5, 1)
+    itp = EarthSciData.DataSetInterpolator{Float32}(fileset, "NOX", sample_time; spatial_ref="EPSG:4326")
+    sample_time = DateTime(2017, 5, 1)
+    try
+        EarthSciData.initialize!(itp, sample_time)
+    catch err
+        @test occursin("Only 2016 emissions data is available with `NEI2016MonthlyEmis`.", string(err))
     end
 end
