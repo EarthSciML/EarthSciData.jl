@@ -136,21 +136,3 @@ end
         checkf(itp2, tt, 1.0f0, 0.0f0, 1.0f0)
     end
 end
-
-#== Profile data loading and interpolation.
-fs = EarthSciData.GEOSFPFileSet("4x5", "A3dyn")
-const itp4 = EarthSciData.DataSetInterpolator{Float32}(fs, "U", t)
-ts = DateTime(2022, 5, 1):Hour(1):DateTime(2022, 5, 3)
-function interpfunc()
-    for t ∈ ts 
-        for lon ∈ -180f0:1f0:175f0
-            for lat ∈ -90f0:1f0:85f0
-                #interp!(itp4, t, lon, lat, 1.0f0)
-                interp_unsafe(itp4, t, lon, lat, 1.0f0)
-            end
-        end
-    end
-end
-interpfunc()
-@profview interpfunc()
-==#
