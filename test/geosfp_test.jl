@@ -110,3 +110,21 @@ end
     psf = eval(PS_expr)
     psf(starttime, 0.0, 0.0, 1.0)
 end
+
+@testset "GEOS-FP wrong year" begin
+    @parameters lon = 0.0 lat = 0.0 lev = 1.0 t
+    starttime = datetime2unix(DateTime(5000, 1, 1))
+
+    geosfp = GEOSFP("4x5", t; dtype=Float64,
+        coord_defaults=Dict(:lon => 0.0, :lat => 0.0, :lev => 1.0))
+
+    iips = findfirst((x) -> x == :I3₊PS, [Symbolics.tosymbol(eq.lhs, escape=false) for eq in equations(geosfp)])
+    pseq = equations(geosfp)[iips]
+    PS_expr = build_function(pseq.rhs, t, lon, lat, lev)
+    psf = eval(PS_expr)
+    try
+        psf(starttime, 0.0, 0.0, 1.0)
+    catch err
+    end
+    @test err isa Base.ExceptionStack
+end
