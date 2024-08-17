@@ -25,7 +25,7 @@ metadata = EarthSciData.loadmetadata(fs, t, "U")
 
 itp = EarthSciData.DataSetInterpolator{Float32}(fs, "U", t)
 
-@test String(latexify(itp)) == L"$\mathrm{EarthSciData}\left( GEOSFPFileSet_{x}U_{interp} \right)$"
+@test String(latexify(itp)) == "\$\\mathrm{GEOSFPFileSet}\\left( U \\right)\$"
 
 @test EarthSciData.dimnames(itp, t) == ["lon", "lat", "lev"]
 @test issetequal(EarthSciData.varnames(fs, t), ["U", "OMEGA", "RH", "DTRAIN", "V"])

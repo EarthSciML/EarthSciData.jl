@@ -432,5 +432,5 @@ function create_interp_equation(itp::DataSetInterpolator, filename, t, sample_ti
 end
 
 Latexify.@latexrecipe function f(itp::EarthSciData.DataSetInterpolator)
-    return "$(typeof(itp.fs))ₓ$(itp.varname)_interp"
+    return "$(split(string(typeof(itp.fs)), ".")[end]).$(itp.varname)"
 end
