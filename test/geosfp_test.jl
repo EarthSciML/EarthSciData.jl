@@ -125,6 +125,6 @@ end
     try
         psf(starttime, 0.0, 0.0, 1.0)
     catch err
+        @test err isa Base.Exception
     end
-    @test err isa Base.ExceptionStack
 end

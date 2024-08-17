@@ -19,7 +19,7 @@ makedocs(;
         "GEOS-FP" => "geosfp.md",
         "2016 NEI" => "nei2016.md",
         "API" => "api.md",
-        "Benchmarks" => "benchmarks.md",
+        "🔗 Benchmarks" => "benchmarks.md",
     ],
 )
 
