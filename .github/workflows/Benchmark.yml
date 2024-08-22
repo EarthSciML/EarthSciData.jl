@@ -39,6 +39,8 @@ jobs:
             ${{ runner.os }}-test-
             ${{ runner.os }}-
       - name: Run benchmark
+        env:
+          JULIA_NO_VERIFY_HOSTS: 'gaftp.epa.gov'
         run: |
           cd bench
           julia --project --threads=4 --color=yes -e '
