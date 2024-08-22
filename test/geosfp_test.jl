@@ -11,7 +11,7 @@ using DynamicQuantities
     @parameters lon [unit = u"rad"]
     @parameters lat [unit = u"rad"]
     @constants c_unit = 180 / π / 6 [unit = u"rad" description = "constant to make units cancel out"]
-    geosfp = GEOSFP("4x5"; dtype=Float64)
+    geosfp, _ = GEOSFP("4x5"; dtype=Float64)
 
     function Example()
         @variables c(t) = 5.0 [unit = u"mol/m^3"]
@@ -39,9 +39,9 @@ using DynamicQuantities
         "MeanWind₊v_lon(t, lat, lon, lev)", "GEOSFP₊A3dyn₊U(t, lat, lon, lev)",
         "MeanWind₊v_lat(t, lat, lon, lev)", "GEOSFP₊A3dyn₊V(t, lat, lon, lev)",
         "MeanWind₊v_lev(t, lat, lon, lev)", "GEOSFP₊A3dyn₊OMEGA(t, lat, lon, lev)",
-        "GEOSFP₊A3dyn₊U(t, lat, lon, lev)", "EarthSciData.interp!(DataSetInterpolator{EarthSciData.GEOSFPFileSet, U}, t, lon, lat, lev)",
-        "GEOSFP₊A3dyn₊OMEGA(t, lat, lon, lev)", "EarthSciData.interp!(DataSetInterpolator{EarthSciData.GEOSFPFileSet, OMEGA}, t, lon, lat, lev)",
-        "GEOSFP₊A3dyn₊V(t, lat, lon, lev)", "EarthSciData.interp!(DataSetInterpolator{EarthSciData.GEOSFPFileSet, V}, t, lon, lat, lev)",
+        "GEOSFP₊A3dyn₊U(t, lat, lon, lev)", "EarthSciData.interp_unsafe(DataSetInterpolator{EarthSciData.GEOSFPFileSet, U}, t, lon, lat, lev)",
+        "GEOSFP₊A3dyn₊OMEGA(t, lat, lon, lev)", "EarthSciData.interp_unsafe(DataSetInterpolator{EarthSciData.GEOSFPFileSet, OMEGA}, t, lon, lat, lev)",
+        "GEOSFP₊A3dyn₊V(t, lat, lon, lev)", "EarthSciData.interp_unsafe(DataSetInterpolator{EarthSciData.GEOSFPFileSet, V}, t, lon, lat, lev)",
         "Differential(t)(ExampleSys₊c(t, lat, lon, lev))", "Differential(lon)(ExampleSys₊c(t, lat, lon, lev)",
         "MeanWind₊v_lon(t, lat, lon, lev)", "lon2m",
         "Differential(lat)(ExampleSys₊c(t, lat, lon, lev)",
@@ -60,7 +60,7 @@ end
 
 @testset "GEOS-FP pressure levels" begin
     @parameters lat lon lev
-    geosfp = GEOSFP("4x5"; dtype=Float64,
+    geosfp, updater = GEOSFP("4x5"; dtype=Float64,
         coord_defaults=Dict(:lev => 1.0, :lat => 39.1, :lon => -155.7))
 
     # Rearrange pressure equation so it can be evaluated for P.
@@ -70,6 +70,7 @@ end
     peq = substitute(equations(geosfp)[iip], pseq.lhs => pseq.rhs)
 
     # Check Pressure levels
+    EarthSciData.lazyload!(updater, datetime2unix(DateTime(2022, 5, 1)))
     P = ModelingToolkit.subs_constants(peq.rhs)
     P_expr = build_function(P, [t, lon, lat, lev])
     mypf = eval(P_expr)
@@ -98,13 +99,14 @@ end
     starttime = datetime2unix(DateTime(2022, 5, 1, 23, 58))
     endtime = datetime2unix(DateTime(2022, 5, 2, 0, 3))
 
-    geosfp = GEOSFP("4x5"; dtype=Float64,
+    geosfp, updater = GEOSFP("4x5"; dtype=Float64,
         coord_defaults=Dict(:lon => 0.0, :lat => 0.0, :lev => 1.0))
 
     iips = findfirst((x) -> x == :I3₊PS, [Symbolics.tosymbol(eq.lhs, escape=false) for eq in equations(geosfp)])
     pseq = equations(geosfp)[iips]
     PS_expr = build_function(pseq.rhs, t, lon, lat, lev)
     psf = eval(PS_expr)
+    EarthSciData.lazyload!(updater, starttime)
     psf(starttime, 0.0, 0.0, 1.0)
 end
 
@@ -112,15 +114,10 @@ end
     @parameters lon = 0.0 lat = 0.0 lev = 1.0
     starttime = datetime2unix(DateTime(5000, 1, 1))
 
-    geosfp = GEOSFP("4x5"; dtype=Float64,
+    geosfp, updater = GEOSFP("4x5"; dtype=Float64,
         coord_defaults=Dict(:lon => 0.0, :lat => 0.0, :lev => 1.0))
-
-    iips = findfirst((x) -> x == :I3₊PS, [Symbolics.tosymbol(eq.lhs, escape=false) for eq in equations(geosfp)])
-    pseq = equations(geosfp)[iips]
-    PS_expr = build_function(pseq.rhs, t, lon, lat, lev)
-    psf = eval(PS_expr)
-    try
-        psf(starttime, 0.0, 0.0, 1.0)
+    try 
+        EarthSciData.lazyload!(updater, starttime)
     catch err
         @test err isa Base.Exception
     end

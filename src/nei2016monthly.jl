@@ -155,6 +155,8 @@ function NEI2016MonthlyEmis(sector, x, y, lev; spatial_ref="EPSG:4326", dtype=Fl
     @parameters(
         Δz = 60.0, [unit = u"m", description = "Height of the first vertical grid layer"],
     )
+    vars = []
+    itps = []
     for varname ∈ varnames(fs, sample_time)
         itp = DataSetInterpolator{dtype}(fs, varname, sample_time; spatial_ref, kwargs...)
         @constants zero_emis = 0 [unit = units(itp, sample_time) / u"m"]
@@ -162,7 +164,11 @@ function NEI2016MonthlyEmis(sector, x, y, lev; spatial_ref="EPSG:4326", dtype=Fl
             wrapper_f=(eq) -> ifelse(lev < 2, eq / Δz * scale, zero_emis),
         )
         push!(eqs, eq)
+        push!(vars, eq.lhs)
+        push!(itps, itp)
     end
-    ODESystem(eqs, t; name=name,
+    sys = ODESystem(eqs, t; name=name,
         metadata=Dict(:coupletype => NEI2016MonthlyEmisCoupler))
+    cb = UpdateCallbackCreator(sys, vars, itps)
+    return sys, cb
 end

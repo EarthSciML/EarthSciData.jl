@@ -7,16 +7,18 @@ const itp4 = EarthSciData.DataSetInterpolator{Float64}(fs, "U", DateTime(2022, 5
 const ts = DateTime(2022, 5, 1):Hour(1):DateTime(2022, 5, 3)
 function interpfunc_serial()
     for t ∈ datetime2unix.(ts)
+        EarthSciData.lazyload!(itp4, t)
         for lon ∈ deg2rad.(-180.0:1:175), lat ∈ deg2rad.(-90:1:85)
-            EarthSciData.interp!(itp4, t, lon, lat, 1.0)
+            EarthSciData.interp_unsafe(itp4, t, lon, lat, 1.0)
         end
     end
 end
 function interpfunc_threads()
     for t ∈ datetime2unix.(ts)
+        EarthSciData.lazyload!(itp4, t)
         Threads.@threads for lon ∈ deg2rad.(-180.0:1:175)
             for lat ∈ deg2rad.(-90:1:85)
-                EarthSciData.interp!(itp4, t, lon, lat, 1.0)
+                EarthSciData.interp_unsafe(itp4, t, lon, lat, 1.0)
             end
         end
     end

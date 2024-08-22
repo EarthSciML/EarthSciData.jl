@@ -230,6 +230,8 @@ function GEOSFP(domain::AbstractString; coord_defaults=Dict{Symbol,Number}(), sp
 
     sample_time = DateTime(2022, 5, 1) # Dummy time to get variable names and dimensions from data.
     eqs = []
+    vars = []
+    itps = []
     for (filename, fs) in filesets
         for varname ∈ varnames(fs, sample_time)
             itp = DataSetInterpolator{dtype}(fs, varname, sample_time; spatial_ref, kwargs...)
@@ -244,7 +246,10 @@ function GEOSFP(domain::AbstractString; coord_defaults=Dict{Symbol,Number}(), sp
                 end
                 push!(coords, v)
             end
-            push!(eqs, create_interp_equation(itp, filename, t, sample_time, coords))
+            eq = create_interp_equation(itp, filename, t, sample_time, coords)
+            push!(eqs, eq)
+            push!(vars, eq.lhs)
+            push!(itps, itp)
         end
     end
 
@@ -261,8 +266,10 @@ function GEOSFP(domain::AbstractString; coord_defaults=Dict{Symbol,Number}(), sp
     pressure_eq = P ~ P_unit * Ap(lev) + Bp(lev) * I3₊PS
     push!(eqs, pressure_eq)
 
-    ODESystem(eqs, t, name=name,
+    sys = ODESystem(eqs, t, name=name,
         metadata=Dict(:coupletype=>GEOSFPCoupler))
+    cb = UpdateCallbackCreator(sys, vars, itps)
+    return sys, cb
 end
 
 function EarthSciMLBase.couple2(mw::EarthSciMLBase.MeanWindCoupler, g::GEOSFPCoupler)

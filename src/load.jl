@@ -322,7 +322,7 @@ function lazyload!(itp::DataSetInterpolator, t::DateTime)
         end
     end
 end
-lazyload!(itp::DataSetInterpolator, t::Float64) = lazyload!(itp, Dates.unix2datetime(t))
+lazyload!(itp::DataSetInterpolator, t::AbstractFloat) = lazyload!(itp, Dates.unix2datetime(t))
 
 """
 $(SIGNATURES)
@@ -397,11 +397,15 @@ end
 # will call the function with a DynamicQuantities.Quantity or an integer to 
 # get information about the type and units of the output.
 interp!(itp::Union{DynamicQuantities.AbstractQuantity,Real}, t, locs...) = itp
+interp_unsafe(itp::Union{DynamicQuantities.AbstractQuantity,Real}, t, locs...) = itp
 
 # Symbolic tracing, for different numbers of dimensions (up to three dimensions).
 @register_symbolic interp!(itp::DataSetInterpolator, t, loc1, loc2, loc3)
 @register_symbolic interp!(itp::DataSetInterpolator, t, loc1, loc2) false
 @register_symbolic interp!(itp::DataSetInterpolator, t, loc1) false
+@register_symbolic interp_unsafe(itp::DataSetInterpolator, t, loc1, loc2, loc3)
+@register_symbolic interp_unsafe(itp::DataSetInterpolator, t, loc1, loc2) false
+@register_symbolic interp_unsafe(itp::DataSetInterpolator, t, loc1) false
 
 """
 $(SIGNATURES)
@@ -414,11 +418,11 @@ to divide the interpolated value by 2.
 function create_interp_equation(itp::DataSetInterpolator, filename, t, sample_time, coords; wrapper_f=v -> v)
     # Create right hand side of equation.
     if length(coords) == 3
-        rhs = wrapper_f(interp!(itp, t, coords[1], coords[2], coords[3]))
+        rhs = wrapper_f(interp_unsafe(itp, t, coords[1], coords[2], coords[3]))
     elseif length(coords) == 2
-        rhs = wrapper_f(interp!(itp, t, coords[1], coords[2]))
+        rhs = wrapper_f(interp_unsafe(itp, t, coords[1], coords[2]))
     elseif length(coords) == 1
-        rhs = wrapper_f(interp!(itp, t, coords[1]))
+        rhs = wrapper_f(interp_unsafe(itp, t, coords[1]))
     else
         error("Unexpected number of coordinates: $(length(coords))")
     end

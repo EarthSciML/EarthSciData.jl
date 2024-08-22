@@ -7,7 +7,7 @@ using DifferentialEquations
 using AllocCheck
 
 @parameters lat lon lev
-emis = NEI2016MonthlyEmis("mrggrid_withbeis_withrwc", lon, lat, lev; dtype=Float64)
+emis, updater = NEI2016MonthlyEmis("mrggrid_withbeis_withrwc", lon, lat, lev; dtype=Float64)
 fileset = EarthSciData.NEI2016MonthlyEmisFileSet("mrggrid_withbeis_withrwc")
 
 eqs = equations(emis)
@@ -46,6 +46,7 @@ end
     sys = extend(ODESystem([eq], t, [], []; name=:test_sys), emis)
     sys = structural_simplify(sys)
     tt = Dates.datetime2unix(sample_time)
+    EarthSciData.lazyload!(updater, tt)
     prob = ODEProblem(sys, zeros(1), (tt, tt + 60.0), [lat => 40.0, lon => -97.0, lev => 1.0])
     sol = solve(prob)
     @test 2 > sol[end][end] > 1
