@@ -1,12 +1,13 @@
 using Main.EarthSciData
 using Test
-using Unitful, EarthSciMLBase, ModelingToolkit
+using DynamicQuantities, EarthSciMLBase, ModelingToolkit
+using ModelingToolkit: t
 using Dates
 using DifferentialEquations
 using AllocCheck
 
-@parameters t lat lon lev
-emis = NEI2016MonthlyEmis("mrggrid_withbeis_withrwc", t, lon, lat, lev; dtype=Float64)
+@parameters lat lon lev
+emis = NEI2016MonthlyEmis("mrggrid_withbeis_withrwc", lon, lat, lev; dtype=Float64)
 fileset = EarthSciData.NEI2016MonthlyEmisFileSet("mrggrid_withbeis_withrwc")
 
 eqs = equations(emis)
@@ -40,7 +41,8 @@ end
 end
 
 @testset "run" begin
-    eq = Differential(t)(emis.ACET) ~ equations(emis)[1].rhs * 1e10
+    @constants uc = 1.0 [unit = u"s" description="unit conversion"]
+    eq = Differential(t)(emis.ACET) ~ equations(emis)[1].rhs * 1e10 / uc
     sys = extend(ODESystem([eq], t, [], []; name=:test_sys), emis)
     sys = structural_simplify(sys)
     tt = Dates.datetime2unix(sample_time)
@@ -79,10 +81,10 @@ end
 end
 
 @testset "Coupling with GEOS-FP" begin
-    gfp = GEOSFP("4x5", t; dtype=Float64,
+    gfp = GEOSFP("4x5"; dtype=Float64,
         coord_defaults=Dict(:lon => 0.0, :lat => 0.0, :lev => 1.0))
 
-    eqs = equations(EarthSciMLBase.get_mtk_ode(couple(emis, gfp)))
+    eqs = equations(convert(ODESystem, couple(emis, gfp)))
 
     @test occursin("NEI2016MonthlyEmis₊lat(t) ~ GEOSFP₊lat", string(eqs))
 end

@@ -4,7 +4,7 @@ using ModelingToolkit
 using Random
 using Latexify, LaTeXStrings
 using AllocCheck
-using Unitful
+using DynamicQuantities
 using GridInterpolations
 
 fs = EarthSciData.GEOSFPFileSet("4x5", "A3dyn")

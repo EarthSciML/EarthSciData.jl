@@ -92,7 +92,7 @@ function loadslice!(data::AbstractArray, fs::GEOSFPFileSet, t::DateTime, varname
         ds = getnc(filepath)
         var = loadslice!(data, fs, ds, t, varname, "time") # Load data from NetCDF file.
 
-        scale, _ = to_unitful(var.attrib["units"])
+        scale, _ = to_unit(var.attrib["units"])
         if scale != 1
             data .*= scale
         end
@@ -118,7 +118,7 @@ function loadmetadata(fs::GEOSFPFileSet, t::DateTime, varname)::MetaData
         dims = deleteat!(dims, time_index)
         varsize = deleteat!(collect(size(var)), time_index)
 
-        _, units = to_unitful(var.attrib["units"])
+        _, units = to_unit(var.attrib["units"])
         description = var.attrib["long_name"]
         @assert var.attrib["scale_factor"] == 1.0 "Unexpected scale factor."
         coords = [ds[d][:] for d ∈ dims]
@@ -159,7 +159,7 @@ const Ap = DataInterpolations.LinearInterpolation([
         2.620211e+00, 2.084970e+00, 1.650790e+00, 1.300510e+00, 1.019440e+00, 7.951341e-01,
         6.167791e-01, 4.758061e-01, 3.650411e-01, 2.785261e-01, 2.113490e-01, 1.594950e-01,
         1.197030e-01, 8.934502e-02, 6.600001e-02, 4.758501e-02, 3.270000e-02, 2.000000e-02,
-        1.000000e-02], 1:73) # hPa
+        1.000000e-02] .* 100, 1:73) # Pa
 
 const Bp = DataInterpolations.LinearInterpolation([
         1.000000e+00, 9.849520e-01, 9.634060e-01, 9.418650e-01, 9.203870e-01, 8.989080e-01,
@@ -219,7 +219,7 @@ for this dataset is Float32.
 
 See http://geoschemdata.wustl.edu/ExtData/ for current options.
 """
-function GEOSFP(domain, t; coord_defaults=Dict{Symbol,Number}(), spatial_ref="EPSG:4326", dtype=Float32, name=:GEOSFP, kwargs...)
+function GEOSFP(domain::AbstractString; coord_defaults=Dict{Symbol,Number}(), spatial_ref="EPSG:4326", dtype=Float32, name=:GEOSFP, kwargs...)
     filesets = Dict{String,GEOSFPFileSet}(
         "A1" => GEOSFPFileSet(domain, "A1"),
         "A3cld" => GEOSFPFileSet(domain, "A3cld"),
@@ -249,9 +249,9 @@ function GEOSFP(domain, t; coord_defaults=Dict{Symbol,Number}(), spatial_ref="EP
     end
 
     # Implement hybrid grid pressure: https://wiki.seas.harvard.edu/geos-chem/index.php/GEOS-Chem_vertical_grids
-    @constants P_unit = 1.0 [unit = u"hPa", description = "Unit pressure"]
-    @variables P(t) [unit = u"hPa", description = "Pressure"]
-    @variables I3₊PS(t) [unit = u"hPa", description = "Pressure at the surface"]
+    @constants P_unit = 1.0 [unit = u"Pa", description = "Unit pressure"]
+    @variables P(t) [unit = u"Pa", description = "Pressure"]
+    @variables I3₊PS(t) [unit = u"Pa", description = "Pressure at the surface"]
     d = :lev
     if d ∈ keys(coord_defaults) # Set a default value for this coordinate.
         lev = (@parameters $d = coord_defaults[d])[1]
@@ -269,8 +269,8 @@ function EarthSciMLBase.couple2(mw::EarthSciMLBase.MeanWindCoupler, g::GEOSFPCou
     mw, g = mw.sys, g.sys
     eqs = [mw.v_lon ~ g.A3dyn₊U]
     # Only add the number of dimensions present in the mean wind system.
-    length(states(mw)) > 1 ? push!(eqs, mw.v_lat ~ g.A3dyn₊V) : nothing
-    length(states(mw)) > 2 ? push!(eqs, mw.v_lev ~ g.A3dyn₊OMEGA) : nothing
+    length(unknowns(mw)) > 1 ? push!(eqs, mw.v_lat ~ g.A3dyn₊V) : nothing
+    length(unknowns(mw)) > 2 ? push!(eqs, mw.v_lev ~ g.A3dyn₊OMEGA) : nothing
 
     ConnectorSystem(
         eqs,
@@ -292,9 +292,8 @@ function partialderivatives_δPδlev_geosfp(geosfp; default_lev=1.0)
     ii = findfirst((x) -> x == :I3₊PS, [Symbolics.tosymbol(eq.lhs, escape=false) for eq in equations(geosfp)])
     # Get interpolator for surface pressure.
     ps = equations(geosfp)[ii].rhs
-    @constants P_unit = 1.0 [unit = u"hPa", description = "Unit pressure"]
-    @constants Pa_per_hPa = 100 [unit = u"Pa/hPa", description = "Conversion factor from hPa to Pa"]
-    P(levx) = (P_unit * Ap(levx) + Bp(levx) * ps) * Pa_per_hPa # Function to calculate pressure at a given level in the hybrid grid.
+    @constants P_unit = 1.0 [unit = u"Pa", description = "Unit pressure"]
+    P(levx) = (P_unit * Ap(levx) + Bp(levx) * ps) # Function to calculate pressure at a given level in the hybrid grid.
 
     (pvars::AbstractVector) -> begin
         levindex = EarthSciMLBase.varindex(pvars, :lev)

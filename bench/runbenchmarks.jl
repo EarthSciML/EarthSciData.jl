@@ -28,9 +28,10 @@ suite["GEOSFP"]["Interpolation serial"] = @benchmarkable interpfunc_serial()
 suite["GEOSFP"]["Interpolation threaded"] = @benchmarkable interpfunc_threads()
 
 using EarthSciMLBase, ModelingToolkit
+using ModelingToolkit: t, D
 using DomainSets, Dates
 using DifferentialEquations
-using Unitful
+using DynamicQuantities
 
 struct SysCoupler
     sys
@@ -40,17 +41,16 @@ function EarthSciMLBase.couple2(sys::SysCoupler, emis::EarthSciData.NEI2016Month
     operator_compose(sys, emis)
 end
 function nei_simulator()
-    @parameters t [unit = u"s"]
     @parameters lat = 0.0 lon = 0.0 lev = 0.0
     @variables ACET(t) = 0.0 [unit = u"kg*m^-3"]
     @constants c = 1000 [unit = u"s"]
     
     @named sys = ODESystem(
-        [Differential(t)(ACET) ~ 0], t,
+        [D(ACET) ~ 0], t,
         metadata=Dict(:coupletype => SysCoupler)
     )
     
-    emis = NEI2016MonthlyEmis("mrggrid_withbeis_withrwc", t, lon, lat, lev; dtype=Float64)
+    emis = NEI2016MonthlyEmis("mrggrid_withbeis_withrwc", lon, lat, lev; dtype=Float64)
     
     starttime = datetime2unix(DateTime(2016, 5, 1))
     endtime = datetime2unix(DateTime(2016, 5, 2))

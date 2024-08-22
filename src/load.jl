@@ -72,7 +72,7 @@ struct MetaData
     "The locations associated with each data point in the array."
     coords::Vector{Vector{Float64}}
     "Physical units of the data, e.g. m s⁻¹."
-    units::Unitful.Unitlike
+    units::DynamicQuantities.AbstractQuantity
     "Description of the data."
     description::AbstractString
     "Dimensions of the data, e.g. (lat, lon, layer)."
@@ -394,9 +394,9 @@ function interp_unsafe(itp::DataSetInterpolator, t::Real, locs::Vararg{T,N})::T 
 end
 
 # Dummy function for unit validation. Basically ModelingToolkit 
-# will call the function with a Unitful.Quantity or an integer to 
+# will call the function with a DynamicQuantities.Quantity or an integer to 
 # get information about the type and units of the output.
-interp!(itp::Union{Unitful.Quantity,Real}, t, locs...) = itp
+interp!(itp::Union{DynamicQuantities.AbstractQuantity,Real}, t, locs...) = itp
 
 # Symbolic tracing, for different numbers of dimensions (up to three dimensions).
 @register_symbolic interp!(itp::DataSetInterpolator, t, loc1, loc2, loc3)

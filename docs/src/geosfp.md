@@ -7,21 +7,24 @@ First, let's initialize some packages and set up the [GEOS-FP](@ref GEOSFP) equa
 ```@example geosfp
 using EarthSciData, EarthSciMLBase
 using DomainSets, ModelingToolkit, MethodOfLines, DifferentialEquations
+using ModelingToolkit: t, D
 using Dates, Plots, DataFrames
+using DynamicQuantities
+using DynamicQuantities: dimension
 
 # Set up system
-@parameters t lev lon lat
-geosfp = GEOSFP("4x5", t)
+@parameters lev lon lat
+geosfp = GEOSFP("4x5")
 ```
 
 We can see above the different variables that are available in the GEOS-FP dataset.
 But also, here they are in table form:
 
 ```@example geosfp
-vars = states(geosfp)
+vars = unknowns(geosfp)
 DataFrame(
         :Name => [string(Symbolics.tosymbol(v, escape=false)) for v ∈ vars],
-        :Units => [ModelingToolkit.get_unit(v) for v ∈ vars],
+        :Units => [dimension(ModelingToolkit.get_unit(v)) for v ∈ vars],
         :Description => [ModelingToolkit.getdescription(v) for v ∈ vars],
 )
 ```
@@ -31,12 +34,11 @@ To fix this, we create another equation system that is an ODE.
 (We don't actually end up using this system for anything, it's just necessary to get the system to compile.)
 
 ```@example geosfp
-function Example(t)
-    @variables c(t) = 5.0
-    D = Differential(t)
+function Example()
+    @variables c(t) = 5.0 [unit=u"s"]
     ODESystem([D(c) ~ sin(lat * π / 180.0 * 6) + sin(lon * π / 180 * 6)], t, name=:Docs₊Example)
 end
-examplesys = Example(t)
+examplesys = Example()
 ```
 
 Now, let's couple these two systems together, and also add in advection and some information about the domain:
@@ -51,7 +53,7 @@ domain = DomainInfo(
 )
 
 composed_sys = couple(examplesys, domain, geosfp)
-pde_sys = get_mtk(composed_sys)
+pde_sys = convert(PDESystem, composed_sys)
 ```
 
 Now, finally, we can run the simulation and plot the GEOS-FP wind fields in the result:

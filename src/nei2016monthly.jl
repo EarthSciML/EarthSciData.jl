@@ -46,7 +46,7 @@ function loadslice!(data::AbstractArray, fs::NEI2016MonthlyEmisFileSet, t::DateT
 
         Δx = ds.attrib["XCELL"]
         Δy = ds.attrib["YCELL"]
-        scale, _ = to_unitful(var.attrib["units"])
+        scale, _ = to_unit(var.attrib["units"])
         if scale != 1
             data .*= scale
         end
@@ -75,7 +75,7 @@ function loadmetadata(fs::NEI2016MonthlyEmisFileSet, t::DateTime, varname)::Meta
 
         Δx = ds.attrib["XCELL"]
         Δy = ds.attrib["YCELL"]
-        _, units = to_unitful(var.attrib["units"])
+        _, units = to_unit(var.attrib["units"])
         units /= u"m^2"
         description = var.attrib["var_desc"]
 
@@ -147,16 +147,8 @@ for this dataset is Float32.
 NOTE: This is an interpolator that returns an emissions value by interpolating between the
 centers of the nearest grid cells in the underlying emissions grid, so it may not exactly conserve the total 
 emissions mass, especially if the simulation grid is coarser than the emissions grid.
-
-# Example
-``` julia
-using EarthSciData, ModelingToolkit, Unitful
-@parameters t lat lon lev
-@parameters Δz = 60 [unit=u"m"]
-emis = NEI2016MonthlyEmis("mrggrid_withbeis_withrwc", t, lon, lat, lev, Δz)
-```
 """
-function NEI2016MonthlyEmis(sector, t, x, y, lev; spatial_ref="EPSG:4326", dtype=Float32, scale=1.0, name=:NEI2016MonthlyEmis, kwargs...)
+function NEI2016MonthlyEmis(sector, x, y, lev; spatial_ref="EPSG:4326", dtype=Float32, scale=1.0, name=:NEI2016MonthlyEmis, kwargs...)
     fs = NEI2016MonthlyEmisFileSet(sector)
     sample_time = DateTime(2016, 5, 1) # Dummy time to get variable names and dimensions from data.
     eqs = []

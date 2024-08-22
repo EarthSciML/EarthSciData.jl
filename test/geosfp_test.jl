@@ -3,24 +3,22 @@ using EarthSciMLBase
 using Test
 using Dates
 using ModelingToolkit, DomainSets
-using Unitful
+using ModelingToolkit: t, D
+using DynamicQuantities
 
 @testset "GEOS-FP" begin
-    @parameters t [unit = u"s"]
     @parameters lev
     @parameters lon [unit = u"rad"]
     @parameters lat [unit = u"rad"]
     @constants c_unit = 180 / π / 6 [unit = u"rad" description = "constant to make units cancel out"]
-    geosfp = GEOSFP("4x5", t; dtype=Float64)
+    geosfp = GEOSFP("4x5"; dtype=Float64)
 
-    function Example(t)
+    function Example()
         @variables c(t) = 5.0 [unit = u"mol/m^3"]
-        D = Differential(t)
         ODESystem([D(c) ~ (sin(lat / c_unit) + sin(lon / c_unit)) * c / t], t, name=:ExampleSys)
     end
-    examplesys = Example(t)
+    examplesys = Example()
 
-    deg2rad(x) = x * π / 180.0
     domain = DomainInfo(
         [
             partialderivatives_δxyδlonlat,
@@ -33,7 +31,7 @@ using Unitful
     )
 
     composed_sys = couple(examplesys, domain, Advection(), geosfp)
-    pde_sys = get_mtk(composed_sys)
+    pde_sys = convert(PDESystem, composed_sys)
 
     eqs = equations(pde_sys)
 
@@ -51,7 +49,7 @@ using Unitful
         "sin(lat / ExampleSys₊c_unit)", "sin(lon / ExampleSys₊c_unit)",
         "ExampleSys₊c(t, lat, lon, lev)", "t",
         "Differential(lev)(ExampleSys₊c(t, lat, lon, lev))",
-        "MeanWind₊v_lev(t, lat, lon, lev)", "P_unit", "Pa_per_hPa",
+        "MeanWind₊v_lev(t, lat, lon, lev)", "P_unit",
     ]
     have_eqs = string.(eqs)
     have_eqs = replace.(have_eqs, ("Main."=>"",))
@@ -61,9 +59,8 @@ using Unitful
 end
 
 @testset "GEOS-FP pressure levels" begin
-    @parameters t [unit = u"s"]
     @parameters lat lon lev
-    geosfp = GEOSFP("4x5", t; dtype=Float64,
+    geosfp = GEOSFP("4x5"; dtype=Float64,
         coord_defaults=Dict(:lev => 1.0, :lat => 39.1, :lon => -155.7))
 
     # Rearrange pressure equation so it can be evaluated for P.
@@ -77,7 +74,7 @@ end
     P_expr = build_function(P, [t, lon, lat, lev])
     mypf = eval(P_expr)
     p_levels = [mypf([DateTime(2022, 5, 1), -155.7, 39.1, lev]) for lev in [1, 1.5, 2, 72, 72.5, 73]]
-    @test p_levels ≈ [1021.6242118225098, 1013.9615353827572, 1006.2988589430047, 0.02, 0.015, 0.01]
+    @test p_levels ≈ [1021.6242118225098, 1013.9615353827572, 1006.2988589430047, 0.02, 0.015, 0.01] .* 100
 
 
     dp = partialderivatives_δPδlev_geosfp(geosfp)
@@ -97,11 +94,11 @@ end
 end
 
 @testset "GEOS-FP new day" begin
-    @parameters lon = 0.0 lat = 0.0 lev = 1.0 t
+    @parameters lon = 0.0 lat = 0.0 lev = 1.0
     starttime = datetime2unix(DateTime(2022, 5, 1, 23, 58))
     endtime = datetime2unix(DateTime(2022, 5, 2, 0, 3))
 
-    geosfp = GEOSFP("4x5", t; dtype=Float64,
+    geosfp = GEOSFP("4x5"; dtype=Float64,
         coord_defaults=Dict(:lon => 0.0, :lat => 0.0, :lev => 1.0))
 
     iips = findfirst((x) -> x == :I3₊PS, [Symbolics.tosymbol(eq.lhs, escape=false) for eq in equations(geosfp)])
@@ -112,10 +109,10 @@ end
 end
 
 @testset "GEOS-FP wrong year" begin
-    @parameters lon = 0.0 lat = 0.0 lev = 1.0 t
+    @parameters lon = 0.0 lat = 0.0 lev = 1.0
     starttime = datetime2unix(DateTime(5000, 1, 1))
 
-    geosfp = GEOSFP("4x5", t; dtype=Float64,
+    geosfp = GEOSFP("4x5"; dtype=Float64,
         coord_defaults=Dict(:lon => 0.0, :lat => 0.0, :lev => 1.0))
 
     iips = findfirst((x) -> x == :I3₊PS, [Symbolics.tosymbol(eq.lhs, escape=false) for eq in equations(geosfp)])
