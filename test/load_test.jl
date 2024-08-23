@@ -34,7 +34,7 @@ itp = EarthSciData.DataSetInterpolator{Float32}(fs, "U", t)
     uvals = []
     times = DateTime(2022, 5, 1):Hour(1):DateTime(2022, 5, 3)
     for t ∈ times
-        push!(uvals, interp!(itp, t, 1.0f0, 0.0f0, 1.0f0))
+        push!(uvals, interp!(itp, t, deg2rad(1.0f0), deg2rad(0.0f0), 1.0f0))
     end
     for i ∈ 4:3:length(uvals)-1
         @test uvals[i] ≈ (uvals[i-1] + uvals[i+1]) / 2 atol = 1e-2
@@ -47,7 +47,7 @@ itp = EarthSciData.DataSetInterpolator{Float32}(fs, "U", t)
     uvals2 = []
     idx = randperm(length(times))
     for t ∈ times[idx]
-        push!(uvals2, interp!(itp, t, 1.0f0, 0.0f0, 1.0f0))
+        push!(uvals2, interp!(itp, t, deg2rad(1.0f0), deg2rad(0.0f0), 1.0f0))
     end
     @test uvals2 ≈ uvals[idx]
 end
@@ -73,7 +73,7 @@ end
         cache .= [v, v * 0.5, v * 2.0]
     end
     function EarthSciData.loadmetadata(fs::DummyFileSet, t::DateTime, varname)
-        return EarthSciData.MetaData([[0.0, 0.5, 1.0]], u"m", "description", ["x"], [3], "EPSG:4326", 1, 1)
+        return EarthSciData.MetaData([[0.0, 0.5, 1.0]], u"m", "description", ["x"], [3], "+proj=longlat +datum=WGS84 +no_defs", 1, 1)
     end
 
     fs = DummyFileSet(DateTime(2022, 4, 30), DateTime(2022, 5, 4))

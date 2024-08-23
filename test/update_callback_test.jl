@@ -30,14 +30,14 @@ endtime = datetime2unix(DateTime(2016, 5, 2))
 domain = DomainInfo(
     constIC(16.0, t ∈ Interval(starttime, endtime)),
     constBC(16.0,
-        lon ∈ Interval(-130.0, -60.0),
-        lat ∈ Interval(9.75, 60.0),
+        lon ∈ Interval(deg2rad(-130.0), deg2rad(-60.0)),
+        lat ∈ Interval(deg2rad(9.75), deg2rad(60.0)),
         lev ∈ Interval(1, 2)
     ))
 
 csys = couple(sys, emis, domain)
 
-sim = Simulator(csys, [2.0, 2.0, 1])
+sim = Simulator(csys, [deg2rad(2.0), deg2rad(2.0), 1])
 
 st = SimulatorStrangSerial(Tsit5(), Euler(), 100.0)
 

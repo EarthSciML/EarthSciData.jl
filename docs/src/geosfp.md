@@ -13,7 +13,11 @@ using DynamicQuantities
 using DynamicQuantities: dimension
 
 # Set up system
-@parameters lev lon lat
+@parameters(
+    lev, 
+    lon, [unit=u"rad"], 
+    lat, [unit=u"rad"],
+)
 geosfp, geosfp_updater = GEOSFP("4x5")
 
 geosfp
@@ -39,7 +43,7 @@ To fix this, we create another equation system that is an ODE.
 ```@example geosfp
 function Example()
     @variables c(t) = 5.0 [unit=u"s"]
-    ODESystem([D(c) ~ sin(lat * π / 180.0 * 6) + sin(lon * π / 180 * 6)], t, name=:Docs₊Example)
+    ODESystem([D(c) ~ sin(lat * 6) + sin(lon * 6)], t, name=:Docs₊Example)
 end
 examplesys = Example()
 ```
@@ -50,8 +54,8 @@ Now, let's couple these two systems together, and also add in advection and some
 domain = DomainInfo(
     partialderivatives_δxyδlonlat,
     constIC(0.0, t ∈ Interval(Dates.datetime2unix(DateTime(2022, 1, 1)), Dates.datetime2unix(DateTime(2022, 1, 3)))),
-    zerogradBC(lat ∈ Interval(-80.0f0, 80.0f0)),
-    periodicBC(lon ∈ Interval(-180.0f0, 180.0f0)),
+    zerogradBC(lat ∈ Interval(deg2rad(-80.0f0), deg2rad(80.0f0))),
+    periodicBC(lon ∈ Interval(deg2rad(-180.0f0), deg2rad(180.0f0))),
     zerogradBC(lev ∈ Interval(1.0f0, 11.0f0)),
 )
 

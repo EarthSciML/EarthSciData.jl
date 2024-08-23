@@ -148,7 +148,7 @@ NOTE: This is an interpolator that returns an emissions value by interpolating b
 centers of the nearest grid cells in the underlying emissions grid, so it may not exactly conserve the total 
 emissions mass, especially if the simulation grid is coarser than the emissions grid.
 """
-function NEI2016MonthlyEmis(sector, x, y, lev; spatial_ref="EPSG:4326", dtype=Float32, scale=1.0, name=:NEI2016MonthlyEmis, kwargs...)
+function NEI2016MonthlyEmis(sector, x, y, lev; spatial_ref="+proj=longlat +datum=WGS84 +no_defs", dtype=Float32, scale=1.0, name=:NEI2016MonthlyEmis, kwargs...)
     fs = NEI2016MonthlyEmisFileSet(sector)
     sample_time = DateTime(2016, 5, 1) # Dummy time to get variable names and dimensions from data.
     eqs = []

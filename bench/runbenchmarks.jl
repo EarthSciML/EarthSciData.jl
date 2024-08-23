@@ -59,14 +59,14 @@ function nei_simulator()
     domain = DomainInfo(
         constIC(16.0, t ∈ Interval(starttime, endtime)),
         constBC(16.0,
-            lon ∈ Interval(-130.0, -60.0),
-            lat ∈ Interval(9.75, 60.0),
+            lon ∈ Interval(deg2rad(-130.0), deg2rad(-60.0)),
+            lat ∈ Interval(deg2rad(9.75), deg2rad(60.0)),
             lev ∈ Interval(1, 2)
         ))
     
     csys = couple(sys, emis, domain)
     
-    Simulator(csys, [2.0, 2.0, 1])    
+    Simulator(csys, [deg2rad(2.0), deg2rad(2.0), 1])    
 end
 
 suite["NEI Simulator"] = BenchmarkGroup()
@@ -76,7 +76,6 @@ suite["NEI Simulator"]["Serial"] = @benchmarkable run!($sim, $st)
 
 st = SimulatorStrangThreads(Tsit5(), Euler(), 100.0)
 suite["NEI Simulator"]["Threads"] = @benchmarkable run!($sim, $st)
-
 
 tune!(suite, verbose = true)
 results = run(suite, verbose = true)

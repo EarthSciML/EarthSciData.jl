@@ -127,8 +127,15 @@ function loadmetadata(fs::GEOSFPFileSet, t::DateTime, varname)::MetaData
         ydim = findfirst((x) -> x == "lat", dims)
         @assert xdim > 0 "GEOSFP `lon` dimension not found"
         @assert ydim > 0 "GEOSFP `lat` dimension not found"
+        # Convert from degrees to radians (so we are using SI units)
+        coords[xdim] .= deg2rad.(coords[xdim])
+        coords[ydim] .= deg2rad.(coords[ydim])
 
-        return MetaData(coords, units, description, dims, varsize, "EPSG:4326", xdim, ydim)
+        # This projection will assume the inputs are radians when used within
+        # a Proj pipeline: https://proj.org/en/9.3/operations/pipeline.html
+        prj = "+proj=longlat +datum=WGS84 +no_defs"
+
+        return MetaData(coords, units, description, dims, varsize, prj, xdim, ydim)
     end
 end
 
@@ -176,7 +183,9 @@ const Bp = DataInterpolations.LinearInterpolation([
         0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00,
         0.000000e+00], 1:73)
 
-struct GEOSFPCoupler sys end
+struct GEOSFPCoupler
+    sys
+end
 
 """
 $(SIGNATURES)
@@ -219,7 +228,7 @@ for this dataset is Float32.
 
 See http://geoschemdata.wustl.edu/ExtData/ for current options.
 """
-function GEOSFP(domain::AbstractString; coord_defaults=Dict{Symbol,Number}(), spatial_ref="EPSG:4326", dtype=Float32, name=:GEOSFP, kwargs...)
+function GEOSFP(domain::AbstractString; coord_defaults=Dict{Symbol,Number}(), spatial_ref="+proj=longlat +datum=WGS84 +no_defs", dtype=Float32, name=:GEOSFP, kwargs...)
     filesets = Dict{String,GEOSFPFileSet}(
         "A1" => GEOSFPFileSet(domain, "A1"),
         "A3cld" => GEOSFPFileSet(domain, "A3cld"),
@@ -267,7 +276,7 @@ function GEOSFP(domain::AbstractString; coord_defaults=Dict{Symbol,Number}(), sp
     push!(eqs, pressure_eq)
 
     sys = ODESystem(eqs, t, name=name,
-        metadata=Dict(:coupletype=>GEOSFPCoupler))
+        metadata=Dict(:coupletype => GEOSFPCoupler))
     cb = UpdateCallbackCreator(sys, vars, itps)
     return sys, cb
 end
