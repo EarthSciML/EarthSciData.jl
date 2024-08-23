@@ -169,10 +169,7 @@ mutable struct DataSetInterpolator{To,N,N2,FT}
         if spatial_ref == metadata.native_sr
             coord_trans = (x) -> x # No transformation needed.
         else
-            t = (x...) -> x
-            if spatial_ref != metadata.native_sr
-                t = Proj.Transformation("+proj=pipeline +step "*spatial_ref*" +step "*metadata.native_sr)
-            end
+            t = Proj.Transformation("+proj=pipeline +step "*spatial_ref*" +step "*metadata.native_sr)
             coord_trans = (locs) -> begin
                 x, y = t(locs[metadata.xdim], locs[metadata.ydim])
                 replace_in_tuple(locs, metadata.xdim, To(x), metadata.ydim, To(y))
