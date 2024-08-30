@@ -1,22 +1,20 @@
 using EarthSciData
 using Test
 using EarthSciMLBase, ModelingToolkit, DomainSets
-using NCDatasets, Unitful, DifferentialEquations, Dates
+using ModelingToolkit: t, D
+using NCDatasets, DynamicQuantities, DifferentialEquations, Dates
+using SciMLOperators
 
-@parameters t [unit = u"s", description = "time"]
 @parameters lev = 1.0
 @parameters y = 2.0 [unit = u"kg"]
 @parameters x = 1.0 [unit = u"kg", description = "x coordinate"]
-x = GlobalScope(x)
-y = GlobalScope(y)
-lev = GlobalScope(lev)
 @variables u(t) = 1.0 [unit = u"kg", description = "u value"]
 @variables v(t) = 2.0 [unit = u"kg", description = "v value"]
+@constants c = 1.0 [unit = u"kg^2"]
 @constants p = 1.0 [unit = u"kg/s"]
-D = Differential(t)
 
 eqs = [
-    D(u) ~ p
+    D(u) ~ p + 1e-20*lev*p*x*y/c # Need to make sure all coordinates are included in model.
     v ~ (x + y) * lev
 ]
 
@@ -26,30 +24,31 @@ domain = DomainInfo(
     constIC(0.0, t ∈ Interval(0.0, 2.0)),
     constBC(16.0, x ∈ Interval(-1.0, 1.0),
         y ∈ Interval(-2.0, 2.0),
-        lev ∈ Interval(1, 3)))
+        lev ∈ Interval(1.0, 3.0)))
 
 file = tempname() * ".nc"
 
 csys = couple(sys, domain)
 
 o = NetCDFOutputter(file, 1.0; extra_vars=[
-    structural_simplify(EarthSciMLBase.get_mtk_ode(csys)).Test₊sys.v
+    structural_simplify(convert(ODESystem, csys)).Test₊sys.v
 ])
 
 csys = couple(csys, o)
 
-sim = Simulator(csys, [0.1, 0.1, 1], Tsit5())
+sim = Simulator(csys, [0.1, 0.1, 1])
+st = SimulatorStrangThreads(Tsit5(), Euler(), 0.01)
 
-run!(sim)
+run!(sim, st)
 
 ds = NCDataset(file, "r")
 
 @test size(ds["Test₊sys₊u"], 4) == 3
-@test all(ds["Test₊sys₊u"][:, :, :, 1] .≈ 2.0)
+@test all(isapprox.(ds["Test₊sys₊u"][:, :, :, 1], 1.0, atol=0.011))
 @test sum(abs.(ds["Test₊sys₊v"][:, :, :, 1])) ≈ 5754.0f0
-@test all(ds["Test₊sys₊u"][:, :, :, 2] .≈ 3.0)
+@test all(isapprox.(ds["Test₊sys₊u"][:, :, :, 2], 2.0, atol=0.011))
 @test sum(abs.(ds["Test₊sys₊v"][:, :, :, 2])) ≈ 5754.0f0
-@test all(ds["Test₊sys₊u"][:, :, :, 3] .≈ 4.0)
+@test all(isapprox.(ds["Test₊sys₊u"][:, :, :, 3], 3.0, atol=0.011))
 @test sum(abs.(ds["Test₊sys₊v"][:, :, :, 3])) ≈ 5754.0f0
 @test size(ds["Test₊sys₊u"]) == (21, 41, 3, 3)
 

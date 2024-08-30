@@ -72,14 +72,14 @@ struct MetaData
     "The locations associated with each data point in the array."
     coords::Vector{Vector{Float64}}
     "Physical units of the data, e.g. m s⁻¹."
-    units::Unitful.Unitlike
+    units::DynamicQuantities.AbstractQuantity
     "Description of the data."
     description::AbstractString
     "Dimensions of the data, e.g. (lat, lon, layer)."
     dimnames::AbstractVector
     "Dimension sizes of the data, e.g. (180, 360, 30)."
     varsize::AbstractVector
-    "The spatial reference system of the data, e.g. \"EPSG:4326\" for lat-lon data."
+    "The spatial reference system of the data, e.g. \"+proj=longlat +datum=WGS84 +no_defs\" for lat-lon data."
     native_sr::AbstractString
     "The index number of the x-dimension (e.g. longitude)"
     xdim::Int
@@ -149,13 +149,13 @@ mutable struct DataSetInterpolator{To,N,N2,FT}
     currenttime::DateTime
     coord_trans::FT
     loadrequest::Channel{DateTime}
-    loadresult::Channel{Int}
+    loadresult::Channel
     copyfinish::Channel{Int}
     lock::ReentrantLock
     initialized::Bool
     kwargs
 
-    function DataSetInterpolator{To}(fs::FileSet, varname::AbstractString, default_time::DateTime; spatial_ref="EPSG:4326", cache_size=3, kwargs...) where {To<:Real}
+    function DataSetInterpolator{To}(fs::FileSet, varname::AbstractString, default_time::DateTime; spatial_ref="+proj=longlat +datum=WGS84 +no_defs", cache_size=3, kwargs...) where {To<:Real}
         metadata = loadmetadata(fs, default_time, varname; kwargs...)
         load_cache = zeros(To, repeat([1], length(metadata.varsize))...)
         data = zeros(To, repeat([1], length(metadata.varsize))..., cache_size) # Add a dimension for time.
@@ -169,7 +169,7 @@ mutable struct DataSetInterpolator{To,N,N2,FT}
         if spatial_ref == metadata.native_sr
             coord_trans = (x) -> x # No transformation needed.
         else
-            t = Proj.Transformation(spatial_ref, metadata.native_sr, always_xy=true)
+            t = Proj.Transformation("+proj=pipeline +step "*spatial_ref*" +step "*metadata.native_sr)
             coord_trans = (locs) -> begin
                 x, y = t(locs[metadata.xdim], locs[metadata.ydim])
                 replace_in_tuple(locs, metadata.xdim, To(x), metadata.ydim, To(y))
@@ -179,7 +179,7 @@ mutable struct DataSetInterpolator{To,N,N2,FT}
 
         itp = new{To,N,N2,FT}(fs, varname, grid, gridmin, gridmax, data, load_cache, metadata, times,
             DateTime(1, 1, 1), coord_trans,
-            Channel{DateTime}(0), Channel{Int}(0), Channel{Int}(0),
+            Channel{DateTime}(0), Channel(1), Channel{Int}(0),
             ReentrantLock(), false, kwargs)
         Threads.@spawn async_loader(itp)
         itp
@@ -252,20 +252,21 @@ function async_loader(itp::DataSetInterpolator)
         if t != tt
             try
                 loadslice!(itp.load_cache, itp.fs, t, itp.varname; itp.kwargs...)
+                tt = t
             catch err
-                @warn err
+                @error err
+                put!(itp.loadresult, err)
                 rethrow(err)
             end
-            tt = t
         end
         put!(itp.loadresult, 0) # Let the requestor know that we've finished.
         # Anticipate what the next request is going to be for and load that data.
         take!(itp.copyfinish)
-        tt = nexttimepoint(itp, tt)
         try
+            tt = nexttimepoint(itp, tt)
             loadslice!(itp.load_cache, itp.fs, tt, itp.varname; itp.kwargs...)
         catch err
-            @warn err
+            @error err
             rethrow(err)
         end
     end
@@ -293,7 +294,10 @@ function initialize!(itp::DataSetInterpolator, t::DateTime)
     for idx in idxs_not_in_times
         d = selectdim(itp.data, N, idx)
         put!(itp.loadrequest, times[idx]) # Request next data
-        take!(itp.loadresult) # Wait for results
+        r = take!(itp.loadresult) # Wait for results
+        if r != 0
+            throw(r)
+        end
         d .= itp.load_cache # Copy results to correct location
         put!(itp.copyfinish, 0) # Let the loader know we've finished copying
     end
@@ -318,7 +322,7 @@ function lazyload!(itp::DataSetInterpolator, t::DateTime)
         end
     end
 end
-lazyload!(itp::DataSetInterpolator, t::Float64) = lazyload!(itp, Dates.unix2datetime(t))
+lazyload!(itp::DataSetInterpolator, t::AbstractFloat) = lazyload!(itp, Dates.unix2datetime(t))
 
 """
 $(SIGNATURES)
@@ -390,14 +394,18 @@ function interp_unsafe(itp::DataSetInterpolator, t::Real, locs::Vararg{T,N})::T 
 end
 
 # Dummy function for unit validation. Basically ModelingToolkit 
-# will call the function with a Unitful.Quantity or an integer to 
+# will call the function with a DynamicQuantities.Quantity or an integer to 
 # get information about the type and units of the output.
-interp!(itp::Union{Unitful.Quantity,Real}, t, locs...) = itp
+interp!(itp::Union{DynamicQuantities.AbstractQuantity,Real}, t, locs...) = itp
+interp_unsafe(itp::Union{DynamicQuantities.AbstractQuantity,Real}, t, locs...) = itp
 
 # Symbolic tracing, for different numbers of dimensions (up to three dimensions).
 @register_symbolic interp!(itp::DataSetInterpolator, t, loc1, loc2, loc3)
 @register_symbolic interp!(itp::DataSetInterpolator, t, loc1, loc2) false
 @register_symbolic interp!(itp::DataSetInterpolator, t, loc1) false
+@register_symbolic interp_unsafe(itp::DataSetInterpolator, t, loc1, loc2, loc3)
+@register_symbolic interp_unsafe(itp::DataSetInterpolator, t, loc1, loc2) false
+@register_symbolic interp_unsafe(itp::DataSetInterpolator, t, loc1) false
 
 """
 $(SIGNATURES)
@@ -410,11 +418,11 @@ to divide the interpolated value by 2.
 function create_interp_equation(itp::DataSetInterpolator, filename, t, sample_time, coords; wrapper_f=v -> v)
     # Create right hand side of equation.
     if length(coords) == 3
-        rhs = wrapper_f(interp!(itp, t, coords[1], coords[2], coords[3]))
+        rhs = wrapper_f(interp_unsafe(itp, t, coords[1], coords[2], coords[3]))
     elseif length(coords) == 2
-        rhs = wrapper_f(interp!(itp, t, coords[1], coords[2]))
+        rhs = wrapper_f(interp_unsafe(itp, t, coords[1], coords[2]))
     elseif length(coords) == 1
-        rhs = wrapper_f(interp!(itp, t, coords[1]))
+        rhs = wrapper_f(interp_unsafe(itp, t, coords[1]))
     else
         error("Unexpected number of coordinates: $(length(coords))")
     end
@@ -422,11 +430,11 @@ function create_interp_equation(itp::DataSetInterpolator, filename, t, sample_ti
     # Create left hand side of equation.
     desc = description(itp, sample_time)
     uu = ModelingToolkit.get_unit(rhs)
-    n = Symbol("$(filename)₊$(itp.varname)")
+    n = length(filename) > 0 ? Symbol("$(filename)₊$(itp.varname)") : Symbol("$(itp.varname)")
     lhs = only(@variables $n(t) [unit = uu, description = desc])
     lhs ~ rhs
 end
 
 Latexify.@latexrecipe function f(itp::EarthSciData.DataSetInterpolator)
-    return "$(typeof(itp.fs))ₓ$(itp.varname)_interp"
+    return "$(split(string(typeof(itp.fs)), ".")[end]).$(itp.varname)"
 end
