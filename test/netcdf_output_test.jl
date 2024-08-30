@@ -1,10 +1,10 @@
 using EarthSciData
 using Test
 using EarthSciMLBase, ModelingToolkit, DomainSets
-using NCDatasets, Unitful, DifferentialEquations, Dates
+using ModelingToolkit: t, D
+using NCDatasets, DynamicQuantities, DifferentialEquations, Dates
 using SciMLOperators
 
-@parameters t [unit = u"s", description = "time"]
 @parameters lev = 1.0
 @parameters y = 2.0 [unit = u"kg"]
 @parameters x = 1.0 [unit = u"kg", description = "x coordinate"]
@@ -12,7 +12,6 @@ using SciMLOperators
 @variables v(t) = 2.0 [unit = u"kg", description = "v value"]
 @constants c = 1.0 [unit = u"kg^2"]
 @constants p = 1.0 [unit = u"kg/s"]
-D = Differential(t)
 
 eqs = [
     D(u) ~ p + 1e-20*lev*p*x*y/c # Need to make sure all coordinates are included in model.
@@ -32,7 +31,7 @@ file = tempname() * ".nc"
 csys = couple(sys, domain)
 
 o = NetCDFOutputter(file, 1.0; extra_vars=[
-    structural_simplify(EarthSciMLBase.get_mtk_ode(csys)).Test₊sys.v
+    structural_simplify(convert(ODESystem, csys)).Test₊sys.v
 ])
 
 csys = couple(csys, o)

@@ -1,20 +1,26 @@
 module EarthSciData
 using Dates, Downloads, Printf
 using DocStringExtensions
+using SciMLBase: DiscreteCallback
 using GridInterpolations, DataInterpolations, StaticArrays
 using NCDatasets, ModelingToolkit, Symbolics, Proj
+using ModelingToolkit: t
 using EarthSciMLBase, DiffEqCallbacks
-using Unitful, Latexify, ProgressMeter
+using DynamicQuantities, Latexify, ProgressMeter
 using Scratch
 
 # General utilities
 include("load.jl")
 include("utils.jl")
+include("update_callback.jl")
 
 # Specific data sets
 include("netcdf.jl")
 include("geosfp.jl")
 include("nei2016monthly.jl")
 include("netcdf_output.jl")
+
+# Coupling
+include("coupling.jl")
 
 end

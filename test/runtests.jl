@@ -7,4 +7,5 @@ using Test, SafeTestsets
     @safetestset "geosfp" begin include("geosfp_test.jl") end
     @safetestset "nei2016monthly" begin include("nei2016monthly_test.jl") end
     @safetestset "NetCDFOutputter" begin include("netcdf_output_test.jl") end
+    @safetestset "Update Callback" begin include("update_callback_test.jl") end
 end
