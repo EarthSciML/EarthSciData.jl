@@ -19,17 +19,15 @@ $(SIGNATURES)
 File path on the server relative to the host root; also path on local disk relative to `ENV["EARTHSCIDATADIR"]`.
 """
 function relpath(fs::NEI2016MonthlyEmisFileSet, t::DateTime)
-    year = Dates.format(t, "Y")
-    if year != "2016"
-        @warn "Only 2016 emissions data is available."
-    end
+    @assert Dates.year(t) == 2016 "Only 2016 emissions data is available with `NEI2016MonthlyEmis`."
     month = @sprintf("%.2d", Dates.month(t))
     return "emismod/2016/v1/gridded/monthly_netCDF/2016fh_16j_$(fs.sector)_12US1_month_$(month).ncf"
 end
 
 function DataFrequencyInfo(fs::NEI2016MonthlyEmisFileSet, t::DateTime)::DataFrequencyInfo
     month = Dates.month(t)
-    start = Dates.DateTime(2016, month, 1)
+    year = Dates.year(t)
+    start = Dates.DateTime(year, month, 1)
     frequency = ((start + Dates.Month(1)) - start)
     centerpoints = [start + frequency / 2]
     return DataFrequencyInfo(start, frequency, centerpoints)
@@ -48,7 +46,7 @@ function loadslice!(data::AbstractArray, fs::NEI2016MonthlyEmisFileSet, t::DateT
 
         Δx = ds.attrib["XCELL"]
         Δy = ds.attrib["YCELL"]
-        scale, _ = to_unitful(var.attrib["units"])
+        scale, _ = to_unit(var.attrib["units"])
         if scale != 1
             data .*= scale
         end
@@ -77,7 +75,7 @@ function loadmetadata(fs::NEI2016MonthlyEmisFileSet, t::DateTime, varname)::Meta
 
         Δx = ds.attrib["XCELL"]
         Δy = ds.attrib["YCELL"]
-        _, units = to_unitful(var.attrib["units"])
+        _, units = to_unit(var.attrib["units"])
         units /= u"m^2"
         description = var.attrib["var_desc"]
 
@@ -123,7 +121,9 @@ function varnames(fs::NEI2016MonthlyEmisFileSet, t::DateTime)
     end
 end
 
-struct NEI2016MonthlyEmisCoupler sys end
+struct NEI2016MonthlyEmisCoupler
+    sys
+end
 
 """
 $(SIGNATURES)
@@ -142,31 +142,33 @@ x and y must be in the same units as `spatial_ref`.
 `dtype` represents the desired data type of the interpolated values. The native data type
 for this dataset is Float32.
 
+`scale` is a scaling factor to apply to the emissions data. The default value is 1.0.
+
 NOTE: This is an interpolator that returns an emissions value by interpolating between the
 centers of the nearest grid cells in the underlying emissions grid, so it may not exactly conserve the total 
 emissions mass, especially if the simulation grid is coarser than the emissions grid.
-
-# Example
-``` julia
-using EarthSciData, ModelingToolkit, Unitful
-@parameters t lat lon lev
-@parameters Δz = 60 [unit=u"m"]
-emis = NEI2016MonthlyEmis("mrggrid_withbeis_withrwc", t, lon, lat, lev, Δz)
-```
 """
-function NEI2016MonthlyEmis(sector, t, x, y, lev, Δz; spatial_ref="EPSG:4326", dtype=Float32, name=:NEI2016MonthlyEmis, kwargs...)
+function NEI2016MonthlyEmis(sector, x, y, lev; spatial_ref="+proj=longlat +datum=WGS84 +no_defs", dtype=Float32, scale=1.0, name=:NEI2016MonthlyEmis, kwargs...)
     fs = NEI2016MonthlyEmisFileSet(sector)
     sample_time = DateTime(2016, 5, 1) # Dummy time to get variable names and dimensions from data.
     eqs = []
-    @assert ModelingToolkit.get_unit(Δz) == u"m" "Δz must be in units of meters."
+    @parameters(
+        Δz = 60.0, [unit = u"m", description = "Height of the first vertical grid layer"],
+    )
+    vars = []
+    itps = []
     for varname ∈ varnames(fs, sample_time)
         itp = DataSetInterpolator{dtype}(fs, varname, sample_time; spatial_ref, kwargs...)
         @constants zero_emis = 0 [unit = units(itp, sample_time) / u"m"]
-        eq = create_interp_equation(itp, sector, t, sample_time, [x, y, 1.0],
-            wrapper_f=(eq) -> ifelse(lev < 2, eq / Δz, zero_emis),
+        eq = create_interp_equation(itp, "", t, sample_time, [x, y, 1.0],
+            wrapper_f=(eq) -> ifelse(lev < 2, eq / Δz * scale, zero_emis),
         )
         push!(eqs, eq)
+        push!(vars, eq.lhs)
+        push!(itps, itp)
     end
-    ODESystem(eqs, t; name=name,
-        metadata=Dict(:coupletype=>NEI2016MonthlyEmisCoupler))
+    sys = ODESystem(eqs, t; name=name,
+        metadata=Dict(:coupletype => NEI2016MonthlyEmisCoupler))
+    cb = UpdateCallbackCreator(sys, vars, itps)
+    return sys, cb
 end

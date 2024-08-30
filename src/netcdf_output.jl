@@ -50,17 +50,17 @@ function EarthSciMLBase.init_callback(nc::NetCDFOutputter, s::Simulator)
         n = string(Symbolics.tosymbol(v, escape=false))
         ncvar = defVar(ds, n, Float32, dims)
         ncvar.attrib["description"] = ModelingToolkit.getdescription(v)
-        ncvar.attrib["units"] = string(ModelingToolkit.get_unit(v))
+        ncvar.attrib["units"] = string(DynamicQuantities.dimension(ModelingToolkit.get_unit(v)))
         ncvar
     end
-    ncvars = [makencvar(v, [pvstr..., "time"]) for v in vcat(states(s.sys_mtk), nc.extra_vars)]
+    ncvars = [makencvar(v, [pvstr..., "time"]) for v in vcat(unknowns(s.sys_mtk), nc.extra_vars)]
     nctvar = defVar(ds, "time", Float64, ("time",))
     nctvar.attrib["description"] = "Time"
     nctvar.attrib["units"] = "seconds since 1970-1-1"
     for (i, p) in enumerate(pvstr)
         d = defVar(ds, p, nc.dtype, (p,))
         d.attrib["description"] = ModelingToolkit.getdescription(pv[i])
-        d.attrib["units"] = string(ModelingToolkit.get_unit(pv[i]))
+        d.attrib["units"] = string(DynamicQuantities.dimension(ModelingToolkit.get_unit(pv[i])))
         d[:] = s.grid[i]
     end
     for j in eachindex(nc.extra_vars)

@@ -7,21 +7,31 @@ First, let's initialize some packages and set up the [GEOS-FP](@ref GEOSFP) equa
 ```@example geosfp
 using EarthSciData, EarthSciMLBase
 using DomainSets, ModelingToolkit, MethodOfLines, DifferentialEquations
+using ModelingToolkit: t, D
 using Dates, Plots, DataFrames
+using DynamicQuantities
+using DynamicQuantities: dimension
 
 # Set up system
-@parameters t lev lon lat
-geosfp = GEOSFP("4x5", t)
+@parameters(
+    lev, 
+    lon, [unit=u"rad"], 
+    lat, [unit=u"rad"],
+)
+geosfp, geosfp_updater = GEOSFP("4x5")
+
+geosfp
 ```
 
+Note that the [`GEOSFP`](@ref) function returns to things, an equation system and an object that can used to update the time in the underlying data loaders. 
 We can see above the different variables that are available in the GEOS-FP dataset.
 But also, here they are in table form:
 
 ```@example geosfp
-vars = states(geosfp)
+vars = unknowns(geosfp)
 DataFrame(
         :Name => [string(Symbolics.tosymbol(v, escape=false)) for v ∈ vars],
-        :Units => [ModelingToolkit.get_unit(v) for v ∈ vars],
+        :Units => [dimension(ModelingToolkit.get_unit(v)) for v ∈ vars],
         :Description => [ModelingToolkit.getdescription(v) for v ∈ vars],
 )
 ```
@@ -31,12 +41,11 @@ To fix this, we create another equation system that is an ODE.
 (We don't actually end up using this system for anything, it's just necessary to get the system to compile.)
 
 ```@example geosfp
-function Example(t)
-    @variables c(t) = 5.0
-    D = Differential(t)
-    ODESystem([D(c) ~ sin(lat * π / 180.0 * 6) + sin(lon * π / 180 * 6)], t, name=:Docs₊Example)
+function Example()
+    @variables c(t) = 5.0 [unit=u"s"]
+    ODESystem([D(c) ~ sin(lat * 6) + sin(lon * 6)], t, name=:Docs₊Example)
 end
-examplesys = Example(t)
+examplesys = Example()
 ```
 
 Now, let's couple these two systems together, and also add in advection and some information about the domain:
@@ -45,14 +54,17 @@ Now, let's couple these two systems together, and also add in advection and some
 domain = DomainInfo(
     partialderivatives_δxyδlonlat,
     constIC(0.0, t ∈ Interval(Dates.datetime2unix(DateTime(2022, 1, 1)), Dates.datetime2unix(DateTime(2022, 1, 3)))),
-    zerogradBC(lat ∈ Interval(-80.0f0, 80.0f0)),
-    periodicBC(lon ∈ Interval(-180.0f0, 180.0f0)),
+    zerogradBC(lat ∈ Interval(deg2rad(-80.0f0), deg2rad(80.0f0))),
+    periodicBC(lon ∈ Interval(deg2rad(-180.0f0), deg2rad(180.0f0))),
     zerogradBC(lev ∈ Interval(1.0f0, 11.0f0)),
 )
 
-composed_sys = couple(examplesys, domain, geosfp)
-pde_sys = get_mtk(composed_sys)
+composed_sys = couple(examplesys, domain, geosfp, geosfp_updater)
+pde_sys = convert(PDESystem, composed_sys)
 ```
+
+You can see above that we add both `geosfp` and `geosfp_updater` to our coupled system. 
+If we didn't include the updater, the resulting model would not give the correct results.
 
 Now, finally, we can run the simulation and plot the GEOS-FP wind fields in the result:
 
