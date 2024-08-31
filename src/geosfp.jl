@@ -53,7 +53,7 @@ end
 """
 $(SIGNATURES)
 
-File path on the server relative to the host root; also path on local disk relative to `ENV["EARTHSCIDATADIR"]` 
+File path on the server relative to the host root; also path on local disk relative to `ENV["EARTHSCIDATADIR"]`
 (or a scratch directory if that environment variable is not set).
 """
 function relpath(fs::GEOSFPFileSet, t::DateTime)
@@ -297,7 +297,7 @@ end
 """
 $(SIGNATURES)
 
-Return a function to calculate coefficients to multiply the 
+Return a function to calculate coefficients to multiply the
 `δ(u)/δ(lev)` partial derivative operator by
 to convert a variable named `u` from δ(u)/δ(lev)` to `δ(u)/δ(P)`,
 i.e. from vertical level number to pressure in hPa.
@@ -309,7 +309,9 @@ function partialderivatives_δPδlev_geosfp(geosfp; default_lev=1.0)
     # Get interpolator for surface pressure.
     ps = equations(geosfp)[ii].rhs
     @constants P_unit = 1.0 [unit = u"Pa", description = "Unit pressure"]
-    P(levx) = (P_unit * Ap(levx) + Bp(levx) * ps) # Function to calculate pressure at a given level in the hybrid grid.
+    # Function to calculate pressure at a given level in the hybrid grid.
+    # This is on a staggered grid so level=1 is the grid bottom.
+    P(levx) = (P_unit * Ap(levx) + Bp(levx) * ps)
 
     (pvars::AbstractVector) -> begin
         levindex = EarthSciMLBase.varindex(pvars, :lev)
@@ -319,7 +321,8 @@ function partialderivatives_δPδlev_geosfp(geosfp; default_lev=1.0)
             lev = default_lev
         end
 
-        δPδlev = 0.5 / (P(Num(lev) + 0.5) - P(Num(lev))) # d(u) / d(P) = d(u) / d(lev) / ( d(P) / d(lev) )
+        # d(u) / d(P) = d(u) / d(lev) / ( d(P) / d(lev) )
+        δPδlev = 0.5 / (P(Num(lev) + 0.5) - P(Num(lev)))
 
         return Dict(levindex => δPδlev)
     end
