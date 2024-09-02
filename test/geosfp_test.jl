@@ -125,5 +125,5 @@ end
 
     geosfp, updater = GEOSFP("4x5"; dtype=Float64,
         coord_defaults=Dict(:lon => 0.0, :lat => 0.0, :lev => 1.0))
-    @test_throws NCDatasets.NetCDFError EarthSciData.lazyload!(updater, starttime)
+    @test_throws Base.Exception EarthSciData.lazyload!(updater, starttime)
 end

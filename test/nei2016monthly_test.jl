@@ -56,7 +56,7 @@ end
     EarthSciData.lazyload!(updater, tt)
     prob = ODEProblem(sys, zeros(1), (tt, tt + 60.0), [lat => deg2rad(40.0), lon => deg2rad(-97.0), lev => 1.0])
     sol = solve(prob)
-    @test 2 > sol[end][end] > 1
+    @test 2 > sol.u[end][end] > 1
 end
 
 @testset "allocations" begin
