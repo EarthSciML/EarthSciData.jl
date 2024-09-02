@@ -5,6 +5,7 @@ using Dates
 using ModelingToolkit, DomainSets
 using ModelingToolkit: t, D
 using DynamicQuantities
+import NCDatasets
 
 @testset "GEOS-FP" begin
     @parameters lev
@@ -96,8 +97,8 @@ end
 
 @testset "GEOS-FP new day" begin
     @parameters(
-        lon = 0.0, [unit=u"rad"], 
-        lat = 0.0, [unit=u"rad"], 
+        lon = 0.0, [unit=u"rad"],
+        lat = 0.0, [unit=u"rad"],
         lev = 1.0,
     )
     starttime = datetime2unix(DateTime(2022, 5, 1, 23, 58))
@@ -116,17 +117,13 @@ end
 
 @testset "GEOS-FP wrong year" begin
     @parameters(
-        lon = 0.0, [unit=u"rad"], 
-        lat = 0.0, [unit=u"rad"], 
+        lon = 0.0, [unit=u"rad"],
+        lat = 0.0, [unit=u"rad"],
         lev = 1.0,
     )
     starttime = datetime2unix(DateTime(5000, 1, 1))
 
     geosfp, updater = GEOSFP("4x5"; dtype=Float64,
         coord_defaults=Dict(:lon => 0.0, :lat => 0.0, :lev => 1.0))
-    try 
-        EarthSciData.lazyload!(updater, starttime)
-    catch err
-        @test err isa Base.Exception
-    end
+    @test_throws NCDatasets.NetCDFError EarthSciData.lazyload!(updater, starttime)
 end

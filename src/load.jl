@@ -123,11 +123,11 @@ end
 $(SIGNATURES)
 
 DataSetInterpolators are used to interpolate data from a `FileSet` to represent a given time and location.
-Data is loaded (and downloaded) lazily, so the first time you use it on a for a given 
-dataset and time period it may take a while to load. Each time step is downloaded and loaded as it is needed 
+Data is loaded (and downloaded) lazily, so the first time you use it on a for a given
+dataset and time period it may take a while to load. Each time step is downloaded and loaded as it is needed
 during the simulation and cached on the hard drive at the path specified by the `\\\$EARTHSCIDATADIR`
-environment variable, or in a scratch directory if that environment variable has not been specified. 
-The interpolator will also cache data in memory representing the 
+environment variable, or in a scratch directory if that environment variable has not been specified.
+The interpolator will also cache data in memory representing the
 data records for the times immediately before and after the current time step.
 
 `varname` is the name of the variable to interpolate. `default_time` is the time to use when initializing
@@ -136,13 +136,12 @@ the interpolator. `spatial_ref` is the spatial reference system that the simulat
 (For gridded simulations where all grid cells are computed synchronously, a `cache_size` of 2 is best,
 but if the grid cells are not all time stepping together, a `cache_size` of 3 or more is best.)
 """
-mutable struct DataSetInterpolator{To,N,N2,FT}
+mutable struct DataSetInterpolator{To,N,N2,FT,ITPT}
     fs::FileSet
     varname::AbstractString
-    grid::GridInterpolations.RectangleGrid{N}
-    gridmin::SVector{N2,To}
-    gridmax::SVector{N2,To}
     data::Array{To,N}
+    interp_cache::Array{To,N}
+    itp::ITPT
     load_cache::Array{To,N2}
     metadata::MetaData
     times::Vector{DateTime}
@@ -158,18 +157,18 @@ mutable struct DataSetInterpolator{To,N,N2,FT}
     function DataSetInterpolator{To}(fs::FileSet, varname::AbstractString, default_time::DateTime; spatial_ref="+proj=longlat +datum=WGS84 +no_defs", cache_size=3, kwargs...) where {To<:Real}
         metadata = loadmetadata(fs, default_time, varname; kwargs...)
         load_cache = zeros(To, repeat([1], length(metadata.varsize))...)
-        data = zeros(To, repeat([1], length(metadata.varsize))..., cache_size) # Add a dimension for time.
+        data = zeros(To, repeat([2], length(metadata.varsize))..., cache_size) # Add a dimension for time.
+        interp_cache = similar(data)
         N = ndims(data)
         N2 = N - 1
         times = [DateTime(0, i, 1) for i ∈ 1:cache_size]
-        grid = RectangleGrid(metadata.coords..., datetime2unix.(times))
-        gridmin = minimum.(grid.cutPoints[1:end-1])
-        gridmax = maximum.(grid.cutPoints[1:end-1])
+        _, itp2 = create_interpolator!(To, interp_cache, data, metadata, times)
+        ITPT = typeof(itp2)
 
         if spatial_ref == metadata.native_sr
             coord_trans = (x) -> x # No transformation needed.
         else
-            t = Proj.Transformation("+proj=pipeline +step "*spatial_ref*" +step "*metadata.native_sr)
+            t = Proj.Transformation("+proj=pipeline +step " * spatial_ref * " +step " * metadata.native_sr)
             coord_trans = (locs) -> begin
                 x, y = t(locs[metadata.xdim], locs[metadata.ydim])
                 replace_in_tuple(locs, metadata.xdim, To(x), metadata.ydim, To(y))
@@ -177,8 +176,8 @@ mutable struct DataSetInterpolator{To,N,N2,FT}
         end
         FT = typeof(coord_trans)
 
-        itp = new{To,N,N2,FT}(fs, varname, grid, gridmin, gridmax, data, load_cache, metadata, times,
-            DateTime(1, 1, 1), coord_trans,
+        itp = new{To,N,N2,FT,ITPT}(fs, varname, data, interp_cache, itp2, load_cache,
+            metadata, times, DateTime(1, 1, 1), coord_trans,
             Channel{DateTime}(0), Channel(1), Channel{Int}(0),
             ReentrantLock(), false, kwargs)
         Threads.@spawn async_loader(itp)
@@ -196,6 +195,45 @@ end
 
 """ Return the units of the data. """
 ModelingToolkit.get_unit(itp::DataSetInterpolator) = itp.metadata.units
+
+"""
+Convert a vector of evenly spaced grid points to a range.
+The `reltol` parameter specifies the relative tolerance for the grid spacing,
+which is necessary to account for different numbers of days in each month
+and things like that.
+"""
+function knots2range(knots, reltol=0.05)
+    dx = diff(knots)
+    dx_mean = sum(dx) / length(dx)
+    @assert all(abs.(1 .- dx ./ dx_mean) .<= reltol) "Knots ($knots) must be evenly spaced within reltol=$reltol."
+    dx = (knots[end] - knots[begin]) / (length(knots) - 1)
+    # Need to do weird range creation to avoid rounding errors.
+    return knots[begin]:dx:(knots[begin]+dx*(length(knots)-1))
+end
+
+"""Create a new interpolator, overwriting `interp_cache`."""
+function create_interpolator!(To, interp_cache, data, metadata::MetaData, times)
+    # We originally create the interpolator with a small array to avoid
+    # unnecessary memory use, so we size the coordinate to match the data size.
+    # However, when we're updating the interpolator below me make sure the
+    # data size matches the original coordinate size.
+    coords = [metadata.coords[i][1:size(data, i)] for i ∈ 1:length(metadata.coords)]
+
+    grid = Tuple(knots2range.([coords..., datetime2unix.(times)]))
+    copyto!(interp_cache, data)
+    itp = interpolate!(interp_cache, BSpline(Linear()))
+    itp = scale(itp, grid)
+    return grid, itp
+end
+
+function update_interpolator!(itp::DataSetInterpolator{To}) where {To}
+    if size(itp.interp_cache) != size(itp.data)
+        itp.interp_cache = similar(itp.data)
+    end
+    grid, itp2 = create_interpolator!(To, itp.interp_cache, itp.data, itp.metadata, itp.times)
+    @assert all([length(g) for g in grid] .== size(itp.data)) "invalid data size: $([length(g) for g in grid]) != $(size(itp.data))"
+    itp.itp = itp2
+end
 
 " Return the next interpolation time point for this interpolator. "
 function nexttimepoint(itp::DataSetInterpolator, t::DateTime)
@@ -302,9 +340,9 @@ function initialize!(itp::DataSetInterpolator, t::DateTime)
         put!(itp.copyfinish, 0) # Let the loader know we've finished copying
     end
     itp.times = times
-    itp.grid = RectangleGrid(itp.metadata.coords..., datetime2unix.(itp.times))
     itp.currenttime = t
     @assert issorted(itp.times) "Interpolator times are in wrong order"
+    update_interpolator!(itp)
 end
 
 function lazyload!(itp::DataSetInterpolator, t::DateTime)
@@ -359,7 +397,7 @@ $(SIGNATURES)
 
 Return the value of the given variable from the given dataset at the given time and location.
 """
-function interp!(itp::DataSetInterpolator{T,N,N2,FT}, t::DateTime, locs::Vararg{T,N2})::T where {T,N,N2,FT}
+function interp!(itp::DataSetInterpolator{T,N,N2}, t::DateTime, locs::Vararg{T,N2})::T where {T,N,N2}
     lazyload!(itp, t)
     interp_unsafe(itp, t, locs...)
 end
@@ -367,16 +405,11 @@ end
 """
 Interpolate without checking if the data has been correctly loaded for the given time.
 """
-@generated function interp_unsafe(itp::DataSetInterpolator{T,N,N2,FT}, t::DateTime, locs::Vararg{T,N2})::T where {T,N,N2,FT}
+@generated function interp_unsafe(itp::DataSetInterpolator{T,N,N2}, t::DateTime, locs::Vararg{T,N2})::T where {T,N,N2}
     if N2 == N - 1 # Number of locs has to be one less than the number of data dimensions so we can add the time in.
         quote
             locs = itp.coord_trans(locs)
-            if any(locs .< itp.gridmin) || any(locs .> itp.gridmax)
-                # Return zero if extrapolating.
-                return zero(eltype(itp.data))
-            end
-            locs = SVector{N,T}(locs..., datetime2unix(t)) # Add time to the location.
-            interpolate(itp.grid, itp.data, locs)
+            itp.itp(locs..., datetime2unix(t))
         end
     else
         throw(ArgumentError("N2 must be equal to N-1"))
@@ -393,8 +426,8 @@ function interp_unsafe(itp::DataSetInterpolator, t::Real, locs::Vararg{T,N})::T 
     interp_unsafe(itp, Dates.unix2datetime(t), locs...)
 end
 
-# Dummy function for unit validation. Basically ModelingToolkit 
-# will call the function with a DynamicQuantities.Quantity or an integer to 
+# Dummy function for unit validation. Basically ModelingToolkit
+# will call the function with a DynamicQuantities.Quantity or an integer to
 # get information about the type and units of the output.
 interp!(itp::Union{DynamicQuantities.AbstractQuantity,Real}, t, locs...) = itp
 interp_unsafe(itp::Union{DynamicQuantities.AbstractQuantity,Real}, t, locs...) = itp
@@ -411,7 +444,7 @@ interp_unsafe(itp::Union{DynamicQuantities.AbstractQuantity,Real}, t, locs...) =
 $(SIGNATURES)
 
 Create an equation that interpolates the given dataset at the given time and location.
-`filename` is an identifier for the dataset, and `t` is the time variable. 
+`filename` is an identifier for the dataset, and `t` is the time variable.
 `wrapper_f` can specify a function to wrap the interpolated value, for example `eq -> eq / 2`
 to divide the interpolated value by 2.
 """

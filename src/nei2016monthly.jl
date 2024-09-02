@@ -42,6 +42,7 @@ function loadslice!(data::AbstractArray, fs::NEI2016MonthlyEmisFileSet, t::DateT
     lock(nclock) do
         filepath = maybedownload(fs, t)
         ds = getnc(filepath)
+        data = reshape(data, size(data)..., 1)
         var = loadslice!(data, fs, ds, t, varname, "TSTEP")
 
         Δx = ds.attrib["XCELL"]
@@ -72,6 +73,8 @@ function loadmetadata(fs::NEI2016MonthlyEmisFileSet, t::DateTime, varname)::Meta
         time_index = findfirst(isequal(timedim), dims)
         dims = deleteat!(dims, time_index)
         varsize = deleteat!(collect(size(var)), time_index)
+        @assert varsize[end] == 1 "Only 2D data is supported."
+        varsize = varsize[1:end-1] # Last dimension is 1.
 
         Δx = ds.attrib["XCELL"]
         Δy = ds.attrib["YCELL"]
@@ -88,7 +91,7 @@ function loadmetadata(fs::NEI2016MonthlyEmisFileSet, t::DateTime, varname)::Meta
         xs = x₀ + Δx / 2 .+ Δx .* (0:nx-1)
         ys = y₀ + Δy / 2 .+ Δy .* (0:ny-1)
 
-        coords = [xs, ys, [1.0]]
+        coords = [xs, ys]
 
         p_alp = ds.attrib["P_ALP"]
         p_bet = ds.attrib["P_BET"]
@@ -96,8 +99,6 @@ function loadmetadata(fs::NEI2016MonthlyEmisFileSet, t::DateTime, varname)::Meta
         x_cent = ds.attrib["XCENT"]
         y_cent = ds.attrib["YCENT"]
         native_sr = "+proj=lcc +lat_1=$(p_alp) +lat_2=$(p_bet) +lat_0=$(y_cent) +lon_0=$(x_cent) +x_0=0 +y_0=0 +a=6370997.000000 +b=6370997.000000 +to_meter=1"
-
-        @assert varsize[3] == 1 "Only 2D data is supported."
 
         xdim = findfirst((x) -> x == "COL", dims)
         ydim = findfirst((x) -> x == "ROW", dims)
@@ -128,13 +129,13 @@ end
 """
 $(SIGNATURES)
 
-A data loader for CMAQ-formatted monthly US National Emissions Inventory data for year 2016, 
+A data loader for CMAQ-formatted monthly US National Emissions Inventory data for year 2016,
 available from: https://gaftp.epa.gov/Air/emismod/2016/v1/gridded/monthly_netCDF/.
 The emissions here are monthly averages, so there is no information about diurnal variation etc.
 
-`spatial_ref` should be the spatial reference system that 
-the simulation will be using. `x` and `y`, and should be the coordinate variables and grid 
-spacing values for the simulation that is going to be run, corresponding to the given x and y 
+`spatial_ref` should be the spatial reference system that
+the simulation will be using. `x` and `y`, and should be the coordinate variables and grid
+spacing values for the simulation that is going to be run, corresponding to the given x and y
 values of the given `spatial_ref`,
 and the `lev` represents the variable for the vertical grid level.
 x and y must be in the same units as `spatial_ref`.
@@ -145,7 +146,7 @@ for this dataset is Float32.
 `scale` is a scaling factor to apply to the emissions data. The default value is 1.0.
 
 NOTE: This is an interpolator that returns an emissions value by interpolating between the
-centers of the nearest grid cells in the underlying emissions grid, so it may not exactly conserve the total 
+centers of the nearest grid cells in the underlying emissions grid, so it may not exactly conserve the total
 emissions mass, especially if the simulation grid is coarser than the emissions grid.
 """
 function NEI2016MonthlyEmis(sector, x, y, lev; spatial_ref="+proj=longlat +datum=WGS84 +no_defs", dtype=Float32, scale=1.0, name=:NEI2016MonthlyEmis, kwargs...)
@@ -160,7 +161,7 @@ function NEI2016MonthlyEmis(sector, x, y, lev; spatial_ref="+proj=longlat +datum
     for varname ∈ varnames(fs, sample_time)
         itp = DataSetInterpolator{dtype}(fs, varname, sample_time; spatial_ref, kwargs...)
         @constants zero_emis = 0 [unit = units(itp, sample_time) / u"m"]
-        eq = create_interp_equation(itp, "", t, sample_time, [x, y, 1.0],
+        eq = create_interp_equation(itp, "", t, sample_time, [x, y],
             wrapper_f=(eq) -> ifelse(lev < 2, eq / Δz * scale, zero_emis),
         )
         push!(eqs, eq)

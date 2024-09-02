@@ -1,11 +1,12 @@
-using EarthSciData
+using Main.EarthSciData
 using Dates
 using ModelingToolkit
 using Random
 using Latexify, LaTeXStrings
 using AllocCheck
 using DynamicQuantities
-using GridInterpolations
+using Interpolations
+using Test
 
 fs = EarthSciData.GEOSFPFileSet("4x5", "A3dyn")
 t = DateTime(2022, 5, 1)
@@ -39,8 +40,8 @@ itp = EarthSciData.DataSetInterpolator{Float32}(fs, "U", t)
     for i ∈ 4:3:length(uvals)-1
         @test uvals[i] ≈ (uvals[i-1] + uvals[i+1]) / 2 atol = 1e-2
     end
-    want_uvals = [-0.047426544f0, 0.06353962f0, 0.111806884f0, 0.09567301f0, 0.07896289f0, -0.01350067f0, -0.17766784f0,
-        -0.3418351f0, -0.50139815f0, -0.65639806f0]
+    want_uvals = [-0.047425747f0, 0.064035736f0, 0.11166346f0, 0.09545743f0, 0.07925139f0,
+        -0.011301707f0, -0.17620188f0, -0.34110206f0, -0.501398f0, -0.65708977f0]
     @test uvals[1:10] ≈ want_uvals
 
     # Test that shuffling the times doesn't change the results.
@@ -79,10 +80,12 @@ end
     fs = DummyFileSet(DateTime(2022, 4, 30), DateTime(2022, 5, 4))
 
     itp = EarthSciData.DataSetInterpolator{Float32}(fs, "U", fs.start; cache_size=5)
-    dfi = EarthSciData.DataFrequencyInfo(fs, t)
+    dfi = EarthSciData.DataFrequencyInfo(fs, fs.start)
 
     answerdata = [tv(fs, t) * v for t ∈ dfi.centerpoints, v ∈ [1.0, 0.5, 2.0]]
-    answer_itp = RectangleGrid(datetime2unix.(dfi.centerpoints), [0.0, 0.5, 1.0])
+
+    grid = Tuple(EarthSciData.knots2range.([datetime2unix.(dfi.centerpoints), [0.0, 0.5, 1.0]]))
+    answer_itp = scale(interpolate(answerdata, BSpline(Linear())), grid)
 
     times = DateTime(2022, 5, 1):Hour(1):DateTime(2022, 5, 3)
     xs = [0.0f0, 0.25f0, 0.75f0]
@@ -92,7 +95,7 @@ end
     for (i, tt) ∈ enumerate(times)
         for (j, x) ∈ enumerate(xs)
             uvals[i, j] = interp!(itp, tt, x)
-            answers[i, j] = interpolate(answer_itp, answerdata, [datetime2unix(tt), x])
+            answers[i, j] = answer_itp(datetime2unix(tt), x)
         end
     end
 
@@ -110,7 +113,7 @@ end
         for j ∈ randperm(length(xs))
             x = xs[j]
             uvals[i, j] = interp!(itp, tt, x)
-            answers[i, j] = interpolate(answer_itp, answerdata, [datetime2unix(tt), x])
+            answers[i, j] = answer_itp(datetime2unix(tt), x)
         end
     end
     @test uvals ≈ answers
@@ -121,7 +124,7 @@ end
     tt = DateTime(2022, 5, 1)
     interp!(itp, tt, 1.0, 0.0, 1.0)
 
-    @test_broken begin
+    @test begin
         @check_allocs checkf(itp, t, loc1, loc2, loc3) = EarthSciData.interp_unsafe(itp, t, loc1, loc2, loc3)
 
         try
@@ -134,5 +137,6 @@ end
         itp2 = EarthSciData.DataSetInterpolator{Float32}(fs, "U", t)
         interp!(itp2, tt, 1.0f0, 0.0f0, 1.0f0)
         checkf(itp2, tt, 1.0f0, 0.0f0, 1.0f0)
+        true
     end
 end
