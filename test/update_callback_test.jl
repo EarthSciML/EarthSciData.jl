@@ -25,7 +25,7 @@ end
 
 emis = NEI2016MonthlyEmis("mrggrid_withbeis_withrwc", lon, lat, lev; dtype=Float64)
 
-starttime = datetime2unix(DateTime(2016, 5, 1))
+starttime = datetime2unix(DateTime(2016, 3, 1))
 endtime = datetime2unix(DateTime(2016, 5, 2))
 domain = DomainInfo(
     constIC(16.0, t ∈ Interval(starttime, endtime)),
@@ -37,16 +37,16 @@ domain = DomainInfo(
 
 csys = couple(sys, emis, domain)
 
-sim = Simulator(csys, [deg2rad(2.0), deg2rad(2.0), 1])
+sim = Simulator(csys, [deg2rad(15.0), deg2rad(15.0), 1])
 
 st = SimulatorStrangSerial(Tsit5(), Euler(), 100.0)
 
 sol = run!(sim, st)
 
-@test sum(sol.u[end]) ≈ 6.650039773230552e-5
+@test sum(sol.u[end]) ≈ 3.3756746955152187e-6
 
 st = SimulatorStrangThreads(Tsit5(), Euler(), 100.0)
 
 sol = run!(sim, st)
 
-@test sum(sol.u[end]) ≈ 6.650039773230552e-5
+@test sum(sol.u[end]) ≈ 3.3756746955152187e-6

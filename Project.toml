@@ -1,7 +1,7 @@
 name = "EarthSciData"
 uuid = "a293c155-435f-439d-9c11-a083b6b47337"
 authors = ["EarthSciML Authors"]
-version = "0.9.2"
+version = "0.9.3"
 
 [deps]
 DataInterpolations = "82cc6244-b520-54b8-b5a6-8a565e85f1d0"

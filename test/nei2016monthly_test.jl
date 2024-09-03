@@ -16,6 +16,12 @@ eqs = equations(emis)
 @test contains(string(eqs[1].rhs), "/ Δz")
 
 sample_time = DateTime(2016, 5, 1)
+
+@testset "can't deepcopy" begin
+    itp = EarthSciData.DataSetInterpolator{Float32}(fileset, "NOX", sample_time; spatial_ref="+proj=longlat +datum=WGS84 +no_defs")
+    deepcopy(itp) === itp
+end
+
 @testset "correct projection" begin
     itp = EarthSciData.DataSetInterpolator{Float32}(fileset, "NOX", sample_time; spatial_ref="+proj=longlat +datum=WGS84 +no_defs")
     @test interp!(itp, sample_time, deg2rad(-97.0f0), deg2rad(40.0f0)) ≈ 9.211331f-10

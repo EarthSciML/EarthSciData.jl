@@ -102,9 +102,9 @@ end
     @test uvals ≈ answers
 
     @test length(itp.times) == 5
-    @test itp.times == [DateTime("2022-05-02T22:30:00"), DateTime("2022-05-03T01:30:00"),
-        DateTime("2022-05-03T04:30:00"), DateTime("2022-05-03T07:30:00"),
-        DateTime("2022-05-03T10:30:00")]
+    @test itp.times == [DateTime("2022-05-02T19:30:00"), DateTime("2022-05-02T22:30:00"),
+        DateTime("2022-05-03T01:30:00"), DateTime("2022-05-03T04:30:00"),
+        DateTime("2022-05-03T07:30:00")]
 
     uvals = zeros(Float32, length(times), length(xs))
     answers = zeros(Float32, length(times), length(xs))

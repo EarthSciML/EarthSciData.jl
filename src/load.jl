@@ -132,9 +132,13 @@ data records for the times immediately before and after the current time step.
 
 `varname` is the name of the variable to interpolate. `default_time` is the time to use when initializing
 the interpolator. `spatial_ref` is the spatial reference system that the simulation will be using.
-`cache_size` is the number of time steps that should be held in the cache at any given time (default=3).
-(For gridded simulations where all grid cells are computed synchronously, a `cache_size` of 2 is best,
-but if the grid cells are not all time stepping together, a `cache_size` of 3 or more is best.)
+`cache_size` is the number of time steps that should be held in the cache at any given time
+(default=3; must be >=3).
+
+!!! warning
+    WARNING: This interpolator includes a hack so that the function `deepcopy` does not copy the interpolator,
+    it just returns the interpolator.
+    This is necessary to allow us to update the interpolator from a callback, but it may cause unintended side effects.
 """
 mutable struct DataSetInterpolator{To,N,N2,FT,ITPT}
     fs::FileSet
@@ -155,6 +159,7 @@ mutable struct DataSetInterpolator{To,N,N2,FT,ITPT}
     kwargs
 
     function DataSetInterpolator{To}(fs::FileSet, varname::AbstractString, default_time::DateTime; spatial_ref="+proj=longlat +datum=WGS84 +no_defs", cache_size=3, kwargs...) where {To<:Real}
+        cache_size >= 3 || throw(ArgumentError("cache_size must be at least 3"))
         metadata = loadmetadata(fs, default_time, varname; kwargs...)
         load_cache = zeros(To, repeat([1], length(metadata.varsize))...)
         data = zeros(To, repeat([2], length(metadata.varsize))..., cache_size) # Add a dimension for time.
@@ -192,6 +197,10 @@ end
 function Base.show(io::IO, itp::DataSetInterpolator)
     print(io, "DataSetInterpolator{$(typeof(itp.fs)), $(itp.varname)}")
 end
+
+# FIXME: WARNING: This is a hack to make sure that the interpolator is not copied
+# so that we can update it from a callback. It may cause unintended side effects.
+Base.deepcopy_internal(itp::DataSetInterpolator, dict::IdDict) = itp
 
 """ Return the units of the data. """
 ModelingToolkit.get_unit(itp::DataSetInterpolator) = itp.metadata.units
@@ -354,8 +363,7 @@ function lazyload!(itp::DataSetInterpolator, t::DateTime)
             initialize!(itp, t)
             return
         end
-        if t <= itp.times[begin] || t > itp.times[end]
-            # @info "Updating data loader for $(itp.varname) for t = $t"
+        if t <= itp.times[begin] || t > itp.times[end-1]
             initialize!(itp, t)
         end
     end
@@ -409,7 +417,12 @@ Interpolate without checking if the data has been correctly loaded for the given
     if N2 == N - 1 # Number of locs has to be one less than the number of data dimensions so we can add the time in.
         quote
             locs = itp.coord_trans(locs)
-            itp.itp(locs..., datetime2unix(t))
+            try
+                itp.itp(locs..., datetime2unix(t))
+            catch err
+                lazyload!(itp, t)
+                itp.itp(locs..., datetime2unix(t))
+            end
         end
     else
         throw(ArgumentError("N2 must be equal to N-1"))
