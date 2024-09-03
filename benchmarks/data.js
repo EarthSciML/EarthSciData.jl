@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1725335872378,
+  "lastUpdate": 1725374499796,
   "repoUrl": "https://github.com/EarthSciML/EarthSciData.jl",
   "entries": {
     "Julia benchmark result": [
@@ -934,6 +934,54 @@ window.BENCHMARK_DATA = {
           {
             "name": "NEI Simulator/Threads",
             "value": 6158370293,
+            "unit": "ns",
+            "extra": "gctime=0\nmemory=1026420960\nallocs=20554130\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "ctessum@gmail.com",
+            "name": "Christopher Tessum",
+            "username": "ctessum"
+          },
+          "committer": {
+            "email": "ctessum@gmail.com",
+            "name": "Christopher Tessum",
+            "username": "ctessum"
+          },
+          "distinct": true,
+          "id": "0f5b5455cc6a24f8969fc8d5a825089e06140704",
+          "message": "Add explanation",
+          "timestamp": "2024-09-03T09:27:54-05:00",
+          "tree_id": "0d313fa9b51c939193ee90c7b48d2f93efec82b4",
+          "url": "https://github.com/EarthSciML/EarthSciData.jl/commit/0f5b5455cc6a24f8969fc8d5a825089e06140704"
+        },
+        "date": 1725374499316,
+        "tool": "julia",
+        "benches": [
+          {
+            "name": "GEOSFP/Interpolation threaded",
+            "value": 211741276,
+            "unit": "ns",
+            "extra": "gctime=0\nmemory=109042960\nallocs=65700\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
+          },
+          {
+            "name": "GEOSFP/Interpolation serial",
+            "value": 344870593.5,
+            "unit": "ns",
+            "extra": "gctime=0\nmemory=82907536\nallocs=47227\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
+          },
+          {
+            "name": "NEI Simulator/Serial",
+            "value": 11732118179,
+            "unit": "ns",
+            "extra": "gctime=99802849\nmemory=1022734464\nallocs=20534982\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
+          },
+          {
+            "name": "NEI Simulator/Threads",
+            "value": 6056224046,
             "unit": "ns",
             "extra": "gctime=0\nmemory=1026420960\nallocs=20554130\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
           }
