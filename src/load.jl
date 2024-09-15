@@ -166,7 +166,7 @@ mutable struct DataSetInterpolator{To,N,N2,FT,ITPT}
         interp_cache = similar(data)
         N = ndims(data)
         N2 = N - 1
-        times = [DateTime(0, i, 1) for i ∈ 1:cache_size]
+        times = [DateTime(0, 1, 1) + Hour(i) for i ∈ 1:cache_size]
         _, itp2 = create_interpolator!(To, interp_cache, data, metadata, times)
         ITPT = typeof(itp2)
 

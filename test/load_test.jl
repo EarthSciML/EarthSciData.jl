@@ -79,6 +79,10 @@ end
 
     fs = DummyFileSet(DateTime(2022, 4, 30), DateTime(2022, 5, 4))
 
+    @testset "big cache" begin
+        @test_nowarn EarthSciData.DataSetInterpolator{Float32}(fs, "U", fs.start; cache_size=100)
+    end
+
     itp = EarthSciData.DataSetInterpolator{Float32}(fs, "U", fs.start; cache_size=5)
     dfi = EarthSciData.DataFrequencyInfo(fs, fs.start)
 
