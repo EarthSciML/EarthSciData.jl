@@ -3,12 +3,12 @@
 Pkg.add(&quot;EarthSciMLData&quot;)</code></pre><h2 id="Feature-Summary"><a class="docs-heading-anchor" href="#Feature-Summary">Feature Summary</a><a id="Feature-Summary-1"></a><a class="docs-heading-anchor-permalink" href="#Feature-Summary" title="Permalink"></a></h2><p>This package contains data loaders for use with the <a href="https://earthsci.dev/">EarthSciML</a> ecosystem.</p><h2 id="Feature-List"><a class="docs-heading-anchor" href="#Feature-List">Feature List</a><a id="Feature-List-1"></a><a class="docs-heading-anchor-permalink" href="#Feature-List" title="Permalink"></a></h2><ul><li>Loader for <a href="https://gmao.gsfc.nasa.gov/GMAO_products/NRT_products.php">GEOS-FP</a> data.</li><li>Loader for <a href="https://gaftp.epa.gov/Air/">2016 NEI</a> emissions data.</li><li>Data outputters:<ul><li><a href="api/#EarthSciData.NetCDFOutputter"><code>NetCDFOutputter</code></a></li></ul></li></ul><h2 id="Contributing"><a class="docs-heading-anchor" href="#Contributing">Contributing</a><a id="Contributing-1"></a><a class="docs-heading-anchor-permalink" href="#Contributing" title="Permalink"></a></h2><ul><li>Please refer to the <a href="https://github.com/SciML/ColPrac/blob/master/README.md">SciML ColPrac: Contributor&#39;s Guide on Collaborative Practices for Community Packages</a> for guidance on PRs, issues, and other matters relating to contributing.</li></ul><h2 id="Reproducibility"><a class="docs-heading-anchor" href="#Reproducibility">Reproducibility</a><a id="Reproducibility-1"></a><a class="docs-heading-anchor-permalink" href="#Reproducibility" title="Permalink"></a></h2><details><summary>The documentation of this EarthSciML package was built using these direct dependencies,</summary><pre class="documenter-example-output"><code class="nohighlight hljs ansi"><span class="sgr32"><span class="sgr1">Status</span></span> `~/work/EarthSciData.jl/EarthSciData.jl/docs/Project.toml`
   <span class="sgr90">[a93c6f00] </span>DataFrames v1.6.1
   <span class="sgr90">[0c46a032] </span>DifferentialEquations v7.14.0
-  <span class="sgr90">[e30172f5] </span>Documenter v1.6.0
+  <span class="sgr90">[e30172f5] </span>Documenter v1.7.0
   <span class="sgr90">[5b8099bc] </span>DomainSets v0.7.14
 <span class="sgr33">⌅</span> <span class="sgr90">[06fc5a27] </span>DynamicQuantities v0.13.2
-  <span class="sgr90">[a293c155] </span>EarthSciData v0.9.3 `~/work/EarthSciData.jl/EarthSciData.jl`
+  <span class="sgr90">[a293c155] </span>EarthSciData v0.9.4 `~/work/EarthSciData.jl/EarthSciData.jl`
   <span class="sgr90">[e53f1632] </span>EarthSciMLBase v0.16.1
-  <span class="sgr90">[94925ecb] </span>MethodOfLines v0.11.2
+  <span class="sgr90">[94925ecb] </span>MethodOfLines v0.11.3
 <span class="sgr32">⌃</span> <span class="sgr90">[961ee093] </span>ModelingToolkit v9.32.0
   <span class="sgr90">[91a5bcdd] </span>Plots v1.40.8
 <span class="sgr36"><span class="sgr1">Info</span></span> Packages marked with <span class="sgr32">⌃</span> and <span class="sgr33">⌅</span> have new versions available. Those with <span class="sgr32">⌃</span> may be upgradable, but those with <span class="sgr33">⌅</span> are restricted by compatibility constraints from upgrading. To see why use `status --outdated`</code></pre></details><details><summary>and using this machine and Julia version.</summary><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Julia Version 1.10.5
@@ -28,7 +28,7 @@ Environment:
   <span class="sgr90">[47edcb42] </span>ADTypes v1.7.1
   <span class="sgr90">[a4c015fc] </span>ANSIColoredPrinters v0.0.1
   <span class="sgr90">[1520ce14] </span>AbstractTrees v0.4.5
-  <span class="sgr90">[7d9f7c33] </span>Accessors v0.1.37
+  <span class="sgr90">[7d9f7c33] </span>Accessors v0.1.38
   <span class="sgr90">[79e6a3ab] </span>Adapt v4.0.4
   <span class="sgr90">[66dad0bd] </span>AliasTables v1.1.3
   <span class="sgr90">[ec485272] </span>ArnoldiMethod v0.4.0
@@ -39,14 +39,14 @@ Environment:
   <span class="sgr90">[e2ed5e7c] </span>Bijections v0.1.9
   <span class="sgr90">[d1d4a3ce] </span>BitFlags v0.1.9
   <span class="sgr90">[62783981] </span>BitTwiddlingConvenienceFunctions v0.1.6
-  <span class="sgr90">[8e7c35d0] </span>BlockArrays v1.1.0
+  <span class="sgr90">[8e7c35d0] </span>BlockArrays v1.1.1
   <span class="sgr90">[ffab5731] </span>BlockBandedMatrices v0.13.1
-  <span class="sgr90">[764a87c0] </span>BoundaryValueDiffEq v5.9.1
+  <span class="sgr90">[764a87c0] </span>BoundaryValueDiffEq v5.10.0
   <span class="sgr90">[fa961155] </span>CEnum v0.5.0
   <span class="sgr90">[179af706] </span>CFTime v0.1.3
   <span class="sgr90">[2a0fbf3d] </span>CPUSummary v0.2.6
   <span class="sgr90">[00ebfdb7] </span>CSTParser v3.4.3
-  <span class="sgr90">[479239e8] </span>Catalyst v14.4.0
+  <span class="sgr90">[479239e8] </span>Catalyst v14.4.1
   <span class="sgr90">[d360d2e6] </span>ChainRulesCore v1.24.0
   <span class="sgr90">[fb6a15b2] </span>CloseOpenIntervals v0.1.13
   <span class="sgr90">[944b1d66] </span>CodecZlib v0.7.6
@@ -77,22 +77,22 @@ Environment:
   <span class="sgr90">[e2d170a0] </span>DataValueInterfaces v1.0.0
   <span class="sgr90">[bcd4f6db] </span>DelayDiffEq v5.48.1
   <span class="sgr90">[8bb1440f] </span>DelimitedFiles v1.9.1
-  <span class="sgr90">[2b5f629d] </span>DiffEqBase v6.154.0
-  <span class="sgr90">[459566f4] </span>DiffEqCallbacks v3.9.0
+  <span class="sgr90">[2b5f629d] </span>DiffEqBase v6.155.1
+  <span class="sgr90">[459566f4] </span>DiffEqCallbacks v3.9.1
   <span class="sgr90">[77a26b50] </span>DiffEqNoiseProcess v5.23.0
   <span class="sgr90">[163ba53b] </span>DiffResults v1.1.0
   <span class="sgr90">[b552c78f] </span>DiffRules v1.15.1
   <span class="sgr90">[0c46a032] </span>DifferentialEquations v7.14.0
-  <span class="sgr90">[a0c0ee7d] </span>DifferentiationInterface v0.5.16
+  <span class="sgr90">[a0c0ee7d] </span>DifferentiationInterface v0.5.17
 <span class="sgr33">⌅</span> <span class="sgr90">[3c3547ce] </span>DiskArrays v0.3.23
   <span class="sgr90">[b4f34e82] </span>Distances v0.10.11
   <span class="sgr90">[31c24e10] </span>Distributions v0.25.111
   <span class="sgr90">[ffbed154] </span>DocStringExtensions v0.9.3
-  <span class="sgr90">[e30172f5] </span>Documenter v1.6.0
+  <span class="sgr90">[e30172f5] </span>Documenter v1.7.0
   <span class="sgr90">[5b8099bc] </span>DomainSets v0.7.14
 <span class="sgr33">⌅</span> <span class="sgr90">[7c1d4256] </span>DynamicPolynomials v0.5.7
 <span class="sgr33">⌅</span> <span class="sgr90">[06fc5a27] </span>DynamicQuantities v0.13.2
-  <span class="sgr90">[a293c155] </span>EarthSciData v0.9.3 `~/work/EarthSciData.jl/EarthSciData.jl`
+  <span class="sgr90">[a293c155] </span>EarthSciData v0.9.4 `~/work/EarthSciData.jl/EarthSciData.jl`
   <span class="sgr90">[e53f1632] </span>EarthSciMLBase v0.16.1
   <span class="sgr90">[4e289a0a] </span>EnumX v1.0.4
   <span class="sgr90">[f151be2c] </span>EnzymeCore v0.7.8
@@ -108,7 +108,7 @@ Environment:
   <span class="sgr90">[29a986be] </span>FastLapackInterface v2.0.4
   <span class="sgr90">[5789e2e9] </span>FileIO v1.16.3
   <span class="sgr90">[1a297f60] </span>FillArrays v1.13.0
-  <span class="sgr90">[64ca27bc] </span>FindFirstFunctions v1.4.0
+  <span class="sgr90">[64ca27bc] </span>FindFirstFunctions v1.4.1
   <span class="sgr90">[6a86dc24] </span>FiniteDiff v2.24.0
   <span class="sgr90">[53c48c17] </span>FixedPointNumbers v0.8.5
   <span class="sgr90">[1fa38f19] </span>Format v1.3.7
@@ -138,7 +138,7 @@ Environment:
   <span class="sgr90">[41ab1584] </span>InvertedIndices v1.3.0
   <span class="sgr90">[92d709cd] </span>IrrationalConstants v0.2.2
   <span class="sgr90">[82899510] </span>IteratorInterfaceExtensions v1.0.0
-  <span class="sgr90">[033835bb] </span>JLD2 v0.4.53
+<span class="sgr33">⌅</span> <span class="sgr90">[033835bb] </span>JLD2 v0.4.53
   <span class="sgr90">[1019f520] </span>JLFzf v0.1.8
   <span class="sgr90">[692b3bcd] </span>JLLWrappers v1.6.0
   <span class="sgr90">[682c06a0] </span>JSON v0.21.4
@@ -153,7 +153,7 @@ Environment:
   <span class="sgr90">[23fbe1c1] </span>Latexify v0.16.5
   <span class="sgr90">[10f19ff3] </span>LayoutPointers v0.1.17
   <span class="sgr90">[0e77f7df] </span>LazilyInitializedFields v1.2.2
-  <span class="sgr90">[5078a376] </span>LazyArrays v2.2.0
+  <span class="sgr90">[5078a376] </span>LazyArrays v2.2.1
   <span class="sgr90">[2d8b4e74] </span>LevyArea v1.0.0
   <span class="sgr90">[d3d80556] </span>LineSearches v7.3.0
   <span class="sgr90">[7ed4a6bd] </span>LinearSolve v2.34.0
@@ -170,7 +170,7 @@ Environment:
   <span class="sgr90">[739be429] </span>MbedTLS v1.1.9
   <span class="sgr90">[442fdcdd] </span>Measures v0.3.2
   <span class="sgr90">[fa8bd995] </span>MetaGraphsNext v0.7.0
-  <span class="sgr90">[94925ecb] </span>MethodOfLines v0.11.2
+  <span class="sgr90">[94925ecb] </span>MethodOfLines v0.11.3
   <span class="sgr90">[e1d29d7a] </span>Missings v1.2.0
 <span class="sgr32">⌃</span> <span class="sgr90">[961ee093] </span>ModelingToolkit v9.32.0
   <span class="sgr90">[46d2c3a1] </span>MuladdMacro v0.2.4
@@ -187,28 +187,28 @@ Environment:
   <span class="sgr90">[bac558e1] </span>OrderedCollections v1.6.3
   <span class="sgr90">[1dea7af3] </span>OrdinaryDiffEq v6.89.0
   <span class="sgr90">[89bda076] </span>OrdinaryDiffEqAdamsBashforthMoulton v1.1.0
-  <span class="sgr90">[6ad6398a] </span>OrdinaryDiffEqBDF v1.1.1
-  <span class="sgr90">[bbf590c4] </span>OrdinaryDiffEqCore v1.4.0
+  <span class="sgr90">[6ad6398a] </span>OrdinaryDiffEqBDF v1.1.2
+  <span class="sgr90">[bbf590c4] </span>OrdinaryDiffEqCore v1.6.0
   <span class="sgr90">[50262376] </span>OrdinaryDiffEqDefault v1.1.0
   <span class="sgr90">[4302a76b] </span>OrdinaryDiffEqDifferentiation v1.1.0
   <span class="sgr90">[9286f039] </span>OrdinaryDiffEqExplicitRK v1.1.0
   <span class="sgr90">[e0540318] </span>OrdinaryDiffEqExponentialRK v1.1.0
   <span class="sgr90">[becaefa8] </span>OrdinaryDiffEqExtrapolation v1.1.0
-  <span class="sgr90">[5960d6e9] </span>OrdinaryDiffEqFIRK v1.1.0
+  <span class="sgr90">[5960d6e9] </span>OrdinaryDiffEqFIRK v1.1.1
   <span class="sgr90">[101fe9f7] </span>OrdinaryDiffEqFeagin v1.1.0
   <span class="sgr90">[d3585ca7] </span>OrdinaryDiffEqFunctionMap v1.1.1
   <span class="sgr90">[d28bc4f8] </span>OrdinaryDiffEqHighOrderRK v1.1.0
   <span class="sgr90">[9f002381] </span>OrdinaryDiffEqIMEXMultistep v1.1.0
   <span class="sgr90">[521117fe] </span>OrdinaryDiffEqLinear v1.1.0
-  <span class="sgr90">[1344f307] </span>OrdinaryDiffEqLowOrderRK v1.1.0
+  <span class="sgr90">[1344f307] </span>OrdinaryDiffEqLowOrderRK v1.2.0
   <span class="sgr90">[b0944070] </span>OrdinaryDiffEqLowStorageRK v1.2.1
-  <span class="sgr90">[127b3ac7] </span>OrdinaryDiffEqNonlinearSolve v1.1.0
+  <span class="sgr90">[127b3ac7] </span>OrdinaryDiffEqNonlinearSolve v1.2.1
   <span class="sgr90">[c9986a66] </span>OrdinaryDiffEqNordsieck v1.1.0
   <span class="sgr90">[5dd0a6cf] </span>OrdinaryDiffEqPDIRK v1.1.0
   <span class="sgr90">[5b33eab2] </span>OrdinaryDiffEqPRK v1.1.0
   <span class="sgr90">[04162be5] </span>OrdinaryDiffEqQPRK v1.1.0
   <span class="sgr90">[af6ede74] </span>OrdinaryDiffEqRKN v1.1.0
-  <span class="sgr90">[43230ef6] </span>OrdinaryDiffEqRosenbrock v1.1.1
+  <span class="sgr90">[43230ef6] </span>OrdinaryDiffEqRosenbrock v1.2.0
   <span class="sgr90">[2d112036] </span>OrdinaryDiffEqSDIRK v1.1.0
   <span class="sgr90">[669c94d9] </span>OrdinaryDiffEqSSPRK v1.2.0
   <span class="sgr90">[e3e12d00] </span>OrdinaryDiffEqStabilizedIRK v1.1.0
@@ -251,11 +251,11 @@ Environment:
   <span class="sgr90">[05181044] </span>RelocatableFolders v1.0.1
   <span class="sgr90">[ae029012] </span>Requires v1.3.0
   <span class="sgr90">[ae5879a3] </span>ResettableStacks v1.1.1
-  <span class="sgr90">[79098fc4] </span>Rmath v0.7.1
+  <span class="sgr90">[79098fc4] </span>Rmath v0.8.0
   <span class="sgr90">[7e49a35a] </span>RuntimeGeneratedFunctions v0.5.13
   <span class="sgr90">[94e857df] </span>SIMDTypes v0.1.0
   <span class="sgr90">[476501e8] </span>SLEEFPirates v0.6.43
-  <span class="sgr90">[0bca4576] </span>SciMLBase v2.52.0
+  <span class="sgr90">[0bca4576] </span>SciMLBase v2.53.1
   <span class="sgr90">[c0aeaf25] </span>SciMLOperators v0.3.10
   <span class="sgr90">[53ae85a6] </span>SciMLStructures v1.5.0
   <span class="sgr90">[6c6a2e73] </span>Scratch v1.2.1
@@ -277,13 +277,13 @@ Environment:
   <span class="sgr90">[1e83bf80] </span>StaticArraysCore v1.4.3
   <span class="sgr90">[82ae8749] </span>StatsAPI v1.7.0
   <span class="sgr90">[2913bbd2] </span>StatsBase v0.34.3
-  <span class="sgr90">[4c63d2b9] </span>StatsFuns v1.3.1
-  <span class="sgr90">[9672c7b4] </span>SteadyStateDiffEq v2.3.2
+  <span class="sgr90">[4c63d2b9] </span>StatsFuns v1.3.2
+  <span class="sgr90">[9672c7b4] </span>SteadyStateDiffEq v2.4.0
   <span class="sgr90">[789caeaf] </span>StochasticDiffEq v6.69.0
   <span class="sgr90">[7792a7ef] </span>StrideArraysCore v0.5.7
   <span class="sgr90">[892a3eda] </span>StringManipulation v0.3.4
   <span class="sgr90">[c3572dad] </span>Sundials v4.25.0
-  <span class="sgr90">[2efcf032] </span>SymbolicIndexingInterface v0.3.28
+  <span class="sgr90">[2efcf032] </span>SymbolicIndexingInterface v0.3.30
 <span class="sgr32">⌃</span> <span class="sgr90">[19f23fe9] </span>SymbolicLimits v0.2.1
 <span class="sgr33">⌅</span> <span class="sgr90">[d1185830] </span>SymbolicUtils v2.1.3
 <span class="sgr33">⌅</span> <span class="sgr90">[0c5d862f] </span>Symbolics v5.36.0
@@ -332,7 +332,7 @@ Environment:
   <span class="sgr90">[aacddb02] </span>JpegTurbo_jll v3.0.3+0
   <span class="sgr90">[c1c5ebd0] </span>LAME_jll v3.100.2+0
 <span class="sgr33">⌅</span> <span class="sgr90">[88015f11] </span>LERC_jll v3.0.0+1
-  <span class="sgr90">[1d63c593] </span>LLVMOpenMP_jll v17.0.6+0
+  <span class="sgr90">[1d63c593] </span>LLVMOpenMP_jll v18.1.7+0
   <span class="sgr90">[dd4b983a] </span>LZO_jll v2.10.2+0
 <span class="sgr33">⌅</span> <span class="sgr90">[e9f186c6] </span>Libffi_jll v3.2.2+1
   <span class="sgr90">[d4300ac3] </span>Libgcrypt_jll v1.8.11+0
@@ -351,7 +351,7 @@ Environment:
 <span class="sgr33">⌅</span> <span class="sgr90">[4c82536e] </span>Nettle_jll v3.7.2+0
   <span class="sgr90">[e7412a2a] </span>Ogg_jll v1.3.5+1
   <span class="sgr90">[fe0851c0] </span>OpenMPI_jll v5.0.5+0
-  <span class="sgr90">[458c3c95] </span>OpenSSL_jll v3.0.14+0
+  <span class="sgr90">[458c3c95] </span>OpenSSL_jll v3.0.15+0
   <span class="sgr90">[efe28fd5] </span>OpenSpecFun_jll v0.5.5+0
   <span class="sgr90">[91d4177d] </span>Opus_jll v1.3.3+0
   <span class="sgr90">[c2071276] </span>P11Kit_jll v0.24.1+0
@@ -362,7 +362,7 @@ Environment:
   <span class="sgr90">[629bc702] </span>Qt6Declarative_jll v6.7.1+2
   <span class="sgr90">[ce943373] </span>Qt6ShaderTools_jll v6.7.1+1
   <span class="sgr90">[e99dba38] </span>Qt6Wayland_jll v6.7.1+1
-<span class="sgr33">⌅</span> <span class="sgr90">[f50d1b31] </span>Rmath_jll v0.4.3+0
+  <span class="sgr90">[f50d1b31] </span>Rmath_jll v0.5.1+0
   <span class="sgr90">[76ed43ae] </span>SQLite_jll v3.45.3+0
 <span class="sgr33">⌅</span> <span class="sgr90">[fb77eaff] </span>Sundials_jll v5.2.2+0
   <span class="sgr90">[a44049a8] </span>Vulkan_Loader_jll v1.3.243+0
@@ -464,5 +464,5 @@ Environment:
   <span class="sgr90">[8e850ede] </span>nghttp2_jll v1.52.0+1
   <span class="sgr90">[3f19e933] </span>p7zip_jll v17.4.0+2
 <span class="sgr36"><span class="sgr1">Info</span></span> Packages marked with <span class="sgr32">⌃</span> and <span class="sgr33">⌅</span> have new versions available. Those with <span class="sgr32">⌃</span> may be upgradable, but those with <span class="sgr33">⌅</span> are restricted by compatibility constraints from upgrading. To see why use `status --outdated -m`</code></pre></details>You can also download the 
-<a href="<p>https://github.com/EarthSciML/EarthSciData.jl/tree/gh-pages/v0.9.3/assets/Manifest.toml</p>">manifest</a> file and the
-<a href="<p>https://github.com/EarthSciML/EarthSciData.jl/tree/gh-pages/v0.9.3/assets/Project.toml</p>">project</a> file.</article><nav class="docs-footer"><a class="docs-footer-nextpage" href="geosfp/">GEOS-FP »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.6.0 on <span class="colophon-date" title="Tuesday 3 September 2024 15:01">Tuesday 3 September 2024</span>. Using Julia version 1.10.5.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+<a href="<p>https://github.com/EarthSciML/EarthSciData.jl/tree/gh-pages/v0.9.4/assets/Manifest.toml</p>">manifest</a> file and the
+<a href="<p>https://github.com/EarthSciML/EarthSciData.jl/tree/gh-pages/v0.9.4/assets/Project.toml</p>">project</a> file.</article><nav class="docs-footer"><a class="docs-footer-nextpage" href="geosfp/">GEOS-FP »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.7.0 on <span class="colophon-date" title="Sunday 15 September 2024 18:06">Sunday 15 September 2024</span>. Using Julia version 1.10.5.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
