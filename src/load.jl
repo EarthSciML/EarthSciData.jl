@@ -423,6 +423,7 @@ Interpolate without checking if the data has been correctly loaded for the given
                 # FIXME(CT): This is needed because ModelingToolkit sometimes
                 # calls the interpolator for the beginning of the simulation time period,
                 # and we don't have a way to update for that proactively.
+                @warn "Interpolation for $(itp.varname) failed at t=$(t), locs=$(locs); trying to update interpolator."
                 lazyload!(itp, t)
                 itp.itp(locs..., datetime2unix(t))
             end
