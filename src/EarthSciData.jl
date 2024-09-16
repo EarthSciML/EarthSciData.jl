@@ -9,10 +9,6 @@ using EarthSciMLBase, DiffEqCallbacks
 using DynamicQuantities, Latexify, ProgressMeter
 using Scratch
 
-# TODO: Hotfix to deal with issue https://github.com/SciML/DataInterpolations.jl/issues/331
-# Remove this when the issue is fixed.
-(itp::DataInterpolations.LinearInterpolation)(x::DynamicQuantities.Quantity) = itp(ustrip(x.value))
-
 # General utilities
 include("load.jl")
 include("utils.jl")
