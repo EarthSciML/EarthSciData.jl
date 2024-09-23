@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1726518126301,
+  "lastUpdate": 1727103614310,
   "repoUrl": "https://github.com/EarthSciML/EarthSciData.jl",
   "entries": {
     "Julia benchmark result": [
@@ -1126,6 +1126,54 @@ window.BENCHMARK_DATA = {
           {
             "name": "NEI Simulator/Threads",
             "value": 6321128311,
+            "unit": "ns",
+            "extra": "gctime=0\nmemory=1028324792\nallocs=20574960\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "49699333+dependabot[bot]@users.noreply.github.com",
+            "name": "dependabot[bot]",
+            "username": "dependabot[bot]"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "19e341237a1945594234e9345f00a8e8ed7dbc88",
+          "message": "Bump cla-assistant/github-action from 2.5.1 to 2.6.0 (#75)\n\nBumps [cla-assistant/github-action](https://github.com/cla-assistant/github-action) from 2.5.1 to 2.6.0.\r\n- [Release notes](https://github.com/cla-assistant/github-action/releases)\r\n- [Commits](https://github.com/cla-assistant/github-action/compare/f41946747f85d28e9a738f4f38dbcc74b69c7e0e...b1522fa982419e79591a92e1267de463a281cdb7)\r\n\r\n---\r\nupdated-dependencies:\r\n- dependency-name: cla-assistant/github-action\r\n  dependency-type: direct:production\r\n  update-type: version-update:semver-minor\r\n...\r\n\r\nSigned-off-by: dependabot[bot] <support@github.com>\r\nCo-authored-by: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>",
+          "timestamp": "2024-09-23T09:47:49-05:00",
+          "tree_id": "7a75b8887558cef6e9fed39a6690c68e100bbb0d",
+          "url": "https://github.com/EarthSciML/EarthSciData.jl/commit/19e341237a1945594234e9345f00a8e8ed7dbc88"
+        },
+        "date": 1727103613914,
+        "tool": "julia",
+        "benches": [
+          {
+            "name": "GEOSFP/Interpolation threaded",
+            "value": 208079589,
+            "unit": "ns",
+            "extra": "gctime=0\nmemory=109042960\nallocs=65700\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
+          },
+          {
+            "name": "GEOSFP/Interpolation serial",
+            "value": 349282725.5,
+            "unit": "ns",
+            "extra": "gctime=0\nmemory=82907536\nallocs=47227\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
+          },
+          {
+            "name": "NEI Simulator/Serial",
+            "value": 11884516179,
+            "unit": "ns",
+            "extra": "gctime=88450875\nmemory=1024638296\nallocs=20555812\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
+          },
+          {
+            "name": "NEI Simulator/Threads",
+            "value": 6216330181,
             "unit": "ns",
             "extra": "gctime=0\nmemory=1028324792\nallocs=20574960\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
           }
