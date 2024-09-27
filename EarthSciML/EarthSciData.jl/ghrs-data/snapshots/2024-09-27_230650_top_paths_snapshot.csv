@@ -1,0 +1,11 @@
+url_path,views_total,views_unique
+/EarthSciML/EarthSciData.jl,5,2
+/EarthSciML/EarthSciData.jl/blob/0f5b5455cc6a24f8969fc8d5a825089e06140704/src/update_callback.jl,4,1
+/EarthSciML/EarthSciData.jl/actions,3,1
+/EarthSciML/EarthSciData.jl/blob/0f5b5455cc6a24f8969fc8d5a825089e06140704/src/coupling.jl,2,1
+/EarthSciML/EarthSciData.jl/blob/0f5b5455cc6a24f8969fc8d5a825089e06140704/src/netcdf_output.jl,2,1
+/EarthSciML/EarthSciData.jl/blob/main/docs/make.jl,2,1
+/EarthSciML/EarthSciData.jl/blob/main/test/geosfp_test.jl,2,1
+/EarthSciML/EarthSciData.jl/blob/main/test/nei2016monthly_test.jl,2,1
+/EarthSciML/EarthSciData.jl/tree/main/docs,2,1
+/EarthSciML/EarthSciData.jl/actions/runs/10873017580,1,1
