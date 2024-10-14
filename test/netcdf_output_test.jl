@@ -24,19 +24,20 @@ domain = DomainInfo(
     constIC(0.0, t ∈ Interval(0.0, 2.0)),
     constBC(16.0, x ∈ Interval(-1.0, 1.0),
         y ∈ Interval(-2.0, 2.0),
-        lev ∈ Interval(1.0, 3.0)))
+        lev ∈ Interval(1.0, 3.0)),
+        grid_spacing = [0.1, 0.1, 1])
 
 file = tempname() * ".nc"
 
 csys = couple(sys, domain)
 
 o = NetCDFOutputter(file, 1.0; extra_vars=[
-    structural_simplify(convert(ODESystem, csys)).Test₊sys.v
+    structural_simplify(convert(ODESystem, csys)).Test₊sys₊v
 ])
 
 csys = couple(csys, o)
 
-sim = Simulator(csys, [0.1, 0.1, 1])
+sim = Simulator(csys)
 st = SimulatorStrangThreads(Tsit5(), Euler(), 0.01)
 
 run!(sim, st)

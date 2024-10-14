@@ -71,7 +71,7 @@ function EarthSciMLBase.init_callback(nc::NetCDFOutputter, s::Simulator)
     nc.tvar = nctvar
     nc.grid = s.grid
     nc.h = 1
-    start, finish = EarthSciMLBase.time_range(s.domaininfo)
+    start, finish = EarthSciMLBase.tspan(s.domaininfo)
     return PresetTimeCallback(start:nc.time_interval:finish,
         (integrator) -> affect!(nc, integrator),
         finalize=(c, u, t, integrator) -> close(nc.file),
