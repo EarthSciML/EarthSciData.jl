@@ -132,8 +132,7 @@ data records for the times immediately before and after the current time step.
 
 `varname` is the name of the variable to interpolate. `default_time` is the time to use when initializing
 the interpolator. `spatial_ref` is the spatial reference system that the simulation will be using.
-`cache_size` is the number of time steps that should be held in the cache at any given time
-(default=3; must be >=3).
+`stream_data` specifies whether the data should be streamed in as needed or loaded all at once.
 
 !!! warning
     WARNING: This interpolator includes a hack so that the function `deepcopy` does not copy the interpolator,
@@ -156,11 +155,19 @@ mutable struct DataSetInterpolator{To,N,N2,FT,ITPT}
     copyfinish::Channel{Int}
     lock::ReentrantLock
     initialized::Bool
-    kwargs
 
-    function DataSetInterpolator{To}(fs::FileSet, varname::AbstractString, default_time::DateTime; spatial_ref="+proj=longlat +datum=WGS84 +no_defs", cache_size=3, kwargs...) where {To<:Real}
-        cache_size >= 3 || throw(ArgumentError("cache_size must be at least 3"))
-        metadata = loadmetadata(fs, default_time, varname; kwargs...)
+    function DataSetInterpolator{To}(fs::FileSet, varname::AbstractString,
+        starttime::DateTime, enddtime::DateTime, spatial_ref; stream_data=true) where {To<:Real}
+        metadata = loadmetadata(fs, starttime, varname)
+
+        # Download all of the data we will need.
+        check_times = starttime:DataFrequencyInfo(fs, starttime).frequency:enddtime
+        cpts = unique(vcat([DataFrequencyInfo(fs, t).centerpoints for t in check_times]...))
+        cache_size = 3
+        if !stream_data
+            cache_size = max(sum([starttime <= t < enddtime for t in cpts]), 2)
+        end
+
         load_cache = zeros(To, repeat([1], length(metadata.varsize))...)
         data = zeros(To, repeat([2], length(metadata.varsize))..., cache_size) # Add a dimension for time.
         interp_cache = similar(data)
@@ -184,7 +191,7 @@ mutable struct DataSetInterpolator{To,N,N2,FT,ITPT}
         itp = new{To,N,N2,FT,ITPT}(fs, varname, data, interp_cache, itp2, load_cache,
             metadata, times, DateTime(1, 1, 1), coord_trans,
             Channel{DateTime}(0), Channel(1), Channel{Int}(0),
-            ReentrantLock(), false, kwargs)
+            ReentrantLock(), false)
         Threads.@spawn async_loader(itp)
         itp
     end
@@ -298,7 +305,7 @@ function async_loader(itp::DataSetInterpolator)
     for t ∈ itp.loadrequest
         if t != tt
             try
-                loadslice!(itp.load_cache, itp.fs, t, itp.varname; itp.kwargs...)
+                loadslice!(itp.load_cache, itp.fs, t, itp.varname)
                 tt = t
             catch err
                 @error err
@@ -311,7 +318,7 @@ function async_loader(itp::DataSetInterpolator)
         take!(itp.copyfinish)
         try
             tt = nexttimepoint(itp, tt)
-            loadslice!(itp.load_cache, itp.fs, tt, itp.varname; itp.kwargs...)
+            loadslice!(itp.load_cache, itp.fs, tt, itp.varname)
         catch err
             @error err
             rethrow(err)

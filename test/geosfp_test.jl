@@ -7,12 +7,20 @@ using ModelingToolkit: t, D
 using DynamicQuantities
 import NCDatasets
 
+domain = DomainInfo(DateTime(2022, 1, 1), DateTime(2022, 1, 3);
+    latrange=deg2rad(-85.0f0):deg2rad(2):deg2rad(85.0f0),
+    lonrange=deg2rad(-180.0f0):deg2rad(2.5):deg2rad(175.0f0),
+    levelrange=1:10, dtype=Float64)
+
 @testset "GEOS-FP" begin
-    @parameters lev
-    @parameters lon [unit = u"rad"]
-    @parameters lat [unit = u"rad"]
+    lon, lat, lev = EarthSciMLBase.pvars(domain)
     @constants c_unit = 6.0 [unit = u"rad" description = "constant to make units cancel out"]
-    geosfp, _ = GEOSFP("4x5"; dtype=Float64)
+    geosfp, _ = GEOSFP("4x5", domain)
+
+    @test Symbol.(parameters(geosfp)) == [:lon, :lat, :lev]
+
+    domain2 = EarthSciMLBase.add_partial_derivative_func(domain,
+        partialderivatives_δPδlev_geosfp(geosfp))
 
     function Example()
         @variables c(t) = 5.0 [unit = u"mol/m^3"]
@@ -20,49 +28,37 @@ import NCDatasets
     end
     examplesys = Example()
 
-    domain = DomainInfo(
-        [
-            partialderivatives_δxyδlonlat,
-            partialderivatives_δPδlev_geosfp(geosfp),
-        ],
-        constIC(0.0, t ∈ Interval(Dates.datetime2unix(DateTime(2022, 1, 1)), Dates.datetime2unix(DateTime(2022, 1, 3)))),
-        zerogradBC(lat ∈ Interval(deg2rad(-85.0f0), deg2rad(85.0f0))),
-        periodicBC(lon ∈ Interval(deg2rad(-180.0f0), deg2rad(175.0f0))),
-        zerogradBC(lev ∈ Interval(1.0f0, 10.0f0)),
-    )
-
-    composed_sys = couple(examplesys, domain, Advection(), geosfp)
+    composed_sys = couple(examplesys, domain2, Advection(), geosfp)
     pde_sys = convert(PDESystem, composed_sys)
 
     eqs = equations(pde_sys)
 
     want_terms = [
-        "MeanWind₊v_lon(t, lat, lon, lev)", "GEOSFP₊A3dyn₊U(t, lat, lon, lev)",
-        "MeanWind₊v_lat(t, lat, lon, lev)", "GEOSFP₊A3dyn₊V(t, lat, lon, lev)",
-        "MeanWind₊v_lev(t, lat, lon, lev)", "GEOSFP₊A3dyn₊OMEGA(t, lat, lon, lev)",
-        "GEOSFP₊A3dyn₊U(t, lat, lon, lev)", "EarthSciData.interp_unsafe(DataSetInterpolator{EarthSciData.GEOSFPFileSet, U}, t, lon, lat, lev)",
-        "GEOSFP₊A3dyn₊OMEGA(t, lat, lon, lev)", "EarthSciData.interp_unsafe(DataSetInterpolator{EarthSciData.GEOSFPFileSet, OMEGA}, t, lon, lat, lev)",
-        "GEOSFP₊A3dyn₊V(t, lat, lon, lev)", "EarthSciData.interp_unsafe(DataSetInterpolator{EarthSciData.GEOSFPFileSet, V}, t, lon, lat, lev)",
-        "Differential(t)(ExampleSys₊c(t, lat, lon, lev))", "Differential(lon)(ExampleSys₊c(t, lat, lon, lev)",
-        "MeanWind₊v_lon(t, lat, lon, lev)", "lon2m",
-        "Differential(lat)(ExampleSys₊c(t, lat, lon, lev)",
-        "MeanWind₊v_lat(t, lat, lon, lev)", "lat2meters",
+        "MeanWind₊v_lon(t, lon, lat, lev)", "GEOSFP₊A3dyn₊U(t, lon, lat, lev)",
+        "MeanWind₊v_lat(t, lon, lat, lev)", "GEOSFP₊A3dyn₊V(t, lon, lat, lev)",
+        "MeanWind₊v_lev(t, lon, lat, lev)", "GEOSFP₊A3dyn₊OMEGA(t, lon, lat, lev)",
+        "GEOSFP₊A3dyn₊U(t, lon, lat, lev)", "EarthSciData.interp_unsafe(DataSetInterpolator{EarthSciData.GEOSFPFileSet, U}, t, lon, lat, lev)",
+        "GEOSFP₊A3dyn₊OMEGA(t, lon, lat, lev)", "EarthSciData.interp_unsafe(DataSetInterpolator{EarthSciData.GEOSFPFileSet, OMEGA}, t, lon, lat, lev)",
+        "GEOSFP₊A3dyn₊V(t, lon, lat, lev)", "EarthSciData.interp_unsafe(DataSetInterpolator{EarthSciData.GEOSFPFileSet, V}, t, lon, lat, lev)",
+        "Differential(t)(ExampleSys₊c(t, lon, lat, lev))", "Differential(lon)(ExampleSys₊c(t, lon, lat, lev)",
+        "MeanWind₊v_lon(t, lon, lat, lev)", "lon2m",
+        "Differential(lat)(ExampleSys₊c(t, lon, lat, lev)",
+        "MeanWind₊v_lat(t, lon, lat, lev)", "lat2meters",
         "sin(ExampleSys₊c_unit*lat)", "sin(ExampleSys₊c_unit*lon)",
-        "ExampleSys₊c(t, lat, lon, lev)", "t",
-        "Differential(lev)(ExampleSys₊c(t, lat, lon, lev))",
-        "MeanWind₊v_lev(t, lat, lon, lev)", "P_unit",
+        "ExampleSys₊c(t, lon, lat, lev)", "t",
+        "Differential(lev)(ExampleSys₊c(t, lon, lat, lev))",
+        "MeanWind₊v_lev(t, lon, lat, lev)", "P_unit",
     ]
     have_eqs = string.(eqs)
-    have_eqs = replace.(have_eqs, ("Main."=>"",))
+    have_eqs = replace.(have_eqs, ("Main." => "",))
     for term ∈ want_terms
         @test any(occursin.((term,), have_eqs))
     end
 end
 
 @testset "GEOS-FP pressure levels" begin
-    @parameters lat, [unit=u"rad"], lon, [unit=u"rad"], lev
-    geosfp, updater = GEOSFP("4x5"; dtype=Float64,
-        coord_defaults=Dict(:lev => 1.0, :lat => deg2rad(39.1), :lon => deg2rad(-155.7)))
+    @parameters lat, [unit = u"rad"], lon, [unit = u"rad"], lev
+    geosfp, updater = GEOSFP("4x5", domain)
 
     # Rearrange pressure equation so it can be evaluated for P.
     iips = findfirst((x) -> x == :I3₊PS, [Symbolics.tosymbol(eq.lhs, escape=false) for eq in equations(geosfp)])
@@ -82,7 +78,7 @@ end
     dp = partialderivatives_δPδlev_geosfp(geosfp)
 
     # Check level coordinate index
-    ff = dp([lat, lon, lev])
+    ff = dp([lon, lat, lev])
     @test all(keys(ff) .=== [3])
 
     fff = ModelingToolkit.subs_constants(ff[3])
@@ -97,15 +93,14 @@ end
 
 @testset "GEOS-FP new day" begin
     @parameters(
-        lon = 0.0, [unit=u"rad"],
-        lat = 0.0, [unit=u"rad"],
+        lon = 0.0, [unit = u"rad"],
+        lat = 0.0, [unit = u"rad"],
         lev = 1.0,
     )
     starttime = datetime2unix(DateTime(2022, 5, 1, 23, 58))
     endtime = datetime2unix(DateTime(2022, 5, 2, 0, 3))
 
-    geosfp, updater = GEOSFP("4x5"; dtype=Float64,
-        coord_defaults=Dict(:lon => 0.0, :lat => 0.0, :lev => 1.0))
+    geosfp, updater = GEOSFP("4x5", domain)
 
     iips = findfirst((x) -> x == :I3₊PS, [Symbolics.tosymbol(eq.lhs, escape=false) for eq in equations(geosfp)])
     pseq = equations(geosfp)[iips]
@@ -117,13 +112,12 @@ end
 
 @testset "GEOS-FP wrong year" begin
     @parameters(
-        lon = 0.0, [unit=u"rad"],
-        lat = 0.0, [unit=u"rad"],
+        lon = 0.0, [unit = u"rad"],
+        lat = 0.0, [unit = u"rad"],
         lev = 1.0,
     )
     starttime = datetime2unix(DateTime(5000, 1, 1))
 
-    geosfp, updater = GEOSFP("4x5"; dtype=Float64,
-        coord_defaults=Dict(:lon => 0.0, :lat => 0.0, :lev => 1.0))
+    geosfp, updater = GEOSFP("4x5", domain)
     @test_throws Base.Exception EarthSciData.lazyload!(updater, starttime)
 end

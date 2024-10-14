@@ -149,26 +149,37 @@ NOTE: This is an interpolator that returns an emissions value by interpolating b
 centers of the nearest grid cells in the underlying emissions grid, so it may not exactly conserve the total
 emissions mass, especially if the simulation grid is coarser than the emissions grid.
 """
-function NEI2016MonthlyEmis(sector, x, y, lev; spatial_ref="+proj=longlat +datum=WGS84 +no_defs", dtype=Float32, scale=1.0, name=:NEI2016MonthlyEmis, kwargs...)
+function NEI2016MonthlyEmis(sector::AbstractString, domaininfo::DomainInfo; scale=1.0,
+    name=:NEI2016MonthlyEmis, stream_data=true)
     fs = NEI2016MonthlyEmisFileSet(sector)
-    sample_time = DateTime(2016, 5, 1) # Dummy time to get variable names and dimensions from data.
-    eqs = []
+    starttime, endtime = EarthSciMLBase.tspan_datetime(domaininfo)
+    pvdict = Dict([Symbol(v) => v for v in EarthSciMLBase.pvars(domaininfo)]...)
+    @assert :x in keys(pvdict) || :lon in keys(pvdict) "x or lon must be specified in the domaininfo"
+    @assert :y in keys(pvdict) || :lat in keys(pvdict) "y or lat must be specified in the domaininfo"
+    @assert :lev in keys(pvdict) "lev must be specified in the domaininfo"
+    x = :x in keys(pvdict) ? pvdict[:x] : pvdict[:lon]
+    y = :y in keys(pvdict) ? pvdict[:y] : pvdict[:lat]
+    lev = pvdict[:lev]
     @parameters(
         Δz = 60.0, [unit = u"m", description = "Height of the first vertical grid layer"],
     )
-    vars = []
+    eqs = Equation[]
+    vars = Num[]
     itps = []
-    for varname ∈ varnames(fs, sample_time)
-        itp = DataSetInterpolator{dtype}(fs, varname, sample_time; spatial_ref, kwargs...)
-        @constants zero_emis = 0 [unit = units(itp, sample_time) / u"m"]
-        eq = create_interp_equation(itp, "", t, sample_time, [x, y],
+    for varname ∈ varnames(fs, starttime)
+        dt = EarthSciMLBase.dtype(domaininfo)
+        itp = DataSetInterpolator{dt}(fs, varname, starttime, endtime,
+            domaininfo.spatial_ref; stream_data=stream_data)
+        @constants zero_emis = 0 [unit = units(itp, starttime) / u"m"]
+        zero_emis = ModelingToolkit.unwrap(zero_emis) # Unsure why this is necessary.
+        eq = create_interp_equation(itp, "", t, starttime, [x, y],
             wrapper_f=(eq) -> ifelse(lev < 2, eq / Δz * scale, zero_emis),
         )
         push!(eqs, eq)
         push!(vars, eq.lhs)
         push!(itps, itp)
     end
-    sys = ODESystem(eqs, t; name=name,
+    sys = ODESystem(eqs, t, vars, [x, y, lev, Δz]; name=name,
         metadata=Dict(:coupletype => NEI2016MonthlyEmisCoupler))
     cb = UpdateCallbackCreator(sys, vars, itps)
     return sys, cb
