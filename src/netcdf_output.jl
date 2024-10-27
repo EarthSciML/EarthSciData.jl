@@ -35,15 +35,18 @@ mutable struct NetCDFOutputter
 end
 
 "Set up the output file and the callback function."
-function EarthSciMLBase.init_callback(nc::NetCDFOutputter, s::Simulator)
+function EarthSciMLBase.init_callback(nc::NetCDFOutputter, sys::EarthSciMLBase.CoupledSystem,
+    sys_mtk, obs_eqs, dom::EarthSciMLBase.DomainInfo)
+
     rm(nc.filepath, force=true)
     ds = NCDataset(nc.filepath, "c")
-    pv = EarthSciMLBase.pvars(s.sys.domaininfo)
+    grid = EarthSciMLBase.grid(dom)
+    pv = EarthSciMLBase.pvars(dom)
     @assert length(pv) == 3 "Currently only 3D simulations are supported."
-    @assert length(s.grid) == 3 "Currently only 3D simulations are supported."
+    @assert length(grid) == 3 "Currently only 3D simulations are supported."
     pvstr = [String(Symbol(p)) for p in pv]
     for (i, p) in enumerate(pvstr)
-        ds.dim[p] = length(s.grid[i])
+        ds.dim[p] = length(grid[i])
     end
     ds.dim["time"] = Inf
     function makencvar(v, dims)
@@ -53,7 +56,7 @@ function EarthSciMLBase.init_callback(nc::NetCDFOutputter, s::Simulator)
         ncvar.attrib["units"] = string(DynamicQuantities.dimension(ModelingToolkit.get_unit(v)))
         ncvar
     end
-    ncvars = [makencvar(v, [pvstr..., "time"]) for v in vcat(unknowns(s.sys_mtk), nc.extra_vars)]
+    ncvars = [makencvar(v, [pvstr..., "time"]) for v in vcat(unknowns(sys_mtk), nc.extra_vars)]
     nctvar = defVar(ds, "time", Float64, ("time",))
     nctvar.attrib["description"] = "Time"
     nctvar.attrib["units"] = "seconds since 1970-1-1"
@@ -61,17 +64,20 @@ function EarthSciMLBase.init_callback(nc::NetCDFOutputter, s::Simulator)
         d = defVar(ds, p, nc.dtype, (p,))
         d.attrib["description"] = ModelingToolkit.getdescription(pv[i])
         d.attrib["units"] = string(DynamicQuantities.dimension(ModelingToolkit.get_unit(pv[i])))
-        d[:] = s.grid[i]
+        d[:] = grid[i]
     end
-    for j in eachindex(nc.extra_vars)
-        push!(nc.extra_var_fs, s.obs_fs[s.obs_fs_idx[nc.extra_vars[j]]])
+    if length(nc.extra_vars) > 0
+        obs_fs = EarthSciMLBase.obs_functions(obs_eqs, dom)
+        for j in eachindex(nc.extra_vars)
+            push!(nc.extra_var_fs, obs_fs(nc.extra_vars[j]))
+        end
     end
     nc.file = ds
     nc.vars = ncvars
     nc.tvar = nctvar
-    nc.grid = s.grid
+    nc.grid = grid
     nc.h = 1
-    start, finish = EarthSciMLBase.tspan(s.domaininfo)
+    start, finish = EarthSciMLBase.tspan(dom)
     return PresetTimeCallback(start:nc.time_interval:finish,
         (integrator) -> affect!(nc, integrator),
         finalize=(c, u, t, integrator) -> close(nc.file),
@@ -81,7 +87,7 @@ function EarthSciMLBase.init_callback(nc::NetCDFOutputter, s::Simulator)
 end
 
 """
-Write the current state of the `Simulator` to the NetCDF file.
+Write the current state of the system to the NetCDF file.
 """
 function affect!(nc::NetCDFOutputter, integrator)
     u = reshape(integrator.u, length(nc.vars) - length(nc.extra_vars), [length(g) for g in nc.grid]...)

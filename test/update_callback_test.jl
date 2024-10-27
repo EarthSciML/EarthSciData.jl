@@ -38,16 +38,18 @@ emis = NEI2016MonthlyEmis("mrggrid_withbeis_withrwc", domain)
 
 csys = couple(sys, emis, domain)
 
-sim = Simulator(csys)
+dt = 100.0
+st = SolverStrangSerial(Tsit5(), dt)
+prob = ODEProblem(csys, st)
 
-st = SimulatorStrangSerial(Tsit5(), Euler(), 100.0)
-
-sol = run!(sim, st)
+sol = solve(prob, Euler(), dt=dt)
 
 @test sum(sol.u[end]) ≈ 3.3756746955152187e-6
 
-st = SimulatorStrangThreads(Tsit5(), Euler(), 100.0)
+st = SolverStrangThreads(Tsit5(), dt)
 
-sol = run!(sim, st)
+prob = ODEProblem(csys, st)
+
+sol = solve(prob, Euler(), dt=dt)
 
 @test sum(sol.u[end]) ≈ 3.3756746955152187e-6

@@ -1,8 +1,8 @@
-using Main.EarthSciData
+using EarthSciData
 using EarthSciMLBase
 using Test
 using Dates
-using ModelingToolkit, DomainSets
+using ModelingToolkit
 using ModelingToolkit: t, D
 using DynamicQuantities
 import NCDatasets

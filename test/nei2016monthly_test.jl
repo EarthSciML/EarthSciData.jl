@@ -1,4 +1,4 @@
-using Main.EarthSciData
+using EarthSciData
 using Test
 using DynamicQuantities, EarthSciMLBase, ModelingToolkit
 using ModelingToolkit: t
@@ -105,9 +105,11 @@ end
 @testset "Coupling with GEOS-FP" begin
     gfp = GEOSFP("4x5", domain)
 
-    eqs = equations(convert(ODESystem, couple(emis, gfp)))
+    sys = convert(ODESystem, couple(emis, gfp))
+    structural_simplify(sys)
+    eqs = equations(sys)
 
-    @test occursin("NEI2016MonthlyEmis₊lat(t) ~ lat", string(eqs))
+    @test occursin("NEI2016MonthlyEmis₊lat(t) ~ GEOSFP₊lat", string(eqs))
 end
 
 @testset "wrong year" begin

@@ -17,12 +17,14 @@ function lazyload!(uc::UpdateCallbackCreator, t::AbstractFloat)
 end
 
 """
-Create a callback for this simulator. We only want to update the interpolators
+Create a callback for this system. We only want to update the interpolators
 that are actually used in the system.
 """
-function EarthSciMLBase.init_callback(uc::UpdateCallbackCreator, s::Simulator)
+function EarthSciMLBase.init_callback(uc::UpdateCallbackCreator, sys::EarthSciMLBase.CoupledSystem,
+    sys_mtk, obs_eqs, dom::EarthSciMLBase.DomainInfo)
+
     sysname = nameof(uc.sys)
-    needvars = Symbol.([unknowns(s.sys_mtk); [eq.lhs for eq in observed(s.sys_mtk)]])
+    needvars = Symbol.([unknowns(sys_mtk); [eq.lhs for eq in observed(sys_mtk)]])
     itps = []
     for (v, itp) in zip(uc.variables, uc.interpolators)
         nv = Symbol(sysname, "₊", v)
@@ -46,7 +48,7 @@ function EarthSciMLBase.init_callback(uc::UpdateCallbackCreator, s::Simulator)
     DiscreteCallback(
         (u, t, integrator) -> true, # TODO(CT): Could change to only run when we know interpolators need to be updated.
         update_callback,
-        initialize = initialize,
-        save_positions = (false, false),
+        initialize=initialize,
+        save_positions=(false, false),
     )
 end
