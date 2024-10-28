@@ -54,7 +54,7 @@ function maybedownload(fs::FileSet, t::DateTime)
         prog = Progress(100; desc="Downloading $(basename(u)):", dt=0.1)
         Downloads.download(u, p, progress=(total::Integer, now::Integer) -> begin
             prog.n = total
-            update!(prog, now)
+            ProgressMeter.update!(prog, now)
         end)
     catch e # Delete partially downloaded file if an error occurs.
         rm(p, force=true)
