@@ -317,12 +317,14 @@ function async_loader(itp::DataSetInterpolator)
 end
 
 function initialize!(itp::DataSetInterpolator, t::DateTime)
-    if itp.initialized == false
-        itp.load_cache = zeros(eltype(itp.load_cache), itp.metadata.varsize...)
-        itp.data = zeros(eltype(itp.data), itp.metadata.varsize..., size(itp.data, length(size(itp.data)))) # Add a dimension for time.
-        Threads.@spawn async_loader(itp)
-        itp.initialized = true
-    end
+    itp.load_cache = zeros(eltype(itp.load_cache), itp.metadata.varsize...)
+    itp.data = zeros(eltype(itp.data), itp.metadata.varsize..., size(itp.data, length(size(itp.data)))) # Add a dimension for time.
+    Threads.@spawn async_loader(itp)
+    itp.initialized = true
+end
+
+function update!(itp::DataSetInterpolator, t::DateTime)
+    @assert itp.initialized "Interpolator has not been initialized"
     times = interp_cache_times!(itp, t) # Figure out which times we need.
 
     # Figure out the overlap between the times we have and the times we need.
@@ -359,10 +361,11 @@ function lazyload!(itp::DataSetInterpolator, t::DateTime)
         end
         if !itp.initialized # Initialize new interpolator.
             initialize!(itp, t)
+            update!(itp, t)
             return
         end
         if t <= itp.times[begin] || t > itp.times[end-1]
-            initialize!(itp, t)
+            update!(itp, t)
         end
     end
 end
