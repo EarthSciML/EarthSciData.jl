@@ -47,13 +47,13 @@ end
 @testset "monthly frequency" begin
     sample_time = DateTime(2016, 5, 1)
     itp = EarthSciData.DataSetInterpolator{Float32}(fileset, "NOX", ts, te, spatial_ref)
-    EarthSciData.initialize!(itp, sample_time)
+    EarthSciData.lazyload!(itp, sample_time)
     ti = EarthSciData.DataFrequencyInfo(itp.fs, sample_time)
     @test month(itp.times[1]) == 4
     @test month(itp.times[2]) == 5
 
     sample_time = DateTime(2016, 5, 31)
-    EarthSciData.initialize!(itp, sample_time)
+    EarthSciData.lazyload!(itp, sample_time)
     @test month(itp.times[1]) == 5
     @test month(itp.times[2]) == 6
 end
@@ -110,5 +110,5 @@ end
     sample_time = DateTime(2016, 5, 1)
     itp = EarthSciData.DataSetInterpolator{Float32}(fileset, "NOX", ts, te, spatial_ref)
     sample_time = DateTime(2017, 5, 1)
-    @test_throws AssertionError EarthSciData.initialize!(itp, sample_time)
+    @test_throws AssertionError EarthSciData.lazyload!(itp, sample_time)
 end
