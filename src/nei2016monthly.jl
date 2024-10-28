@@ -165,22 +165,19 @@ function NEI2016MonthlyEmis(sector::AbstractString, domaininfo::DomainInfo; scal
     )
     eqs = Equation[]
     vars = Num[]
-    itps = []
     for varname ∈ varnames(fs, starttime)
         dt = EarthSciMLBase.dtype(domaininfo)
         itp = DataSetInterpolator{dt}(fs, varname, starttime, endtime,
             domaininfo.spatial_ref; stream_data=stream_data)
-        @constants zero_emis = 0 [unit = units(itp, starttime) / u"m"]
+        @constants zero_emis = 0 [unit = units(itp) / u"m"]
         zero_emis = ModelingToolkit.unwrap(zero_emis) # Unsure why this is necessary.
-        eq = create_interp_equation(itp, "", t, starttime, [x, y],
+        eq = create_interp_equation(itp, "", t, [x, y],
             wrapper_f=(eq) -> ifelse(lev < 2, eq / Δz * scale, zero_emis),
         )
         push!(eqs, eq)
         push!(vars, eq.lhs)
-        push!(itps, itp)
     end
     sys = ODESystem(eqs, t, vars, [x, y, lev, Δz]; name=name,
         metadata=Dict(:coupletype => NEI2016MonthlyEmisCoupler))
-    cb = UpdateCallbackCreator(sys, vars, itps)
-    return sys, cb
+    return sys
 end

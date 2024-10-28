@@ -15,7 +15,7 @@ domain = DomainInfo(DateTime(2022, 1, 1), DateTime(2022, 1, 3);
 @testset "GEOS-FP" begin
     lon, lat, lev = EarthSciMLBase.pvars(domain)
     @constants c_unit = 6.0 [unit = u"rad" description = "constant to make units cancel out"]
-    geosfp, _ = GEOSFP("4x5", domain)
+    geosfp = GEOSFP("4x5", domain)
 
     @test Symbol.(parameters(geosfp)) == [:lon, :lat, :lev]
 
@@ -37,9 +37,9 @@ domain = DomainInfo(DateTime(2022, 1, 1), DateTime(2022, 1, 3);
         "MeanWind₊v_lon(t, lon, lat, lev)", "GEOSFP₊A3dyn₊U(t, lon, lat, lev)",
         "MeanWind₊v_lat(t, lon, lat, lev)", "GEOSFP₊A3dyn₊V(t, lon, lat, lev)",
         "MeanWind₊v_lev(t, lon, lat, lev)", "GEOSFP₊A3dyn₊OMEGA(t, lon, lat, lev)",
-        "GEOSFP₊A3dyn₊U(t, lon, lat, lev)", "EarthSciData.interp_unsafe(DataSetInterpolator{EarthSciData.GEOSFPFileSet, U}, t, lon, lat, lev)",
-        "GEOSFP₊A3dyn₊OMEGA(t, lon, lat, lev)", "EarthSciData.interp_unsafe(DataSetInterpolator{EarthSciData.GEOSFPFileSet, OMEGA}, t, lon, lat, lev)",
-        "GEOSFP₊A3dyn₊V(t, lon, lat, lev)", "EarthSciData.interp_unsafe(DataSetInterpolator{EarthSciData.GEOSFPFileSet, V}, t, lon, lat, lev)",
+        "GEOSFP₊A3dyn₊U(t, lon, lat, lev)", "EarthSciData.interp!(DataSetInterpolator{EarthSciData.GEOSFPFileSet, U}, t, lon, lat, lev)",
+        "GEOSFP₊A3dyn₊OMEGA(t, lon, lat, lev)", "EarthSciData.interp!(DataSetInterpolator{EarthSciData.GEOSFPFileSet, OMEGA}, t, lon, lat, lev)",
+        "GEOSFP₊A3dyn₊V(t, lon, lat, lev)", "EarthSciData.interp!(DataSetInterpolator{EarthSciData.GEOSFPFileSet, V}, t, lon, lat, lev)",
         "Differential(t)(ExampleSys₊c(t, lon, lat, lev))", "Differential(lon)(ExampleSys₊c(t, lon, lat, lev)",
         "MeanWind₊v_lon(t, lon, lat, lev)", "lon2m",
         "Differential(lat)(ExampleSys₊c(t, lon, lat, lev)",
@@ -58,7 +58,7 @@ end
 
 @testset "GEOS-FP pressure levels" begin
     @parameters lat, [unit = u"rad"], lon, [unit = u"rad"], lev
-    geosfp, updater = GEOSFP("4x5", domain)
+    geosfp = GEOSFP("4x5", domain)
 
     # Rearrange pressure equation so it can be evaluated for P.
     iips = findfirst((x) -> x == :I3₊PS, [Symbolics.tosymbol(eq.lhs, escape=false) for eq in equations(geosfp)])
@@ -67,7 +67,6 @@ end
     peq = substitute(equations(geosfp)[iip], pseq.lhs => pseq.rhs)
 
     # Check Pressure levels
-    EarthSciData.lazyload!(updater, datetime2unix(DateTime(2022, 5, 1)))
     P = ModelingToolkit.subs_constants(peq.rhs)
     P_expr = build_function(P, [t, lon, lat, lev])
     mypf = eval(P_expr)
@@ -100,13 +99,12 @@ end
     starttime = datetime2unix(DateTime(2022, 5, 1, 23, 58))
     endtime = datetime2unix(DateTime(2022, 5, 2, 0, 3))
 
-    geosfp, updater = GEOSFP("4x5", domain)
+    geosfp = GEOSFP("4x5", domain)
 
     iips = findfirst((x) -> x == :I3₊PS, [Symbolics.tosymbol(eq.lhs, escape=false) for eq in equations(geosfp)])
     pseq = equations(geosfp)[iips]
     PS_expr = build_function(pseq.rhs, t, lon, lat, lev)
     psf = eval(PS_expr)
-    EarthSciData.lazyload!(updater, starttime)
     psf(starttime, 0.0, 0.0, 1.0)
 end
 
@@ -118,6 +116,11 @@ end
     )
     starttime = datetime2unix(DateTime(5000, 1, 1))
 
-    geosfp, updater = GEOSFP("4x5", domain)
-    @test_throws Base.Exception EarthSciData.lazyload!(updater, starttime)
+    geosfp = GEOSFP("4x5", domain)
+
+    iips = findfirst((x) -> x == :I3₊PS, [Symbolics.tosymbol(eq.lhs, escape=false) for eq in equations(geosfp)])
+    pseq = equations(geosfp)[iips]
+    PS_expr = build_function(pseq.rhs, t, lon, lat, lev)
+    psf = eval(PS_expr)
+    @test_throws Base.Exception psf(starttime, 0.0, 0.0, 1.0)
 end

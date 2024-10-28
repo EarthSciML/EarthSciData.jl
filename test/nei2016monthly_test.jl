@@ -18,7 +18,7 @@ sample_time = ts
 
 spatial_ref="+proj=longlat +datum=WGS84 +no_defs"
 
-emis, updater = NEI2016MonthlyEmis("mrggrid_withbeis_withrwc", domain)
+emis = NEI2016MonthlyEmis("mrggrid_withbeis_withrwc", domain)
 fileset = EarthSciData.NEI2016MonthlyEmisFileSet("mrggrid_withbeis_withrwc")
 
 eqs = equations(emis)
@@ -26,11 +26,6 @@ eqs = equations(emis)
 @test contains(string(eqs[1].rhs), "/ Δz")
 
 sample_time = DateTime(2016, 5, 1)
-
-@testset "can't deepcopy" begin
-    itp = EarthSciData.DataSetInterpolator{Float32}(fileset, "NOX", ts, te, spatial_ref)
-    deepcopy(itp) === itp
-end
 
 @testset "correct projection" begin
     itp = EarthSciData.DataSetInterpolator{Float32}(fileset, "NOX", ts, te, spatial_ref)
@@ -69,7 +64,6 @@ end
     sys = extend(ODESystem([eq], t, [], []; name=:test_sys), emis)
     sys = structural_simplify(sys)
     tt = Dates.datetime2unix(sample_time)
-    EarthSciData.lazyload!(updater, tt)
     prob = ODEProblem(sys, zeros(1), (tt, tt + 60.0), [lat => deg2rad(40.0), lon => deg2rad(-97.0), lev => 1.0])
     sol = solve(prob)
     @test 2 > sol.u[end][end] > 1

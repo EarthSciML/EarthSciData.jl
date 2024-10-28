@@ -1,4 +1,4 @@
-using Main.EarthSciData
+using EarthSciData
 using Dates
 using ModelingToolkit
 using Random
@@ -30,7 +30,7 @@ itp = EarthSciData.DataSetInterpolator{Float32}(fs, "U", t, te, spatial_ref)
 
 @test String(latexify(itp)) == "\$\\mathrm{GEOSFPFileSet}\\left( U \\right)\$"
 
-@test EarthSciData.dimnames(itp, t) == ["lon", "lat", "lev"]
+@test EarthSciData.dimnames(itp) == ["lon", "lat", "lev"]
 @test issetequal(EarthSciData.varnames(fs, t), ["U", "OMEGA", "RH", "DTRAIN", "V"])
 
 @testset "interpolation" begin

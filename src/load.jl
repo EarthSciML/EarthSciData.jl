@@ -133,11 +133,6 @@ data records for the times immediately before and after the current time step.
 `varname` is the name of the variable to interpolate. `default_time` is the time to use when initializing
 the interpolator. `spatial_ref` is the spatial reference system that the simulation will be using.
 `stream_data` specifies whether the data should be streamed in as needed or loaded all at once.
-
-!!! warning
-    WARNING: This interpolator includes a hack so that the function `deepcopy` does not copy the interpolator,
-    it just returns the interpolator.
-    This is necessary to allow us to update the interpolator from a callback, but it may cause unintended side effects.
 """
 mutable struct DataSetInterpolator{To,N,N2,FT,ITPT}
     fs::FileSet
@@ -192,7 +187,6 @@ mutable struct DataSetInterpolator{To,N,N2,FT,ITPT}
             metadata, times, DateTime(1, 1, 1), coord_trans,
             Channel{DateTime}(0), Channel(1), Channel{Int}(0),
             ReentrantLock(), false)
-        Threads.@spawn async_loader(itp)
         itp
     end
 end
@@ -204,10 +198,6 @@ end
 function Base.show(io::IO, itp::DataSetInterpolator)
     print(io, "DataSetInterpolator{$(typeof(itp.fs)), $(itp.varname)}")
 end
-
-# FIXME: WARNING: This is a hack to make sure that the interpolator is not copied
-# so that we can update it from a callback. It may cause unintended side effects.
-Base.deepcopy_internal(itp::DataSetInterpolator, dict::IdDict) = itp
 
 """ Return the units of the data. """
 ModelingToolkit.get_unit(itp::DataSetInterpolator) = itp.metadata.units
@@ -330,6 +320,7 @@ function initialize!(itp::DataSetInterpolator, t::DateTime)
     if itp.initialized == false
         itp.load_cache = zeros(eltype(itp.load_cache), itp.metadata.varsize...)
         itp.data = zeros(eltype(itp.data), itp.metadata.varsize..., size(itp.data, length(size(itp.data)))) # Add a dimension for time.
+        Threads.@spawn async_loader(itp)
         itp.initialized = true
     end
     times = interp_cache_times!(itp, t) # Figure out which times we need.
@@ -382,30 +373,21 @@ $(SIGNATURES)
 
 Return the dimension names associated with this interpolator.
 """
-function dimnames(itp::DataSetInterpolator, t::DateTime)
-    lazyload!(itp, t)
-    itp.metadata.dimnames
-end
+dimnames(itp::DataSetInterpolator) = itp.metadata.dimnames
 
 """
 $(SIGNATURES)
 
 Return the units of the data associated with this interpolator.
 """
-function units(itp::DataSetInterpolator, t::DateTime)
-    lazyload!(itp, t)
-    itp.metadata.units
-end
+units(itp::DataSetInterpolator) = itp.metadata.units
 
 """
 $(SIGNATURES)
 
 Return the description of the data associated with this interpolator.
 """
-function description(itp::DataSetInterpolator, t::DateTime)
-    lazyload!(itp, t)
-    itp.metadata.description
-end
+description(itp::DataSetInterpolator) = itp.metadata.description
 
 """
 $(SIGNATURES)
@@ -472,20 +454,20 @@ Create an equation that interpolates the given dataset at the given time and loc
 `wrapper_f` can specify a function to wrap the interpolated value, for example `eq -> eq / 2`
 to divide the interpolated value by 2.
 """
-function create_interp_equation(itp::DataSetInterpolator, filename, t, sample_time, coords; wrapper_f=v -> v)
+function create_interp_equation(itp::DataSetInterpolator, filename, t, coords; wrapper_f=v -> v)
     # Create right hand side of equation.
     if length(coords) == 3
-        rhs = wrapper_f(interp_unsafe(itp, t, coords[1], coords[2], coords[3]))
+        rhs = wrapper_f(interp!(itp, t, coords[1], coords[2], coords[3]))
     elseif length(coords) == 2
-        rhs = wrapper_f(interp_unsafe(itp, t, coords[1], coords[2]))
+        rhs = wrapper_f(interp!(itp, t, coords[1], coords[2]))
     elseif length(coords) == 1
-        rhs = wrapper_f(interp_unsafe(itp, t, coords[1]))
+        rhs = wrapper_f(interp!(itp, t, coords[1]))
     else
         error("Unexpected number of coordinates: $(length(coords))")
     end
 
     # Create left hand side of equation.
-    desc = description(itp, sample_time)
+    desc = description(itp)
     uu = ModelingToolkit.get_unit(rhs)
     n = length(filename) > 0 ? Symbol("$(filename)₊$(itp.varname)") : Symbol("$(itp.varname)")
     lhs = only(@variables $n(t) [unit = uu, description = desc])

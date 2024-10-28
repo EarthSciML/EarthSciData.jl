@@ -12,7 +12,6 @@ using Scratch
 # General utilities
 include("load.jl")
 include("utils.jl")
-include("update_callback.jl")
 
 # Specific data sets
 include("netcdf.jl")

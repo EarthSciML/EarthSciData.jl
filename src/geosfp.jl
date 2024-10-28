@@ -223,7 +223,7 @@ The native data type for this dataset is Float32.
 
 `stream_data` specifies whether the data should be streamed in as needed or loaded all at once.
 
-See http://geoschemdata.wustl.edu/ExtData/ for current options.
+See http://geoschemdata.wustl.edu/ExtData/ for current data domain options.
 """
 function GEOSFP(domain::AbstractString, domaininfo::DomainInfo; name=:GEOSFP, stream_data=true)
     filesets = Dict{String,GEOSFPFileSet}(
@@ -238,23 +238,21 @@ function GEOSFP(domain::AbstractString, domaininfo::DomainInfo; name=:GEOSFP, st
     pvdict = Dict([Symbol(v) => v for v in EarthSciMLBase.pvars(domaininfo)]...)
     eqs = Equation[]
     vars = Num[]
-    itps = []
     for (filename, fs) in filesets
         for varname ∈ varnames(fs, starttime)
             dt = EarthSciMLBase.dtype(domaininfo)
             itp = DataSetInterpolator{dt}(fs, varname, starttime, endtime,
                 domaininfo.spatial_ref; stream_data=stream_data)
-            dims = dimnames(itp, starttime)
+            dims = dimnames(itp)
             coords = Num[]
             for dim in dims
                 d = Symbol(dim)
                 @assert d ∈ keys(pvdict) "GEOSFP coordinate $d not found in domaininfo coordinates ($(pvs))."
                 push!(coords, pvdict[d])
             end
-            eq = create_interp_equation(itp, filename, t, starttime, coords)
+            eq = create_interp_equation(itp, filename, t, coords)
             push!(eqs, eq)
             push!(vars, eq.lhs)
-            push!(itps, itp)
         end
     end
 
@@ -269,8 +267,7 @@ function GEOSFP(domain::AbstractString, domaininfo::DomainInfo; name=:GEOSFP, st
 
     sys = ODESystem(eqs, t, vars, [pvdict[:lon], pvdict[:lat], lev], name=name,
         metadata=Dict(:coupletype => GEOSFPCoupler))
-    cb = UpdateCallbackCreator(sys, vars, itps)
-    return sys, cb
+    return sys
 end
 
 function EarthSciMLBase.couple2(mw::EarthSciMLBase.MeanWindCoupler, g::GEOSFPCoupler)

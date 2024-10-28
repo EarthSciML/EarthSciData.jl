@@ -18,9 +18,7 @@ using DynamicQuantities: dimension
     lon, [unit=u"rad"], 
     lat, [unit=u"rad"],
 )
-geosfp, geosfp_updater = GEOSFP("4x5")
-
-geosfp
+geosfp = GEOSFP("4x5")
 ```
 
 Note that the [`GEOSFP`](@ref) function returns to things, an equation system and an object that can used to update the time in the underlying data loaders. 
@@ -59,12 +57,9 @@ domain = DomainInfo(
     zerogradBC(lev ∈ Interval(1.0f0, 11.0f0)),
 )
 
-composed_sys = couple(examplesys, domain, geosfp, geosfp_updater)
+composed_sys = couple(examplesys, domain, geosfp)
 pde_sys = convert(PDESystem, composed_sys)
 ```
-
-You can see above that we add both `geosfp` and `geosfp_updater` to our coupled system. 
-If we didn't include the updater, the resulting model would not give the correct results.
 
 Now, finally, we can run the simulation and plot the GEOS-FP wind fields in the result:
 

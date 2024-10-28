@@ -1,4 +1,4 @@
-using Main.EarthSciData
+using EarthSciData
 
 using Test
 using EarthSciMLBase, ModelingToolkit
@@ -44,7 +44,7 @@ prob = ODEProblem(csys, st)
 
 sol = solve(prob, Euler(), dt=dt)
 
-@test sum(sol.u[end]) ≈ 3.3756746955152187e-6
+@test sum(sol.u[end]) ≈ 2.7782704702240893e-5
 
 st = SolverStrangThreads(Tsit5(), dt)
 
@@ -52,4 +52,4 @@ prob = ODEProblem(csys, st)
 
 sol = solve(prob, Euler(), dt=dt)
 
-@test sum(sol.u[end]) ≈ 3.3756746955152187e-6
+@test sum(sol.u[end]) ≈ 2.7782704702240893e-5
