@@ -6,19 +6,19 @@ First, let's initialize some packages and set up the [GEOS-FP](@ref GEOSFP) equa
 
 ```@example geosfp
 using EarthSciData, EarthSciMLBase
-using DomainSets, ModelingToolkit, MethodOfLines, DifferentialEquations
+using ModelingToolkit, MethodOfLines, DifferentialEquations
 using ModelingToolkit: t, D
 using Dates, Plots, DataFrames
 using DynamicQuantities
 using DynamicQuantities: dimension
 
 # Set up system
-@parameters(
-    lev, 
-    lon, [unit=u"rad"], 
-    lat, [unit=u"rad"],
-)
-geosfp = GEOSFP("4x5")
+domain = DomainInfo(DateTime(2022, 1, 1), DateTime(2022, 1, 3);
+    latrange=deg2rad(-85.0f0):deg2rad(2):deg2rad(85.0f0),
+    lonrange=deg2rad(-180.0f0):deg2rad(2.5):deg2rad(175.0f0),
+    levelrange=1:11, dtype=Float32)
+
+geosfp = GEOSFP("4x5", domain)
 ```
 
 Note that the [`GEOSFP`](@ref) function returns to things, an equation system and an object that can used to update the time in the underlying data loaders. 
@@ -40,6 +40,8 @@ To fix this, we create another equation system that is an ODE.
 
 ```@example geosfp
 function Example()
+    @parameters lat=0.0 [unit=u"rad"]
+    @parameters lon=0.0 [unit=u"rad"]
     @variables c(t) = 5.0 [unit=u"s"]
     ODESystem([D(c) ~ sin(lat * 6) + sin(lon * 6)], t, name=:Docs₊Example)
 end
@@ -49,14 +51,6 @@ examplesys = Example()
 Now, let's couple these two systems together, and also add in advection and some information about the domain:
 
 ```@example geosfp
-domain = DomainInfo(
-    partialderivatives_δxyδlonlat,
-    constIC(0.0, t ∈ Interval(Dates.datetime2unix(DateTime(2022, 1, 1)), Dates.datetime2unix(DateTime(2022, 1, 3)))),
-    zerogradBC(lat ∈ Interval(deg2rad(-80.0f0), deg2rad(80.0f0))),
-    periodicBC(lon ∈ Interval(deg2rad(-180.0f0), deg2rad(180.0f0))),
-    zerogradBC(lev ∈ Interval(1.0f0, 11.0f0)),
-)
-
 composed_sys = couple(examplesys, domain, geosfp)
 pde_sys = convert(PDESystem, composed_sys)
 ```
