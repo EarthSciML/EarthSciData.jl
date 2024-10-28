@@ -1,4 +1,4 @@
-using Main.EarthSciData
+using EarthSciData
 using Dates
 using ModelingToolkit
 using Random
@@ -10,6 +10,8 @@ using Test
 
 fs = EarthSciData.GEOSFPFileSet("4x5", "A3dyn")
 t = DateTime(2022, 5, 1)
+te = DateTime(2022, 5, 2)
+spatial_ref = "+proj=longlat +datum=WGS84 +no_defs"
 @test EarthSciData.url(fs, t) == "http://geoschemdata.wustl.edu/ExtData/GEOS_4x5/GEOS_FP/2022/05/GEOSFP.20220501.A3dyn.4x5.nc"
 
 @test endswith(EarthSciData.localpath(fs, t), joinpath("GEOS_4x5", "GEOS_FP", "2022", "05", "GEOSFP.20220501.A3dyn.4x5.nc"))
@@ -24,11 +26,11 @@ metadata = EarthSciData.loadmetadata(fs, t, "U")
 @test metadata.varsize == [72, 46, 72]
 @test metadata.dimnames == ["lon", "lat", "lev"]
 
-itp = EarthSciData.DataSetInterpolator{Float32}(fs, "U", t)
+itp = EarthSciData.DataSetInterpolator{Float32}(fs, "U", t, te, spatial_ref)
 
 @test String(latexify(itp)) == "\$\\mathrm{GEOSFPFileSet}\\left( U \\right)\$"
 
-@test EarthSciData.dimnames(itp, t) == ["lon", "lat", "lev"]
+@test EarthSciData.dimnames(itp) == ["lon", "lat", "lev"]
 @test issetequal(EarthSciData.varnames(fs, t), ["U", "OMEGA", "RH", "DTRAIN", "V"])
 
 @testset "interpolation" begin
@@ -80,10 +82,12 @@ end
     fs = DummyFileSet(DateTime(2022, 4, 30), DateTime(2022, 5, 4))
 
     @testset "big cache" begin
-        @test_nowarn EarthSciData.DataSetInterpolator{Float32}(fs, "U", fs.start; cache_size=100)
+        @test_nowarn EarthSciData.DataSetInterpolator{Float32}(fs, "U", DateTime(2022, 5, 1), DateTime(2022, 5, 3),
+            spatial_ref; stream_data=false)
     end
 
-    itp = EarthSciData.DataSetInterpolator{Float32}(fs, "U", fs.start; cache_size=5)
+    itp = EarthSciData.DataSetInterpolator{Float32}(fs, "U", DateTime(2022, 5, 1), DateTime(2022, 5, 3),
+        spatial_ref; stream_data=true)
     dfi = EarthSciData.DataFrequencyInfo(fs, fs.start)
 
     answerdata = [tv(fs, t) * v for t ∈ dfi.centerpoints, v ∈ [1.0, 0.5, 2.0]]
@@ -105,10 +109,10 @@ end
 
     @test uvals ≈ answers
 
-    @test length(itp.times) == 5
-    @test itp.times == [DateTime("2022-05-02T19:30:00"), DateTime("2022-05-02T22:30:00"),
-        DateTime("2022-05-03T01:30:00"), DateTime("2022-05-03T04:30:00"),
-        DateTime("2022-05-03T07:30:00")]
+    interp!(itp, times[end], xs[end])
+    @test length(itp.times) == 3
+    @test itp.times == [DateTime("2022-05-02T22:30:00"), DateTime("2022-05-03T01:30:00"),
+        DateTime("2022-05-03T04:30:00")]
 
     uvals = zeros(Float32, length(times), length(xs))
     answers = zeros(Float32, length(times), length(xs))
@@ -121,10 +125,26 @@ end
         end
     end
     @test uvals ≈ answers
+
+    @testset "no stream" begin
+        itp = EarthSciData.DataSetInterpolator{Float32}(fs, "U", DateTime(2022, 5, 1),
+            DateTime(2022, 5, 2), spatial_ref; stream_data=false)
+
+        uvals = zeros(Float32, length(times), length(xs))
+        answers = zeros(Float32, length(times), length(xs))
+        for (i, tt) ∈ enumerate(times)
+            for (j, x) ∈ enumerate(xs)
+                uvals[i, j] = interp!(itp, tt, x)
+                answers[i, j] = answer_itp(datetime2unix(tt), x)
+            end
+        end
+
+        @test uvals ≈ answers
+    end
 end
 
 @testset "allocations" begin
-    itp = EarthSciData.DataSetInterpolator{Float64}(fs, "U", t)
+    itp = EarthSciData.DataSetInterpolator{Float64}(fs, "U", t, te, spatial_ref)
     tt = DateTime(2022, 5, 1)
     interp!(itp, tt, 1.0, 0.0, 1.0)
 
@@ -138,7 +158,7 @@ end
             rethrow(err)
         end
 
-        itp2 = EarthSciData.DataSetInterpolator{Float32}(fs, "U", t)
+        itp2 = EarthSciData.DataSetInterpolator{Float32}(fs, "U", t, te, spatial_ref)
         interp!(itp2, tt, 1.0f0, 0.0f0, 1.0f0)
         checkf(itp2, tt, 1.0f0, 0.0f0, 1.0f0)
         true

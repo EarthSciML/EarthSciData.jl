@@ -18,39 +18,41 @@ eqs = [
     v ~ (x + y) * lev
 ]
 
-sys = ODESystem(eqs, t; name=:Test₊sys)
+sys = ODESystem(eqs, t; name=:sys)
 
 domain = DomainInfo(
     constIC(0.0, t ∈ Interval(0.0, 2.0)),
     constBC(16.0, x ∈ Interval(-1.0, 1.0),
         y ∈ Interval(-2.0, 2.0),
-        lev ∈ Interval(1.0, 3.0)))
+        lev ∈ Interval(1.0, 3.0)),
+        grid_spacing = [0.1, 0.1, 1])
 
 file = tempname() * ".nc"
 
 csys = couple(sys, domain)
 
 o = NetCDFOutputter(file, 1.0; extra_vars=[
-    structural_simplify(convert(ODESystem, csys)).Test₊sys.v
+    structural_simplify(convert(ODESystem, csys)).sys₊v
 ])
 
 csys = couple(csys, o)
 
-sim = Simulator(csys, [0.1, 0.1, 1])
-st = SimulatorStrangThreads(Tsit5(), Euler(), 0.01)
+dt = 0.01
+st = SolverStrangThreads(Tsit5(), dt)
+prob = ODEProblem(csys, st)
 
-run!(sim, st)
+solve(prob, Euler(), dt=dt)
 
 ds = NCDataset(file, "r")
 
-@test size(ds["Test₊sys₊u"], 4) == 3
-@test all(isapprox.(ds["Test₊sys₊u"][:, :, :, 1], 1.0, atol=0.011))
-@test sum(abs.(ds["Test₊sys₊v"][:, :, :, 1])) ≈ 5754.0f0
-@test all(isapprox.(ds["Test₊sys₊u"][:, :, :, 2], 2.0, atol=0.011))
-@test sum(abs.(ds["Test₊sys₊v"][:, :, :, 2])) ≈ 5754.0f0
-@test all(isapprox.(ds["Test₊sys₊u"][:, :, :, 3], 3.0, atol=0.011))
-@test sum(abs.(ds["Test₊sys₊v"][:, :, :, 3])) ≈ 5754.0f0
-@test size(ds["Test₊sys₊u"]) == (21, 41, 3, 3)
+@test size(ds["sys₊u"], 4) == 3
+@test all(isapprox.(ds["sys₊u"][:, :, :, 1], 1.0, atol=0.011))
+@test sum(abs.(ds["sys₊v"][:, :, :, 1])) ≈ 5754.0f0
+@test all(isapprox.(ds["sys₊u"][:, :, :, 2], 2.0, atol=0.011))
+@test sum(abs.(ds["sys₊v"][:, :, :, 2])) ≈ 5754.0f0
+@test all(isapprox.(ds["sys₊u"][:, :, :, 3], 3.0, atol=0.011))
+@test sum(abs.(ds["sys₊v"][:, :, :, 3])) ≈ 5754.0f0
+@test size(ds["sys₊u"]) == (21, 41, 3, 3)
 
 @test ds["time"][:] == [DateTime("1970-01-01T00:00:00"), DateTime("1970-01-01T00:00:01"), DateTime("1970-01-01T00:00:02")]
 @test ds["x"][:] ≈ -1.0:0.1:1.0
@@ -60,7 +62,7 @@ ds = NCDataset(file, "r")
 @test ds["x"].attrib["description"] == "x coordinate"
 @test ds["x"].attrib["units"] == "kg"
 
-@test ds["Test₊sys₊u"].attrib["description"] == "u value"
-@test ds["Test₊sys₊u"].attrib["units"] == "kg"
+@test ds["sys₊u"].attrib["description"] == "u value"
+@test ds["sys₊u"].attrib["units"] == "kg"
 
 rm(file, force=true)

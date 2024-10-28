@@ -44,7 +44,7 @@ function EarthSciMLBase.couple2(sys::SysCoupler, emis::EarthSciData.NEI2016Month
     sys, emis = sys.sys, emis.sys
     operator_compose(sys, emis)
 end
-function nei_simulator()
+function nei_simulator(st)
     @parameters lat = deg2rad(40.0) lon = deg2rad(-97.0) lev = 0.0
     @variables ACET(t) = 0.0 [unit = u"kg*m^-3"]
     @constants c = 1000 [unit = u"s"]
@@ -64,22 +64,26 @@ function nei_simulator()
             lon ∈ Interval(deg2rad(-115), deg2rad(-68.75)),
             lat ∈ Interval(deg2rad(25), deg2rad(53.7)),
             lev ∈ Interval(1, 2)
-        ))
+        );
+        grid_spacing=[deg2rad(1.25), deg2rad(1.2), 1])
 
     csys = couple(sys, emis, domain)
 
-    Simulator(csys, [deg2rad(1.25), deg2rad(1.2), 1])
+    ODEProblem(csys, st)
 end
 
 suite["NEI Simulator"] = BenchmarkGroup()
-sim = nei_simulator()
 st = SimulatorStrangSerial(Tsit5(), Euler(), 100.0)
-suite["NEI Simulator"]["Serial"] = @benchmarkable run!($sim, $st)
+sim = nei_simulator(st)
+suite["NEI Simulator"]["Serial"] = @benchmarkable solve($sim, dt=100.0,
+    save_on=false, save_start=false, save_end=false, initialize_save=false)
 
 st = SimulatorStrangThreads(Tsit5(), Euler(), 100.0)
-suite["NEI Simulator"]["Threads"] = @benchmarkable run!($sim, $st)
+sim = nei_simulator(st)
+suite["NEI Simulator"]["Threads"] = @benchmarkable solve($sim, dt=100.0,
+    save_on=false, save_start=false, save_end=false, initialize_save=false)
 
-tune!(suite, verbose = true)
-results = run(suite, verbose = true)
+tune!(suite, verbose=true)
+results = run(suite, verbose=true)
 
 BenchmarkTools.save("output.json", median(results))

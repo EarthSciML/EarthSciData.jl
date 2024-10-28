@@ -219,16 +219,13 @@ Domain options (as of 2022-01-30):
 - NATIVE
 - c720
 
-`coord_defaults` can be used to provide default values for the coordinates of the
-domain. For example if we want to perform a 2D simulation with a vertical dimension,
-we can set `coord_defaults = Dict(:lev => 1)`.
+The native data type for this dataset is Float32.
 
-`dtype` represents the desired data type of the interpolated values. The native data type
-for this dataset is Float32.
+`stream_data` specifies whether the data should be streamed in as needed or loaded all at once.
 
-See http://geoschemdata.wustl.edu/ExtData/ for current options.
+See http://geoschemdata.wustl.edu/ExtData/ for current data domain options.
 """
-function GEOSFP(domain::AbstractString; coord_defaults=Dict{Symbol,Number}(), spatial_ref="+proj=longlat +datum=WGS84 +no_defs", dtype=Float32, name=:GEOSFP, kwargs...)
+function GEOSFP(domain::AbstractString, domaininfo::DomainInfo; name=:GEOSFP, stream_data=true)
     filesets = Dict{String,GEOSFPFileSet}(
         "A1" => GEOSFPFileSet(domain, "A1"),
         "A3cld" => GEOSFPFileSet(domain, "A3cld"),
@@ -237,28 +234,25 @@ function GEOSFP(domain::AbstractString; coord_defaults=Dict{Symbol,Number}(), sp
         "A3mstE" => GEOSFPFileSet(domain, "A3mstE"),
         "I3" => GEOSFPFileSet(domain, "I3"))
 
-    sample_time = DateTime(2022, 5, 1) # Dummy time to get variable names and dimensions from data.
-    eqs = []
-    vars = []
-    itps = []
+    starttime, endtime = EarthSciMLBase.tspan_datetime(domaininfo)
+    pvdict = Dict([Symbol(v) => v for v in EarthSciMLBase.pvars(domaininfo)]...)
+    eqs = Equation[]
+    vars = Num[]
     for (filename, fs) in filesets
-        for varname ∈ varnames(fs, sample_time)
-            itp = DataSetInterpolator{dtype}(fs, varname, sample_time; spatial_ref, kwargs...)
-            dims = dimnames(itp, sample_time)
+        for varname ∈ varnames(fs, starttime)
+            dt = EarthSciMLBase.dtype(domaininfo)
+            itp = DataSetInterpolator{dt}(fs, varname, starttime, endtime,
+                domaininfo.spatial_ref; stream_data=stream_data)
+            dims = dimnames(itp)
             coords = Num[]
-            for dim ∈ dims
+            for dim in dims
                 d = Symbol(dim)
-                if d ∈ keys(coord_defaults) # Set a default value for this coordinate.
-                    v = (@parameters $d = coord_defaults[d])[1]
-                else # No default value.
-                    v = (@parameters $d)[1]
-                end
-                push!(coords, v)
+                @assert d ∈ keys(pvdict) "GEOSFP coordinate $d not found in domaininfo coordinates ($(pvs))."
+                push!(coords, pvdict[d])
             end
-            eq = create_interp_equation(itp, filename, t, sample_time, coords)
+            eq = create_interp_equation(itp, filename, t, coords)
             push!(eqs, eq)
             push!(vars, eq.lhs)
-            push!(itps, itp)
         end
     end
 
@@ -266,19 +260,14 @@ function GEOSFP(domain::AbstractString; coord_defaults=Dict{Symbol,Number}(), sp
     @constants P_unit = 1.0 [unit = u"Pa", description = "Unit pressure"]
     @variables P(t) [unit = u"Pa", description = "Pressure"]
     @variables I3₊PS(t) [unit = u"Pa", description = "Pressure at the surface"]
-    d = :lev
-    if d ∈ keys(coord_defaults) # Set a default value for this coordinate.
-        lev = (@parameters $d = coord_defaults[d])[1]
-    else # No default value.
-        lev = (@parameters $d)[1]
-    end
+    @assert :lev in keys(pvdict) "GEOSFP coordinate :lev not found in domaininfo coordinates ($(pvs))."
+    lev = pvdict[:lev]
     pressure_eq = P ~ P_unit * Ap(lev) + Bp(lev) * I3₊PS
     push!(eqs, pressure_eq)
 
-    sys = ODESystem(eqs, t, name=name,
+    sys = ODESystem(eqs, t, vars, [pvdict[:lon], pvdict[:lat], lev], name=name,
         metadata=Dict(:coupletype => GEOSFPCoupler))
-    cb = UpdateCallbackCreator(sys, vars, itps)
-    return sys, cb
+    return sys
 end
 
 function EarthSciMLBase.couple2(mw::EarthSciMLBase.MeanWindCoupler, g::GEOSFPCoupler)

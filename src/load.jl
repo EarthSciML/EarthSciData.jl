@@ -132,13 +132,7 @@ data records for the times immediately before and after the current time step.
 
 `varname` is the name of the variable to interpolate. `default_time` is the time to use when initializing
 the interpolator. `spatial_ref` is the spatial reference system that the simulation will be using.
-`cache_size` is the number of time steps that should be held in the cache at any given time
-(default=3; must be >=3).
-
-!!! warning
-    WARNING: This interpolator includes a hack so that the function `deepcopy` does not copy the interpolator,
-    it just returns the interpolator.
-    This is necessary to allow us to update the interpolator from a callback, but it may cause unintended side effects.
+`stream_data` specifies whether the data should be streamed in as needed or loaded all at once.
 """
 mutable struct DataSetInterpolator{To,N,N2,FT,ITPT}
     fs::FileSet
@@ -156,11 +150,19 @@ mutable struct DataSetInterpolator{To,N,N2,FT,ITPT}
     copyfinish::Channel{Int}
     lock::ReentrantLock
     initialized::Bool
-    kwargs
 
-    function DataSetInterpolator{To}(fs::FileSet, varname::AbstractString, default_time::DateTime; spatial_ref="+proj=longlat +datum=WGS84 +no_defs", cache_size=3, kwargs...) where {To<:Real}
-        cache_size >= 3 || throw(ArgumentError("cache_size must be at least 3"))
-        metadata = loadmetadata(fs, default_time, varname; kwargs...)
+    function DataSetInterpolator{To}(fs::FileSet, varname::AbstractString,
+        starttime::DateTime, enddtime::DateTime, spatial_ref; stream_data=true) where {To<:Real}
+        metadata = loadmetadata(fs, starttime, varname)
+
+        # Download all of the data we will need.
+        check_times = starttime:DataFrequencyInfo(fs, starttime).frequency:enddtime
+        cpts = unique(vcat([DataFrequencyInfo(fs, t).centerpoints for t in check_times]...))
+        cache_size = 3
+        if !stream_data
+            cache_size = max(sum([starttime <= t < enddtime for t in cpts]), 2)
+        end
+
         load_cache = zeros(To, repeat([1], length(metadata.varsize))...)
         data = zeros(To, repeat([2], length(metadata.varsize))..., cache_size) # Add a dimension for time.
         interp_cache = similar(data)
@@ -184,8 +186,7 @@ mutable struct DataSetInterpolator{To,N,N2,FT,ITPT}
         itp = new{To,N,N2,FT,ITPT}(fs, varname, data, interp_cache, itp2, load_cache,
             metadata, times, DateTime(1, 1, 1), coord_trans,
             Channel{DateTime}(0), Channel(1), Channel{Int}(0),
-            ReentrantLock(), false, kwargs)
-        Threads.@spawn async_loader(itp)
+            ReentrantLock(), false)
         itp
     end
 end
@@ -197,10 +198,6 @@ end
 function Base.show(io::IO, itp::DataSetInterpolator)
     print(io, "DataSetInterpolator{$(typeof(itp.fs)), $(itp.varname)}")
 end
-
-# FIXME: WARNING: This is a hack to make sure that the interpolator is not copied
-# so that we can update it from a callback. It may cause unintended side effects.
-Base.deepcopy_internal(itp::DataSetInterpolator, dict::IdDict) = itp
 
 """ Return the units of the data. """
 ModelingToolkit.get_unit(itp::DataSetInterpolator) = itp.metadata.units
@@ -298,7 +295,7 @@ function async_loader(itp::DataSetInterpolator)
     for t ∈ itp.loadrequest
         if t != tt
             try
-                loadslice!(itp.load_cache, itp.fs, t, itp.varname; itp.kwargs...)
+                loadslice!(itp.load_cache, itp.fs, t, itp.varname)
                 tt = t
             catch err
                 @error err
@@ -311,7 +308,7 @@ function async_loader(itp::DataSetInterpolator)
         take!(itp.copyfinish)
         try
             tt = nexttimepoint(itp, tt)
-            loadslice!(itp.load_cache, itp.fs, tt, itp.varname; itp.kwargs...)
+            loadslice!(itp.load_cache, itp.fs, tt, itp.varname)
         catch err
             @error err
             rethrow(err)
@@ -323,6 +320,7 @@ function initialize!(itp::DataSetInterpolator, t::DateTime)
     if itp.initialized == false
         itp.load_cache = zeros(eltype(itp.load_cache), itp.metadata.varsize...)
         itp.data = zeros(eltype(itp.data), itp.metadata.varsize..., size(itp.data, length(size(itp.data)))) # Add a dimension for time.
+        Threads.@spawn async_loader(itp)
         itp.initialized = true
     end
     times = interp_cache_times!(itp, t) # Figure out which times we need.
@@ -375,30 +373,21 @@ $(SIGNATURES)
 
 Return the dimension names associated with this interpolator.
 """
-function dimnames(itp::DataSetInterpolator, t::DateTime)
-    lazyload!(itp, t)
-    itp.metadata.dimnames
-end
+dimnames(itp::DataSetInterpolator) = itp.metadata.dimnames
 
 """
 $(SIGNATURES)
 
 Return the units of the data associated with this interpolator.
 """
-function units(itp::DataSetInterpolator, t::DateTime)
-    lazyload!(itp, t)
-    itp.metadata.units
-end
+units(itp::DataSetInterpolator) = itp.metadata.units
 
 """
 $(SIGNATURES)
 
 Return the description of the data associated with this interpolator.
 """
-function description(itp::DataSetInterpolator, t::DateTime)
-    lazyload!(itp, t)
-    itp.metadata.description
-end
+description(itp::DataSetInterpolator) = itp.metadata.description
 
 """
 $(SIGNATURES)
@@ -465,20 +454,20 @@ Create an equation that interpolates the given dataset at the given time and loc
 `wrapper_f` can specify a function to wrap the interpolated value, for example `eq -> eq / 2`
 to divide the interpolated value by 2.
 """
-function create_interp_equation(itp::DataSetInterpolator, filename, t, sample_time, coords; wrapper_f=v -> v)
+function create_interp_equation(itp::DataSetInterpolator, filename, t, coords; wrapper_f=v -> v)
     # Create right hand side of equation.
     if length(coords) == 3
-        rhs = wrapper_f(interp_unsafe(itp, t, coords[1], coords[2], coords[3]))
+        rhs = wrapper_f(interp!(itp, t, coords[1], coords[2], coords[3]))
     elseif length(coords) == 2
-        rhs = wrapper_f(interp_unsafe(itp, t, coords[1], coords[2]))
+        rhs = wrapper_f(interp!(itp, t, coords[1], coords[2]))
     elseif length(coords) == 1
-        rhs = wrapper_f(interp_unsafe(itp, t, coords[1]))
+        rhs = wrapper_f(interp!(itp, t, coords[1]))
     else
         error("Unexpected number of coordinates: $(length(coords))")
     end
 
     # Create left hand side of equation.
-    desc = description(itp, sample_time)
+    desc = description(itp)
     uu = ModelingToolkit.get_unit(rhs)
     n = length(filename) > 0 ? Symbol("$(filename)₊$(itp.varname)") : Symbol("$(itp.varname)")
     lhs = only(@variables $n(t) [unit = uu, description = desc])
