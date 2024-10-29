@@ -10,7 +10,7 @@ import NCDatasets
 domain = DomainInfo(DateTime(2022, 1, 1), DateTime(2022, 1, 3);
     latrange=deg2rad(-85.0f0):deg2rad(2):deg2rad(85.0f0),
     lonrange=deg2rad(-180.0f0):deg2rad(2.5):deg2rad(175.0f0),
-    levelrange=1:10, dtype=Float64)
+    levrange=1:10, dtype=Float64)
 
 @testset "GEOS-FP" begin
     lon, lat, lev = EarthSciMLBase.pvars(domain)
