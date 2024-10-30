@@ -264,6 +264,7 @@ function GEOSFP(domain::AbstractString, domaininfo::DomainInfo; name=:GEOSFP, st
     lev = pvdict[:lev]
     pressure_eq = P ~ P_unit * Ap(lev) + Bp(lev) * I3₊PS
     push!(eqs, pressure_eq)
+    push!(vars, P)
 
     sys = ODESystem(eqs, t, vars, [pvdict[:lon], pvdict[:lat], lev], name=name,
         metadata=Dict(:coupletype => GEOSFPCoupler))
