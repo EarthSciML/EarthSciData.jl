@@ -26,6 +26,7 @@ function interpfunc_threads(itp, itpf)
     end
 end
 
+# @profview interpfunc_serial(itp_stream, EarthSciData.interp!)
 
 suite = BenchmarkGroup()
 suite["GEOSFP"] = BenchmarkGroup()

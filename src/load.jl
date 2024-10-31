@@ -335,7 +335,17 @@ function update!(itp::DataSetInterpolator, t::DateTime)
 
     # Move data we already have to where it should be.
     N = ndims(itp.data)
-    selectdim(itp.data, N, idxs_in_times) .= selectdim(itp.data, N, idxs_in_cache)
+    if all(idxs_in_cache .> idxs_in_times) && all(issorted.((idxs_in_cache, idxs_in_times)))
+        for (new, old) in zip(idxs_in_times, idxs_in_cache)
+            selectdim(itp.data, N, new) .= selectdim(itp.data, N, old)
+        end
+    elseif all(idxs_in_cache .< idxs_in_times) && all(issorted.((idxs_in_cache, idxs_in_times)))
+        for (new, old) in zip(reverse(idxs_in_times), reverse(idxs_in_cache))
+            selectdim(itp.data, N, new) .= selectdim(itp.data, N, old)
+        end
+    elseif !all(idxs_in_cache .== idxs_in_times)
+        error("Unexpected time ordering, can't reorder indexes $(idxs_in_times) to $(idxs_in_cache)")
+    end
 
     # Load the additional times we need
     for idx in idxs_not_in_times
