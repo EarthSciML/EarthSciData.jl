@@ -83,11 +83,11 @@ end
 
     @testset "big cache" begin
         @test_nowarn EarthSciData.DataSetInterpolator{Float32}(fs, "U", DateTime(2022, 5, 1), DateTime(2022, 5, 3),
-            spatial_ref; stream_data=false)
+            spatial_ref; stream=false)
     end
 
     itp = EarthSciData.DataSetInterpolator{Float32}(fs, "U", DateTime(2022, 5, 1), DateTime(2022, 5, 3),
-        spatial_ref; stream_data=true)
+        spatial_ref; stream=true)
     dfi = EarthSciData.DataFrequencyInfo(fs, fs.start)
 
     answerdata = [tv(fs, t) * v for t ∈ dfi.centerpoints, v ∈ [1.0, 0.5, 2.0]]
@@ -128,7 +128,7 @@ end
 
     @testset "no stream" begin
         itp = EarthSciData.DataSetInterpolator{Float32}(fs, "U", DateTime(2022, 5, 1),
-            DateTime(2022, 5, 2), spatial_ref; stream_data=false)
+            DateTime(2022, 5, 2), spatial_ref; stream=false)
 
         uvals = zeros(Float32, length(times), length(xs))
         answers = zeros(Float32, length(times), length(xs))

@@ -4,8 +4,8 @@ using Dates
 
 const fs = EarthSciData.GEOSFPFileSet("4x5", "A3dyn")
 spatial_ref = "+proj=longlat +datum=WGS84 +no_defs"
-const itp_stream = EarthSciData.DataSetInterpolator{Float64}(fs, "U", DateTime(2022, 5, 1), DateTime(2022, 5, 3), spatial_ref; stream_data=true)
-const itp_nostream = EarthSciData.DataSetInterpolator{Float64}(fs, "U", DateTime(2022, 5, 1), DateTime(2022, 5, 3), spatial_ref; stream_data=false)
+const itp_stream = EarthSciData.DataSetInterpolator{Float64}(fs, "U", DateTime(2022, 5, 1), DateTime(2022, 5, 3), spatial_ref; stream=true)
+const itp_nostream = EarthSciData.DataSetInterpolator{Float64}(fs, "U", DateTime(2022, 5, 1), DateTime(2022, 5, 3), spatial_ref; stream=false)
 const ts = DateTime(2022, 5, 1):Hour(1):DateTime(2022, 5, 3)
 const lons = deg2rad.(-180.0:1:174)
 const lats = deg2rad.(-90:1:85)

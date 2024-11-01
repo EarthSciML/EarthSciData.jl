@@ -145,12 +145,14 @@ for this dataset is Float32.
 
 `scale` is a scaling factor to apply to the emissions data. The default value is 1.0.
 
+`stream` specifies whether the data should be streamed in as needed or loaded all at once.
+
 NOTE: This is an interpolator that returns an emissions value by interpolating between the
 centers of the nearest grid cells in the underlying emissions grid, so it may not exactly conserve the total
 emissions mass, especially if the simulation grid is coarser than the emissions grid.
 """
 function NEI2016MonthlyEmis(sector::AbstractString, domaininfo::DomainInfo; scale=1.0,
-    name=:NEI2016MonthlyEmis, stream_data=true)
+    name=:NEI2016MonthlyEmis, stream=true)
     fs = NEI2016MonthlyEmisFileSet(sector)
     starttime, endtime = EarthSciMLBase.tspan_datetime(domaininfo)
     pvdict = Dict([Symbol(v) => v for v in EarthSciMLBase.pvars(domaininfo)]...)
@@ -168,7 +170,7 @@ function NEI2016MonthlyEmis(sector::AbstractString, domaininfo::DomainInfo; scal
     for varname ∈ varnames(fs, starttime)
         dt = EarthSciMLBase.dtype(domaininfo)
         itp = DataSetInterpolator{dt}(fs, varname, starttime, endtime,
-            domaininfo.spatial_ref; stream_data=stream_data)
+            domaininfo.spatial_ref; stream=stream)
         @constants zero_emis = 0 [unit = units(itp) / u"m"]
         zero_emis = ModelingToolkit.unwrap(zero_emis) # Unsure why this is necessary.
         eq = create_interp_equation(itp, "", t, [x, y],

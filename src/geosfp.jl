@@ -221,11 +221,11 @@ Domain options (as of 2022-01-30):
 
 The native data type for this dataset is Float32.
 
-`stream_data` specifies whether the data should be streamed in as needed or loaded all at once.
+`stream` specifies whether the data should be streamed in as needed or loaded all at once.
 
 See http://geoschemdata.wustl.edu/ExtData/ for current data domain options.
 """
-function GEOSFP(domain::AbstractString, domaininfo::DomainInfo; name=:GEOSFP, stream_data=true)
+function GEOSFP(domain::AbstractString, domaininfo::DomainInfo; name=:GEOSFP, stream=true)
     filesets = Dict{String,GEOSFPFileSet}(
         "A1" => GEOSFPFileSet(domain, "A1"),
         "A3cld" => GEOSFPFileSet(domain, "A3cld"),
@@ -242,7 +242,7 @@ function GEOSFP(domain::AbstractString, domaininfo::DomainInfo; name=:GEOSFP, st
         for varname ∈ varnames(fs, starttime)
             dt = EarthSciMLBase.dtype(domaininfo)
             itp = DataSetInterpolator{dt}(fs, varname, starttime, endtime,
-                domaininfo.spatial_ref; stream_data=stream_data)
+                domaininfo.spatial_ref; stream=stream)
             dims = dimnames(itp)
             coords = Num[]
             for dim in dims

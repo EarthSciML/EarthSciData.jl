@@ -132,7 +132,7 @@ data records for the times immediately before and after the current time step.
 
 `varname` is the name of the variable to interpolate. `default_time` is the time to use when initializing
 the interpolator. `spatial_ref` is the spatial reference system that the simulation will be using.
-`stream_data` specifies whether the data should be streamed in as needed or loaded all at once.
+`stream` specifies whether the data should be streamed in as needed or loaded all at once.
 """
 mutable struct DataSetInterpolator{To,N,N2,FT,ITPT}
     fs::FileSet
@@ -152,14 +152,14 @@ mutable struct DataSetInterpolator{To,N,N2,FT,ITPT}
     initialized::Bool
 
     function DataSetInterpolator{To}(fs::FileSet, varname::AbstractString,
-        starttime::DateTime, enddtime::DateTime, spatial_ref; stream_data=true) where {To<:Real}
+        starttime::DateTime, enddtime::DateTime, spatial_ref; stream=true) where {To<:Real}
         metadata = loadmetadata(fs, starttime, varname)
 
         # Download all of the data we will need.
         check_times = starttime:DataFrequencyInfo(fs, starttime).frequency:enddtime
         cpts = unique(vcat([DataFrequencyInfo(fs, t).centerpoints for t in check_times]...))
         cache_size = 3
-        if !stream_data
+        if !stream
             cache_size = max(sum([starttime <= t < enddtime for t in cpts]), 2)
         end
 
