@@ -8,21 +8,21 @@ using DynamicQuantities
 using Interpolations
 using Test
 
-fs = EarthSciData.GEOSFPFileSet("4x5", "A3dyn")
 t = DateTime(2022, 5, 1)
-te = DateTime(2022, 5, 2)
+te = DateTime(2022, 5, 3)
+fs = EarthSciData.GEOSFPFileSet("4x5", "A3dyn", t, te)
 spatial_ref = "+proj=longlat +datum=WGS84 +no_defs"
 @test EarthSciData.url(fs, t) == "http://geoschemdata.wustl.edu/ExtData/GEOS_4x5/GEOS_FP/2022/05/GEOSFP.20220501.A3dyn.4x5.nc"
 
 @test endswith(EarthSciData.localpath(fs, t), joinpath("GEOS_4x5", "GEOS_FP", "2022", "05", "GEOSFP.20220501.A3dyn.4x5.nc"))
 
-ti = EarthSciData.DataFrequencyInfo(fs, t)
+ti = EarthSciData.DataFrequencyInfo(fs)
 epp = EarthSciData.endpoints(ti)
 
-@test epp[1] == (DateTime("2022-05-01T00:00:00"), DateTime("2022-05-01T03:00:00"))
-@test epp[8] == (DateTime("2022-05-01T21:00:00"), DateTime("2022-05-02T00:00:00"))
+@test epp[begin] == (DateTime("2022-04-30T00:00:00"), DateTime("2022-04-30T03:00:00"))
+@test epp[end] == (DateTime("2022-05-03T21:00:00"), DateTime("2022-05-04T00:00:00"))
 
-metadata = EarthSciData.loadmetadata(fs, t, "U")
+metadata = EarthSciData.loadmetadata(fs, "U")
 @test metadata.varsize == [72, 46, 72]
 @test metadata.dimnames == ["lon", "lat", "lev"]
 
@@ -31,7 +31,7 @@ itp = EarthSciData.DataSetInterpolator{Float32}(fs, "U", t, te, spatial_ref)
 @test String(latexify(itp)) == "\$\\mathrm{GEOSFPFileSet}\\left( U \\right)\$"
 
 @test EarthSciData.dimnames(itp) == ["lon", "lat", "lev"]
-@test issetequal(EarthSciData.varnames(fs, t), ["U", "OMEGA", "RH", "DTRAIN", "V"])
+@test issetequal(EarthSciData.varnames(fs), ["U", "OMEGA", "RH", "DTRAIN", "V"])
 
 @testset "interpolation" begin
     uvals = []
@@ -61,21 +61,21 @@ end
         finish::DateTime
     end
 
-    function EarthSciData.DataFrequencyInfo(fs::DummyFileSet, t::DateTime)::EarthSciData.DataFrequencyInfo
+    function EarthSciData.DataFrequencyInfo(fs::DummyFileSet)::EarthSciData.DataFrequencyInfo
         frequency = Second(3 * 3600)
         centerpoints = collect(fs.start+frequency/2:frequency:fs.finish)
-        EarthSciData.DataFrequencyInfo(t, frequency, centerpoints)
+        EarthSciData.DataFrequencyInfo(fs.start, frequency, centerpoints)
     end
 
     tv(fs, t) = (t - fs.start) / (fs.finish - fs.start)
 
     function EarthSciData.loadslice!(cache::AbstractArray, fs::DummyFileSet, t::DateTime, varname)
-        dfi = EarthSciData.DataFrequencyInfo(fs, t)
+        dfi = EarthSciData.DataFrequencyInfo(fs)
         tt = dfi.centerpoints[EarthSciData.centerpoint_index(dfi, t)]
         v = tv(fs, tt)
         cache .= [v, v * 0.5, v * 2.0]
     end
-    function EarthSciData.loadmetadata(fs::DummyFileSet, t::DateTime, varname)
+    function EarthSciData.loadmetadata(fs::DummyFileSet, varname)
         return EarthSciData.MetaData([[0.0, 0.5, 1.0]], u"m", "description", ["x"], [3], "+proj=longlat +datum=WGS84 +no_defs", 1, 1)
     end
 
@@ -88,7 +88,7 @@ end
 
     itp = EarthSciData.DataSetInterpolator{Float32}(fs, "U", DateTime(2022, 5, 1), DateTime(2022, 5, 3),
         spatial_ref; stream=true)
-    dfi = EarthSciData.DataFrequencyInfo(fs, fs.start)
+    dfi = EarthSciData.DataFrequencyInfo(fs)
 
     answerdata = [tv(fs, t) * v for t ∈ dfi.centerpoints, v ∈ [1.0, 0.5, 2.0]]
 
@@ -110,9 +110,8 @@ end
     @test uvals ≈ answers
 
     interp!(itp, times[end], xs[end])
-    @test length(itp.times) == 3
-    @test itp.times == [DateTime("2022-05-02T22:30:00"), DateTime("2022-05-03T01:30:00"),
-        DateTime("2022-05-03T04:30:00")]
+    @test length(itp.times) == 2
+    @test itp.times == [DateTime("2022-05-02T22:30:00"), DateTime("2022-05-03T01:30:00")]
 
     uvals = zeros(Float32, length(times), length(xs))
     answers = zeros(Float32, length(times), length(xs))

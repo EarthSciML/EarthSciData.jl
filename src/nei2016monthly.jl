@@ -10,7 +10,27 @@ Currently, only data for year 2016 is available.
 struct NEI2016MonthlyEmisFileSet <: FileSet
     mirror::AbstractString
     sector
-    NEI2016MonthlyEmisFileSet(sector) = new("https://gaftp.epa.gov/Air/", sector)
+    ds
+    freq_info::DataFrequencyInfo
+    function NEI2016MonthlyEmisFileSet(sector, starttime, endtime)
+        NEI2016MonthlyEmisFileSet("https://gaftp.epa.gov/Air/", sector, starttime, endtime)
+    end
+    function NEI2016MonthlyEmisFileSet(mirror, sector, starttime, endtime)
+        floormonth(t) = DateTime(Dates.year(t), Dates.month(t))
+        check_times = (floormonth(starttime-Day(16))):Month(1):(endtime+Day(16))
+        fs = new(mirror, sector, nothing, DataFrequencyInfo(starttime, Day(1), check_times))
+        filepaths = maybedownload.((fs,), check_times)
+
+        start = floormonth(starttime)
+        frequency = ((start + Dates.Month(1)) - start) # Only true for the first month.
+        centerpoints = [t + Second(t+Month(1)-t)/2 for t in check_times]
+        dfi = DataFrequencyInfo(start, frequency, centerpoints)
+
+        lock(nclock) do
+            ds = NCDataset(filepaths, aggdim="TSTEP")
+            new(mirror, sector, ds, dfi)
+        end
+    end
 end
 
 """
@@ -24,14 +44,7 @@ function relpath(fs::NEI2016MonthlyEmisFileSet, t::DateTime)
     return "emismod/2016/v1/gridded/monthly_netCDF/2016fh_16j_$(fs.sector)_12US1_month_$(month).ncf"
 end
 
-function DataFrequencyInfo(fs::NEI2016MonthlyEmisFileSet, t::DateTime)::DataFrequencyInfo
-    month = Dates.month(t)
-    year = Dates.year(t)
-    start = Dates.DateTime(year, month, 1)
-    frequency = ((start + Dates.Month(1)) - start)
-    centerpoints = [start + frequency / 2]
-    return DataFrequencyInfo(start, frequency, centerpoints)
-end
+DataFrequencyInfo(fs::NEI2016MonthlyEmisFileSet) = fs.freq_info
 
 """
 $(SIGNATURES)
@@ -40,13 +53,11 @@ Load the data in place for the given variable name at the given time.
 """
 function loadslice!(data::AbstractArray, fs::NEI2016MonthlyEmisFileSet, t::DateTime, varname)
     lock(nclock) do
-        filepath = maybedownload(fs, t)
-        ds = getnc(filepath)
         data = reshape(data, size(data)..., 1)
-        var = loadslice!(data, fs, ds, t, varname, "TSTEP")
+        var = loadslice!(data, fs, fs.ds, t, varname, "TSTEP")
 
-        Δx = ds.attrib["XCELL"]
-        Δy = ds.attrib["YCELL"]
+        Δx = fs.ds.attrib["XCELL"]
+        Δy = fs.ds.attrib["YCELL"]
         scale, _ = to_unit(var.attrib["units"])
         if scale != 1
             data .*= scale
@@ -61,13 +72,10 @@ $(SIGNATURES)
 
 Load the data for the given variable name at the given time.
 """
-function loadmetadata(fs::NEI2016MonthlyEmisFileSet, t::DateTime, varname)::MetaData
+function loadmetadata(fs::NEI2016MonthlyEmisFileSet, varname)::MetaData
     lock(nclock) do
-        filepath = maybedownload(fs, t)
-        ds = getnc(filepath)
-
         timedim = "TSTEP"
-        var = ds[varname]
+        var = fs.ds[varname]
         dims = collect(NCDatasets.dimnames(var))
         @assert timedim ∈ dims "Variable $varname does not have a dimension named '$timedim'."
         time_index = findfirst(isequal(timedim), dims)
@@ -76,28 +84,28 @@ function loadmetadata(fs::NEI2016MonthlyEmisFileSet, t::DateTime, varname)::Meta
         @assert varsize[end] == 1 "Only 2D data is supported."
         varsize = varsize[1:end-1] # Last dimension is 1.
 
-        Δx = ds.attrib["XCELL"]
-        Δy = ds.attrib["YCELL"]
+        Δx = fs.ds.attrib["XCELL"]
+        Δy = fs.ds.attrib["YCELL"]
         _, units = to_unit(var.attrib["units"])
         units /= u"m^2"
         description = var.attrib["var_desc"]
 
-        x₀ = ds.attrib["XORIG"]
-        y₀ = ds.attrib["YORIG"]
-        Δx = ds.attrib["XCELL"]
-        Δy = ds.attrib["YCELL"]
-        nx = ds.attrib["NCOLS"]
-        ny = ds.attrib["NROWS"]
+        x₀ = fs.ds.attrib["XORIG"]
+        y₀ = fs.ds.attrib["YORIG"]
+        Δx = fs.ds.attrib["XCELL"]
+        Δy = fs.ds.attrib["YCELL"]
+        nx = fs.ds.attrib["NCOLS"]
+        ny = fs.ds.attrib["NROWS"]
         xs = x₀ + Δx / 2 .+ Δx .* (0:nx-1)
         ys = y₀ + Δy / 2 .+ Δy .* (0:ny-1)
 
         coords = [xs, ys]
 
-        p_alp = ds.attrib["P_ALP"]
-        p_bet = ds.attrib["P_BET"]
-        #p_gam = ds.attrib["P_GAM"] # Don't think this is used for anything.
-        x_cent = ds.attrib["XCENT"]
-        y_cent = ds.attrib["YCENT"]
+        p_alp = fs.ds.attrib["P_ALP"]
+        p_bet = fs.ds.attrib["P_BET"]
+        #p_gam = fs.ds.attrib["P_GAM"] # Don't think this is used for anything.
+        x_cent = fs.ds.attrib["XCENT"]
+        y_cent = fs.ds.attrib["YCENT"]
         native_sr = "+proj=lcc +lat_1=$(p_alp) +lat_2=$(p_bet) +lat_0=$(y_cent) +lon_0=$(x_cent) +x_0=0 +y_0=0 +a=6370997.000000 +b=6370997.000000 +to_meter=1"
 
         xdim = findfirst((x) -> x == "COL", dims)
@@ -114,11 +122,9 @@ $(SIGNATURES)
 
 Return the variable names associated with this FileSet.
 """
-function varnames(fs::NEI2016MonthlyEmisFileSet, t::DateTime)
+function varnames(fs::NEI2016MonthlyEmisFileSet)
     lock(nclock) do
-        filepath = maybedownload(fs, t)
-        ds = getnc(filepath)
-        return [setdiff(keys(ds), ["TFLAG"; keys(ds.dim)])...]
+        return [setdiff(keys(fs.ds), ["TFLAG"; keys(fs.ds.dim)])...]
     end
 end
 
@@ -153,8 +159,8 @@ emissions mass, especially if the simulation grid is coarser than the emissions 
 """
 function NEI2016MonthlyEmis(sector::AbstractString, domaininfo::DomainInfo; scale=1.0,
     name=:NEI2016MonthlyEmis, stream=true)
-    fs = NEI2016MonthlyEmisFileSet(sector)
     starttime, endtime = EarthSciMLBase.tspan_datetime(domaininfo)
+    fs = NEI2016MonthlyEmisFileSet(sector, starttime, endtime)
     pvdict = Dict([Symbol(v) => v for v in EarthSciMLBase.pvars(domaininfo)]...)
     @assert :x in keys(pvdict) || :lon in keys(pvdict) "x or lon must be specified in the domaininfo"
     @assert :y in keys(pvdict) || :lat in keys(pvdict) "y or lat must be specified in the domaininfo"
@@ -167,7 +173,7 @@ function NEI2016MonthlyEmis(sector::AbstractString, domaininfo::DomainInfo; scal
     )
     eqs = Equation[]
     vars = Num[]
-    for varname ∈ varnames(fs, starttime)
+    for varname ∈ varnames(fs)
         dt = EarthSciMLBase.dtype(domaininfo)
         itp = DataSetInterpolator{dt}(fs, varname, starttime, endtime,
             domaininfo.spatial_ref; stream=stream)

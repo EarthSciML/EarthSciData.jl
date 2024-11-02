@@ -70,8 +70,8 @@ end
     P = ModelingToolkit.subs_constants(peq.rhs)
     P_expr = build_function(P, [t, lon, lat, lev])
     mypf = eval(P_expr)
-    p_levels = [mypf([DateTime(2022, 5, 1), deg2rad(-155.7), deg2rad(39.1), lev]) for lev in [1, 1.5, 2, 72, 72.5, 73]]
-    @test p_levels ≈ [1021.6242118225098, 1013.9615353827572, 1006.2988589430047, 0.02, 0.015, 0.01] .* 100
+    p_levels = [mypf([DateTime(2022, 1, 2), deg2rad(-155.7), deg2rad(39.1), lev]) for lev in [1, 1.5, 2, 72, 72.5, 73]]
+    @test p_levels ≈ [102340.37924047427, 101572.77264006894, 100805.16603966363, 2.0, 1.5, 1.0]
 
 
     dp = partialderivatives_δPδlev_geosfp(geosfp)
@@ -85,9 +85,9 @@ end
     # Check δP at different levels
     f_expr = build_function(fff, [t, lon, lat, lev])
     myf = eval(f_expr)
-    δP_levels = [myf([DateTime(2022, 5, 1), deg2rad(-155.7), deg2rad(39.1), lev]) for lev in [1, 1.5, 2, 71.5, 72, 72.5]]
-    @test 1.0 ./ δP_levels ≈ [-15.32535287950509, -15.325352879504862, -15.466211527927955,
-        -0.012699999999999994, -0.010000000000000002, -0.009999999999999998] .* 100.0
+    δP_levels = [myf([DateTime(2022, 1, 2), deg2rad(-155.7), deg2rad(39.1), lev]) for lev in [1, 1.5, 2, 71.5, 72, 72.5]]
+    @test 1.0 ./ δP_levels ≈ [-1535.2132008106564, -1535.2132008106273, -1550.4554371152772,
+        -1.2699999999999996, -1.0, -1.0]
 end
 
 @testset "GEOS-FP new day" begin
@@ -96,8 +96,8 @@ end
         lat = 0.0, [unit = u"rad"],
         lev = 1.0,
     )
-    starttime = datetime2unix(DateTime(2022, 5, 1, 23, 58))
-    endtime = datetime2unix(DateTime(2022, 5, 2, 0, 3))
+    starttime = datetime2unix(DateTime(2022, 1, 1, 23, 58))
+    endtime = datetime2unix(DateTime(2022, 1, 2, 0, 3))
 
     geosfp = GEOSFP("4x5", domain)
 
@@ -114,7 +114,7 @@ end
         lat = 0.0, [unit = u"rad"],
         lev = 1.0,
     )
-    starttime = datetime2unix(DateTime(5000, 1, 1))
+    starttime = datetime2unix(DateTime(2022, 5, 1))
 
     geosfp = GEOSFP("4x5", domain)
 

@@ -44,7 +44,7 @@ prob = ODEProblem(csys, st)
 
 sol = solve(prob, Euler(), dt=dt)
 
-@test sum(sol.u[end]) ≈ 2.7782704702240893e-5
+@test sum(sol.u[end]) ≈ 2.7791006168742467e-5
 
 st = SolverStrangThreads(Tsit5(), dt)
 
@@ -52,4 +52,4 @@ prob = ODEProblem(csys, st)
 
 sol = solve(prob, Euler(), dt=dt)
 
-@test sum(sol.u[end]) ≈ 2.7782704702240893e-5
+@test sum(sol.u[end]) ≈ 2.7791006168742467e-5

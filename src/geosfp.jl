@@ -47,7 +47,34 @@ struct GEOSFPFileSet <: FileSet
     mirror::AbstractString
     domain
     filetype
-    GEOSFPFileSet(domain, filetype) = new("http://geoschemdata.wustl.edu/ExtData/", domain, filetype)
+    ds
+    freq_info::DataFrequencyInfo
+    function GEOSFPFileSet(domain, filetype, starttime, endtime)
+        GEOSFPFileSet("http://geoschemdata.wustl.edu/ExtData/", domain, filetype,
+            starttime, endtime)
+    end
+    function GEOSFPFileSet(mirror, domain, filetype, starttime, endtime)
+        check_times = (starttime-Hour(13)):Day(1):(endtime+Hour(13)) # 13 hours because maybe daylight savings
+        fs_temp = new(mirror, domain, filetype, nothing,
+            DataFrequencyInfo(starttime, Day(1), check_times))
+        filepaths = maybedownload.((fs_temp,), check_times)
+
+        lock(nclock) do
+            ds = NCDataset(filepaths, aggdim="time")
+
+            sd = ds.attrib["Start_Date"]
+            st = ds.attrib["Start_Time"]
+            dt = ds.attrib["Delta_Time"]
+            file_start = DateTime(sd * " " * st, dateformat"yyyymmdd HH:MM:SS.s")
+            frequency = Second(parse(Int64, dt[1:2])) * 3600 +
+                        Second(parse(Int64, dt[3:4])) * 60 +
+                        Second(parse(Int64, dt[5:6]))
+            times = ds["time"][:]
+            dfi = DataFrequencyInfo(file_start, frequency, times)
+
+            return new(mirror, domain, filetype, ds, dfi)
+        end
+    end
 end
 
 """
@@ -57,29 +84,15 @@ File path on the server relative to the host root; also path on local disk relat
 (or a scratch directory if that environment variable is not set).
 """
 function relpath(fs::GEOSFPFileSet, t::DateTime)
-    year = Dates.format(t, "Y")
+    yr = year(t)
     month = @sprintf("%.2d", Dates.month(t))
     day = @sprintf("%.2d", Dates.day(t))
     domain = replace(fs.domain, '.' => "")
     domain = replace(domain, '_' => ".")
-    return joinpath("GEOS_$(fs.domain)/GEOS_FP/$year/$month", "GEOSFP.$(year)$(month)$day.$(fs.filetype).$(domain).nc")
+    return joinpath("GEOS_$(fs.domain)/GEOS_FP/$yr/$month", "GEOSFP.$(yr)$(month)$day.$(fs.filetype).$(domain).nc")
 end
 
-function DataFrequencyInfo(fs::GEOSFPFileSet, t::DateTime)::DataFrequencyInfo
-    lock(nclock) do
-        filepath = maybedownload(fs, t)
-        ds = getnc(filepath)
-        sd = ds.attrib["Start_Date"]
-        st = ds.attrib["Start_Time"]
-        dt = ds.attrib["Delta_Time"]
-
-        start = DateTime(sd * " " * st, dateformat"yyyymmdd HH:MM:SS.s")
-        frequency = Second(parse(Int64, dt[1:2])) * 3600 + Second(parse(Int64, dt[3:4])) * 60 +
-                    Second(parse(Int64, dt[5:6]))
-        centerpoints = ds["time"][:]
-        return DataFrequencyInfo(start, frequency, centerpoints)
-    end
-end
+DataFrequencyInfo(fs::GEOSFPFileSet)::DataFrequencyInfo = fs.freq_info
 
 """
 $(SIGNATURES)
@@ -88,9 +101,7 @@ Load the data in place for the given variable name at the given time.
 """
 function loadslice!(data::AbstractArray, fs::GEOSFPFileSet, t::DateTime, varname)
     lock(nclock) do
-        filepath = maybedownload(fs, t)
-        ds = getnc(filepath)
-        var = loadslice!(data, fs, ds, t, varname, "time") # Load data from NetCDF file.
+        var = loadslice!(data, fs, fs.ds, t, varname, "time") # Load data from NetCDF file.
 
         scale, _ = to_unit(var.attrib["units"])
         if scale != 1
@@ -105,13 +116,10 @@ $(SIGNATURES)
 
 Load the data for the given variable name at the given time.
 """
-function loadmetadata(fs::GEOSFPFileSet, t::DateTime, varname)::MetaData
+function loadmetadata(fs::GEOSFPFileSet, varname)::MetaData
     lock(nclock) do
-        filepath = maybedownload(fs, t)
-        ds = getnc(filepath)
-
         timedim = "time"
-        var = ds[varname]
+        var = fs.ds[varname]
         dims = collect(NCDatasets.dimnames(var))
         @assert timedim ∈ dims "Variable $varname does not have a dimension named '$timedim'."
         time_index = findfirst(isequal(timedim), dims)
@@ -121,7 +129,7 @@ function loadmetadata(fs::GEOSFPFileSet, t::DateTime, varname)::MetaData
         _, units = to_unit(var.attrib["units"])
         description = var.attrib["long_name"]
         @assert var.attrib["scale_factor"] == 1.0 "Unexpected scale factor."
-        coords = [ds[d][:] for d ∈ dims]
+        coords = [fs.ds[d][:] for d ∈ dims]
 
         xdim = findfirst((x) -> x == "lon", dims)
         ydim = findfirst((x) -> x == "lat", dims)
@@ -144,11 +152,9 @@ $(SIGNATURES)
 
 Return the variable names associated with this FileSet.
 """
-function varnames(fs::GEOSFPFileSet, t::DateTime)
+function varnames(fs::GEOSFPFileSet)
     lock(nclock) do
-        filepath = maybedownload(fs, t)
-        ds = getnc(filepath)
-        return [setdiff(keys(ds), keys(ds.dim))...]
+        return [setdiff(keys(fs.ds), keys(fs.ds.dim))...]
     end
 end
 
@@ -226,20 +232,20 @@ The native data type for this dataset is Float32.
 See http://geoschemdata.wustl.edu/ExtData/ for current data domain options.
 """
 function GEOSFP(domain::AbstractString, domaininfo::DomainInfo; name=:GEOSFP, stream=true)
-    filesets = Dict{String,GEOSFPFileSet}(
-        "A1" => GEOSFPFileSet(domain, "A1"),
-        "A3cld" => GEOSFPFileSet(domain, "A3cld"),
-        "A3dyn" => GEOSFPFileSet(domain, "A3dyn"),
-        "A3mstC" => GEOSFPFileSet(domain, "A3mstC"),
-        "A3mstE" => GEOSFPFileSet(domain, "A3mstE"),
-        "I3" => GEOSFPFileSet(domain, "I3"))
-
     starttime, endtime = EarthSciMLBase.tspan_datetime(domaininfo)
+    filesets = Dict{String,GEOSFPFileSet}(
+        "A1" => GEOSFPFileSet(domain, "A1", starttime, endtime),
+        "A3cld" => GEOSFPFileSet(domain, "A3cld", starttime, endtime),
+        "A3dyn" => GEOSFPFileSet(domain, "A3dyn", starttime, endtime),
+        "A3mstC" => GEOSFPFileSet(domain, "A3mstC", starttime, endtime),
+        "A3mstE" => GEOSFPFileSet(domain, "A3mstE", starttime, endtime),
+        "I3" => GEOSFPFileSet(domain, "I3", starttime, endtime))
+
     pvdict = Dict([Symbol(v) => v for v in EarthSciMLBase.pvars(domaininfo)]...)
     eqs = Equation[]
     vars = Num[]
     for (filename, fs) in filesets
-        for varname ∈ varnames(fs, starttime)
+        for varname ∈ varnames(fs)
             dt = EarthSciMLBase.dtype(domaininfo)
             itp = DataSetInterpolator{dt}(fs, varname, starttime, endtime,
                 domaininfo.spatial_ref; stream=stream)

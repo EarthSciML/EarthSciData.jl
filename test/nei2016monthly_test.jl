@@ -19,7 +19,7 @@ sample_time = ts
 spatial_ref="+proj=longlat +datum=WGS84 +no_defs"
 
 emis = NEI2016MonthlyEmis("mrggrid_withbeis_withrwc", domain)
-fileset = EarthSciData.NEI2016MonthlyEmisFileSet("mrggrid_withbeis_withrwc")
+fileset = EarthSciData.NEI2016MonthlyEmisFileSet("mrggrid_withbeis_withrwc", ts, te)
 
 eqs = equations(emis)
 @test length(eqs) == 69
@@ -45,10 +45,12 @@ end
 
 
 @testset "monthly frequency" begin
+    ts, te = DateTime(2016, 5, 1), DateTime(2016, 6, 1)
+    fileset = EarthSciData.NEI2016MonthlyEmisFileSet("mrggrid_withbeis_withrwc", ts, te)
     sample_time = DateTime(2016, 5, 1)
     itp = EarthSciData.DataSetInterpolator{Float32}(fileset, "NOX", ts, te, spatial_ref)
     EarthSciData.lazyload!(itp, sample_time)
-    ti = EarthSciData.DataFrequencyInfo(itp.fs, sample_time)
+    ti = EarthSciData.DataFrequencyInfo(itp.fs)
     @test month(itp.times[1]) == 4
     @test month(itp.times[2]) == 5
 
@@ -110,5 +112,5 @@ end
     sample_time = DateTime(2016, 5, 1)
     itp = EarthSciData.DataSetInterpolator{Float32}(fileset, "NOX", ts, te, spatial_ref)
     sample_time = DateTime(2017, 5, 1)
-    @test_throws AssertionError EarthSciData.lazyload!(itp, sample_time)
+    @test_throws ArgumentError EarthSciData.lazyload!(itp, sample_time)
 end

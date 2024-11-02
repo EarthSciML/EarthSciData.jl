@@ -3,7 +3,6 @@ export interp!
 download_cache = ("EARTHSCIDATADIR" ∈ keys(ENV)) ? ENV["EARTHSCIDATADIR"] : @get_scratch!("earthsci_data")
 function __init__()
     global download_cache = ("EARTHSCIDATADIR" ∈ keys(ENV)) ? ENV["EARTHSCIDATADIR"] : @get_scratch!("earthsci_data")
-    [delete!(ncfiledict, key) for key in keys(ncfiledict)] # Remove any files opened during precompilation because they're not valid any more.
 end
 
 """
@@ -13,10 +12,10 @@ To satisfy this interface, a type must implement the following methods:
 - `relpath(fs::FileSet, t::DateTime)`
 - `url(fs::FileSet, t::DateTime)`
 - `localpath(fs::FileSet, t::DateTime)`
-- `DataFrequencyInfo(fs::FileSet, t::DateTime)::DataFrequencyInfo`
-- `loadmetadata(fs::FileSet, t::DateTime, varname)::MetaData`
+- `DataFrequencyInfo(fs::FileSet)::DataFrequencyInfo`
+- `loadmetadata(fs::FileSet, varname)::MetaData`
 - `loadslice!(cache::AbstractArray, fs::FileSet, t::DateTime, varname)`
-- `varnames(fs::FileSet, t::DateTime)`
+- `varnames(fs::FileSet)`
 """
 abstract type FileSet end
 
@@ -110,13 +109,10 @@ endpoints(t::DataFrequencyInfo) = [(cp - t.frequency / 2, cp + t.frequency / 2) 
 Return the index of the centerpoint closest to the given time.
 """
 function centerpoint_index(t_info::DataFrequencyInfo, t)
-    eps = endpoints(t_info)
-    if t > eps[end][2]
-        return length(eps) + 1
+    if t < t_info.centerpoints[begin] || t > t_info.centerpoints[end]
+        throw(ArgumentError("Time $t is outside the range of the data range ($(t_info.centerpoints[begin]), $(t_info.centerpoints[end]))."))
     end
-    t_index = ((ep) -> ep[1] <= t < ep[2]).(eps)
-    @assert sum(t_index) == 1 "Expected exactly one time step to match, instead $(sum(t_index)) timesteps match."
-    argmax(t_index)
+    findmin(x->abs(x-t), t_info.centerpoints)[2]
 end
 
 """
@@ -152,15 +148,14 @@ mutable struct DataSetInterpolator{To,N,N2,FT,ITPT}
     initialized::Bool
 
     function DataSetInterpolator{To}(fs::FileSet, varname::AbstractString,
-        starttime::DateTime, enddtime::DateTime, spatial_ref; stream=true) where {To<:Real}
-        metadata = loadmetadata(fs, starttime, varname)
+        starttime::DateTime, endtime::DateTime, spatial_ref; stream=true) where {To<:Real}
+        metadata = loadmetadata(fs, varname)
 
-        # Download all of the data we will need.
-        check_times = starttime:DataFrequencyInfo(fs, starttime).frequency:enddtime
-        cpts = unique(vcat([DataFrequencyInfo(fs, t).centerpoints for t in check_times]...))
-        cache_size = 3
+        # Check how many time indices we will need.
+        dfi = DataFrequencyInfo(fs)
+        cache_size = 2
         if !stream
-            cache_size = max(sum([starttime <= t < enddtime for t in cpts]), 2)
+            cache_size = sum((starttime-dfi.frequency) .<= dfi.centerpoints .<= (endtime+dfi.frequency))
         end
 
         load_cache = zeros(To, repeat([1], length(metadata.varsize))...)
@@ -243,50 +238,36 @@ end
 
 " Return the next interpolation time point for this interpolator. "
 function nexttimepoint(itp::DataSetInterpolator, t::DateTime)
-    ti = DataFrequencyInfo(itp.fs, t)
-    currenttimepoint(itp, t + ti.frequency)
+    ti = DataFrequencyInfo(itp.fs)
+    ci = centerpoint_index(ti, t)
+    ti.centerpoints[min(length(ti.centerpoints), ci+1)]
 end
 
 " Return the previous interpolation time point for this interpolator. "
 function prevtimepoint(itp::DataSetInterpolator, t::DateTime)
-    ti = DataFrequencyInfo(itp.fs, t)
+    ti = DataFrequencyInfo(itp.fs)
     ci = centerpoint_index(ti, t)
-    if ci != 1
-        return ti.centerpoints[ci-1]
-    end
-    tt = t - ti.frequency * 0.75 # Just go most of the way because some months etc. have different lengths.
-    ti = DataFrequencyInfo(itp.fs, tt)
-    ti.centerpoints[centerpoint_index(ti, tt)]
+    ti.centerpoints[max(1, ci-1)]
 end
 
 " Return the current interpolation time point for this interpolator. "
 function currenttimepoint(itp::DataSetInterpolator, t::DateTime)
-    ti = DataFrequencyInfo(itp.fs, t)
+    ti = DataFrequencyInfo(itp.fs)
     ci = centerpoint_index(ti, t)
-    if ci <= length(ti.centerpoints)
-        return ti.centerpoints[ci]
-    end
-    tt = t + ti.frequency * 0.75 # Just go most of the way because some months etc. have different lengths.
-    ti = DataFrequencyInfo(itp.fs, tt)
-    ti.centerpoints[centerpoint_index(ti, tt)]
+    ti.centerpoints[ci]
 end
 
 " Load the time points that should be cached in this interpolator. "
 function interp_cache_times!(itp::DataSetInterpolator, t::DateTime)
     cache_size = length(itp.times)
-    times = Vector{DateTime}(undef, cache_size)
-    centerpoint = currenttimepoint(itp, t)
+    dfi = DataFrequencyInfo(itp.fs)
+    ti = centerpoint_index(dfi, t)
     # Currently assuming we're going forwards in time.
-    if t < centerpoint  # Load data starting with current time step.
-        tt = prevtimepoint(itp, t)
+    if t < dfi.centerpoints[ti]  # Load data starting with previous time step.
+        return @view dfi.centerpoints[(ti-1):(ti+cache_size-2)]
     else  # Load data starting with previous time step.
-        tt = centerpoint
+        return @view dfi.centerpoints[ti:(ti+cache_size-1)]
     end
-    for i in 1:cache_size
-        times[i] = tt
-        tt = nexttimepoint(itp, tt)
-    end
-    times
 end
 
 " Asynchronously load data, anticipating which time will be requested next. "
@@ -374,7 +355,7 @@ function lazyload!(itp::DataSetInterpolator, t::DateTime)
             update!(itp, t)
             return
         end
-        if t <= itp.times[begin] || t > itp.times[end-1]
+        if t <= itp.times[begin] || t > itp.times[end]
             update!(itp, t)
         end
     end
