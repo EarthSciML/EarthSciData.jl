@@ -2,7 +2,7 @@ using BenchmarkTools
 using EarthSciData
 using Dates
 
-const fs = EarthSciData.GEOSFPFileSet("4x5", "A3dyn")
+const fs = EarthSciData.GEOSFPFileSet("4x5", "A3dyn", DateTime(2022, 5, 1), DateTime(2022, 5, 3))
 spatial_ref = "+proj=longlat +datum=WGS84 +no_defs"
 const itp_stream = EarthSciData.DataSetInterpolator{Float64}(fs, "U", DateTime(2022, 5, 1), DateTime(2022, 5, 3), spatial_ref; stream=true)
 const itp_nostream = EarthSciData.DataSetInterpolator{Float64}(fs, "U", DateTime(2022, 5, 1), DateTime(2022, 5, 3), spatial_ref; stream=false)
@@ -26,7 +26,7 @@ function interpfunc_threads(itp, itpf)
     end
 end
 
-# @profview interpfunc_serial(itp_stream, EarthSciData.interp!)
+@profview interpfunc_serial(itp_stream, EarthSciData.interp!)
 
 suite = BenchmarkGroup()
 suite["GEOSFP"] = BenchmarkGroup()
