@@ -101,7 +101,7 @@ struct DataFrequencyInfo
 end
 
 """
-Return the time endpoints correcponding to each centerpoint
+Return the time endpoints corresponding to each centerpoint
 """
 endpoints(t::DataFrequencyInfo) = [(cp - t.frequency / 2, cp + t.frequency / 2) for cp in t.centerpoints]
 
@@ -270,6 +270,13 @@ function interp_cache_times!(itp::DataSetInterpolator, t::DateTime)
     end
 end
 
+# The time points when integration should be stopped to update the interpolator.
+function get_tstops(itp::DataSetInterpolator, starttime::DateTime)
+    cpts = DataFrequencyInfo(itp.fs).centerpoints
+    u_cpts = datetime2unix.(cpts)
+    [datetime2unix(starttime), [(u_cpts[i] + u_cpts[i+1])/2 for i in 1:(length(u_cpts)-1)]...]
+end
+
 " Asynchronously load data, anticipating which time will be requested next. "
 function async_loader(itp::DataSetInterpolator)
     tt = DateTime(0, 1, 10)
@@ -359,6 +366,7 @@ function lazyload!(itp::DataSetInterpolator, t::DateTime)
             update!(itp, t)
         end
     end
+    itp
 end
 lazyload!(itp::DataSetInterpolator, t::AbstractFloat) = lazyload!(itp, Dates.unix2datetime(t))
 
@@ -416,6 +424,8 @@ Interpolate without checking if the data has been correctly loaded for the given
     end
 end
 
+(itp::DataSetInterpolator)(t, locs::Vararg{T,N}) where {T,N} = interp_unsafe(itp, t, locs...)
+
 """
 Interpolation with a unix timestamp.
 """
@@ -426,7 +436,7 @@ function interp_unsafe(itp::DataSetInterpolator, t::Real, locs::Vararg{T,N})::T 
     interp_unsafe(itp, Dates.unix2datetime(t), locs...)
 end
 
-# Dummy function for unit validation. Basically ModelingToolkit
+# Dummy functions for unit validation. Basically ModelingToolkit
 # will call the function with a DynamicQuantities.Quantity or an integer to
 # get information about the type and units of the output.
 interp!(itp::Union{DynamicQuantities.AbstractQuantity,Real}, t, locs...) = itp
@@ -448,24 +458,30 @@ Create an equation that interpolates the given dataset at the given time and loc
 `wrapper_f` can specify a function to wrap the interpolated value, for example `eq -> eq / 2`
 to divide the interpolated value by 2.
 """
-function create_interp_equation(itp::DataSetInterpolator, filename, t, coords; wrapper_f=v -> v)
+function create_interp_equation(itp::DataSetInterpolator, filename, t, starttime, coords; wrapper_f=v -> v)
+    n = length(filename) > 0 ? Symbol("$(filename)₊$(itp.varname)") : Symbol("$(itp.varname)")
+    n_p = Symbol(n, "_itp")
+
+    t_itp = typeof(itp)
+    p_itp = only(@parameters ($n_p::t_itp)(..)=itp [unit=units(itp), description = "Interpolated $(n)"])
+
     # Create right hand side of equation.
-    if length(coords) == 3
-        rhs = wrapper_f(interp!(itp, t, coords[1], coords[2], coords[3]))
-    elseif length(coords) == 2
-        rhs = wrapper_f(interp!(itp, t, coords[1], coords[2]))
-    elseif length(coords) == 1
-        rhs = wrapper_f(interp!(itp, t, coords[1]))
-    else
-        error("Unexpected number of coordinates: $(length(coords))")
-    end
+    rhs = wrapper_f(p_itp(t, coords...))
 
     # Create left hand side of equation.
     desc = description(itp)
     uu = ModelingToolkit.get_unit(rhs)
-    n = length(filename) > 0 ? Symbol("$(filename)₊$(itp.varname)") : Symbol("$(itp.varname)")
     lhs = only(@variables $n(t) [unit = uu, description = desc])
-    lhs ~ rhs
+
+    eq = lhs ~ rhs
+
+    event = get_tstops(itp, starttime) => (update_affect!, [], [p_itp], [], itp)
+
+    return eq, event, p_itp
+end
+
+function update_affect!(integ, u, p, ctx)
+    lazyload!(integ.p[only(p)], integ.t)
 end
 
 Latexify.@latexrecipe function f(itp::EarthSciData.DataSetInterpolator)

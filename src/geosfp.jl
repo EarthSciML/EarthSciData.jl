@@ -243,6 +243,8 @@ function GEOSFP(domain::AbstractString, domaininfo::DomainInfo; name=:GEOSFP, st
 
     pvdict = Dict([Symbol(v) => v for v in EarthSciMLBase.pvars(domaininfo)]...)
     eqs = Equation[]
+    params = []
+    events = []
     vars = Num[]
     for (filename, fs) in filesets
         for varname ∈ varnames(fs)
@@ -256,8 +258,10 @@ function GEOSFP(domain::AbstractString, domaininfo::DomainInfo; name=:GEOSFP, st
                 @assert d ∈ keys(pvdict) "GEOSFP coordinate $d not found in domaininfo coordinates ($(pvs))."
                 push!(coords, pvdict[d])
             end
-            eq = create_interp_equation(itp, filename, t, coords)
+            eq, event, param = create_interp_equation(itp, filename, t, starttime, coords)
             push!(eqs, eq)
+            push!(events, event)
+            push!(params, param)
             push!(vars, eq.lhs)
         end
     end
@@ -272,8 +276,8 @@ function GEOSFP(domain::AbstractString, domaininfo::DomainInfo; name=:GEOSFP, st
     push!(eqs, pressure_eq)
     push!(vars, P)
 
-    sys = ODESystem(eqs, t, vars, [pvdict[:lon], pvdict[:lat], lev], name=name,
-        metadata=Dict(:coupletype => GEOSFPCoupler))
+    sys = ODESystem(eqs, t, vars, [pvdict[:lon], pvdict[:lat], lev, params...]; name=name,
+        metadata=Dict(:coupletype => GEOSFPCoupler), discrete_events=events)
     return sys
 end
 

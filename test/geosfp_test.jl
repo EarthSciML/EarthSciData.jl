@@ -17,7 +17,7 @@ domain = DomainInfo(DateTime(2022, 1, 1), DateTime(2022, 1, 3);
     @constants c_unit = 6.0 [unit = u"rad" description = "constant to make units cancel out"]
     geosfp = GEOSFP("4x5", domain)
 
-    @test Symbol.(parameters(geosfp)) == [:lon, :lat, :lev]
+    @test all([x in Symbol.(parameters(geosfp)) for x in [:lon, :lat, :lev]])
 
     domain2 = EarthSciMLBase.add_partial_derivative_func(domain,
         partialderivatives_δPδlev_geosfp(geosfp))
@@ -37,9 +37,9 @@ domain = DomainInfo(DateTime(2022, 1, 1), DateTime(2022, 1, 3);
         "MeanWind₊v_lon(t, lon, lat, lev)", "GEOSFP₊A3dyn₊U(t, lon, lat, lev)",
         "MeanWind₊v_lat(t, lon, lat, lev)", "GEOSFP₊A3dyn₊V(t, lon, lat, lev)",
         "MeanWind₊v_lev(t, lon, lat, lev)", "GEOSFP₊A3dyn₊OMEGA(t, lon, lat, lev)",
-        "GEOSFP₊A3dyn₊U(t, lon, lat, lev)", "EarthSciData.interp!(DataSetInterpolator{EarthSciData.GEOSFPFileSet, U}, t, lon, lat, lev)",
-        "GEOSFP₊A3dyn₊OMEGA(t, lon, lat, lev)", "EarthSciData.interp!(DataSetInterpolator{EarthSciData.GEOSFPFileSet, OMEGA}, t, lon, lat, lev)",
-        "GEOSFP₊A3dyn₊V(t, lon, lat, lev)", "EarthSciData.interp!(DataSetInterpolator{EarthSciData.GEOSFPFileSet, V}, t, lon, lat, lev)",
+        "GEOSFP₊A3dyn₊U(t, lon, lat, lev)", "GEOSFP₊A3dyn₊U_itp(t, lon, lat, lev)",
+        "GEOSFP₊A3dyn₊OMEGA(t, lon, lat, lev)", "GEOSFP₊A3dyn₊OMEGA_itp(t, lon, lat, lev)",
+        "GEOSFP₊A3dyn₊V(t, lon, lat, lev)", "GEOSFP₊A3dyn₊V_itp(t, lon, lat, lev)",
         "Differential(t)(ExampleSys₊c(t, lon, lat, lev))", "Differential(lon)(ExampleSys₊c(t, lon, lat, lev)",
         "MeanWind₊v_lon(t, lon, lat, lev)", "lon2m",
         "Differential(lat)(ExampleSys₊c(t, lon, lat, lev)",
@@ -57,6 +57,7 @@ domain = DomainInfo(DateTime(2022, 1, 1), DateTime(2022, 1, 3);
 end
 
 @testset "GEOS-FP pressure levels" begin
+    tt = DateTime(2022, 1, 2)
     @parameters lat, [unit = u"rad"], lon, [unit = u"rad"], lev
     geosfp = GEOSFP("4x5", domain)
 
@@ -66,11 +67,18 @@ end
     pseq = equations(geosfp)[iips]
     peq = substitute(equations(geosfp)[iip], pseq.lhs => pseq.rhs)
 
+    events = ModelingToolkit.get_discrete_events(geosfp)
+    e = only(events[[only(e.affects.pars_syms) == :I3₊PS_itp for e in events]])
+    Main.EarthSciData.lazyload!(e.affects.ctx, tt)
+    ps_itp = only(get_variables(peq.rhs)[[s == Symbol("I3₊PS_itp(t, lon, lat)") for s in Symbol.(get_variables(peq.rhs))]])
+
     # Check Pressure levels
     P = ModelingToolkit.subs_constants(peq.rhs)
-    P_expr = build_function(P, [t, lon, lat, lev])
+    P_expr = build_function(P, [t, lon, lat, lev, ps_itp])
     mypf = eval(P_expr)
-    p_levels = [mypf([DateTime(2022, 1, 2), deg2rad(-155.7), deg2rad(39.1), lev]) for lev in [1, 1.5, 2, 72, 72.5, 73]]
+    lonv = deg2rad(-155.7)
+    latv = deg2rad(39.1)
+    p_levels = [mypf([tt, lonv, latv, lev, e.affects.ctx(tt, lonv, latv)]) for lev in [1, 1.5, 2, 72, 72.5, 73]]
     @test p_levels ≈ [102340.37924047427, 101572.77264006894, 100805.16603966363, 2.0, 1.5, 1.0]
 
 
@@ -83,9 +91,9 @@ end
     fff = ModelingToolkit.subs_constants(ff[3])
 
     # Check δP at different levels
-    f_expr = build_function(fff, [t, lon, lat, lev])
+    f_expr = build_function(fff, [t, lon, lat, lev, ps_itp])
     myf = eval(f_expr)
-    δP_levels = [myf([DateTime(2022, 1, 2), deg2rad(-155.7), deg2rad(39.1), lev]) for lev in [1, 1.5, 2, 71.5, 72, 72.5]]
+    δP_levels = [myf([tt, lonv, latv, lev, e.affects.ctx(tt, lonv, latv)]) for lev in [1, 1.5, 2, 71.5, 72, 72.5]]
     @test 1.0 ./ δP_levels ≈ [-1535.2132008106564, -1535.2132008106273, -1550.4554371152772,
         -1.2699999999999996, -1.0, -1.0]
 end
@@ -103,9 +111,15 @@ end
 
     iips = findfirst((x) -> x == :I3₊PS, [Symbolics.tosymbol(eq.lhs, escape=false) for eq in equations(geosfp)])
     pseq = equations(geosfp)[iips]
-    PS_expr = build_function(pseq.rhs, t, lon, lat, lev)
+
+    events = ModelingToolkit.get_discrete_events(geosfp)
+    e = only(events[[only(e.affects.pars_syms) == :I3₊PS_itp for e in events]])
+    Main.EarthSciData.lazyload!(e.affects.ctx, DateTime(2022, 1, 1, 23, 58))
+    ps_itp = only(get_variables(pseq.rhs)[[s == Symbol("I3₊PS_itp(t, lon, lat)") for s in Symbol.(get_variables(pseq.rhs))]])
+
+    PS_expr = build_function(pseq.rhs, t, lon, lat, lev, ps_itp)
     psf = eval(PS_expr)
-    psf(starttime, 0.0, 0.0, 1.0)
+    psf(starttime, 0.0, 0.0, 1.0, e.affects.ctx(DateTime(2022, 1, 1, 23, 58), 0.0, 0.0))
 end
 
 @testset "GEOS-FP wrong year" begin

@@ -172,6 +172,8 @@ function NEI2016MonthlyEmis(sector::AbstractString, domaininfo::DomainInfo; scal
         Δz = 60.0, [unit = u"m", description = "Height of the first vertical grid layer"],
     )
     eqs = Equation[]
+    events = []
+    params = []
     vars = Num[]
     for varname ∈ varnames(fs)
         dt = EarthSciMLBase.dtype(domaininfo)
@@ -179,13 +181,15 @@ function NEI2016MonthlyEmis(sector::AbstractString, domaininfo::DomainInfo; scal
             domaininfo.spatial_ref; stream=stream)
         @constants zero_emis = 0 [unit = units(itp) / u"m"]
         zero_emis = ModelingToolkit.unwrap(zero_emis) # Unsure why this is necessary.
-        eq = create_interp_equation(itp, "", t, [x, y],
+        eq, event, param = create_interp_equation(itp, "", t, starttime, [x, y],
             wrapper_f=(eq) -> ifelse(lev < 2, eq / Δz * scale, zero_emis),
         )
         push!(eqs, eq)
+        push!(events, event)
+        push!(params, param)
         push!(vars, eq.lhs)
     end
-    sys = ODESystem(eqs, t, vars, [x, y, lev, Δz]; name=name,
-        metadata=Dict(:coupletype => NEI2016MonthlyEmisCoupler))
+    sys = ODESystem(eqs, t, vars, [x, y, lev, Δz, params...]; name=name,
+        metadata=Dict(:coupletype => NEI2016MonthlyEmisCoupler), discrete_events=events)
     return sys
 end
