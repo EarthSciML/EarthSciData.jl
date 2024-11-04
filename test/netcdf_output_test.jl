@@ -31,9 +31,8 @@ file = tempname() * ".nc"
 
 csys = couple(sys, domain)
 
-o = NetCDFOutputter(file, 1.0; extra_vars=[
-    structural_simplify(convert(ODESystem, csys)).sys₊v
-])
+sys, obs = convert(ODESystem, csys)
+o = NetCDFOutputter(file, 1.0; extra_vars=[obs[1].lhs])
 
 csys = couple(csys, o)
 

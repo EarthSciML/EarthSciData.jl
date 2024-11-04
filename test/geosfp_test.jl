@@ -78,7 +78,8 @@ end
     mypf = eval(P_expr)
     lonv = deg2rad(-155.7)
     latv = deg2rad(39.1)
-    p_levels = [mypf([tt, lonv, latv, lev, e.affects.ctx(tt, lonv, latv)]) for lev in [1, 1.5, 2, 72, 72.5, 73]]
+    itp = EarthSciData.ITPWrapper(e.affects.ctx)
+    p_levels = [mypf([tt, lonv, latv, lev, itp(tt, lonv, latv)]) for lev in [1, 1.5, 2, 72, 72.5, 73]]
     @test p_levels ≈ [102340.37924047427, 101572.77264006894, 100805.16603966363, 2.0, 1.5, 1.0]
 
 
@@ -93,7 +94,7 @@ end
     # Check δP at different levels
     f_expr = build_function(fff, [t, lon, lat, lev, ps_itp])
     myf = eval(f_expr)
-    δP_levels = [myf([tt, lonv, latv, lev, e.affects.ctx(tt, lonv, latv)]) for lev in [1, 1.5, 2, 71.5, 72, 72.5]]
+    δP_levels = [myf([tt, lonv, latv, lev, itp(tt, lonv, latv)]) for lev in [1, 1.5, 2, 71.5, 72, 72.5]]
     @test 1.0 ./ δP_levels ≈ [-1535.2132008106564, -1535.2132008106273, -1550.4554371152772,
         -1.2699999999999996, -1.0, -1.0]
 end
@@ -119,7 +120,8 @@ end
 
     PS_expr = build_function(pseq.rhs, t, lon, lat, lev, ps_itp)
     psf = eval(PS_expr)
-    psf(starttime, 0.0, 0.0, 1.0, e.affects.ctx(DateTime(2022, 1, 1, 23, 58), 0.0, 0.0))
+    itp = EarthSciData.ITPWrapper(e.affects.ctx)
+    psf(starttime, 0.0, 0.0, 1.0, itp(DateTime(2022, 1, 1, 23, 58), 0.0, 0.0))
 end
 
 @testset "GEOS-FP wrong year" begin

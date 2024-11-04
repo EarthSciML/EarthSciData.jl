@@ -232,7 +232,7 @@ The native data type for this dataset is Float32.
 See http://geoschemdata.wustl.edu/ExtData/ for current data domain options.
 """
 function GEOSFP(domain::AbstractString, domaininfo::DomainInfo; name=:GEOSFP, stream=true)
-    starttime, endtime = EarthSciMLBase.tspan_datetime(domaininfo)
+    starttime, endtime = get_tspan_datetime(domaininfo)
     filesets = Dict{String,GEOSFPFileSet}(
         "A1" => GEOSFPFileSet(domain, "A1", starttime, endtime),
         "A3cld" => GEOSFPFileSet(domain, "A3cld", starttime, endtime),

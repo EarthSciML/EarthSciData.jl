@@ -108,11 +108,14 @@ endpoints(t::DataFrequencyInfo) = [(cp - t.frequency / 2, cp + t.frequency / 2) 
 """
 Return the index of the centerpoint closest to the given time.
 """
-function centerpoint_index(t_info::DataFrequencyInfo, t)
-    if t < t_info.centerpoints[begin] || t > t_info.centerpoints[end]
-        throw(ArgumentError("Time $t is outside the range of the data range ($(t_info.centerpoints[begin]), $(t_info.centerpoints[end]))."))
+function centerpoint_index(t_info::DataFrequencyInfo, t::DateTime)
+    cpts = t_info.centerpoints
+    if t < cpts[begin] || t > cpts[end]
+        throw(ArgumentError("Time $t is outside the range of the data range ($(cpts[begin]), $(cpts[end]))."))
     end
-    findmin(x->abs(x-t), t_info.centerpoints)[2]
+    diffs = diff(cpts)
+    middles = (cpts[1], (cpts[i] + diffs[i] / 2 for i in 1:(length(cpts)-1))...)
+    findlast((x) -> x <= t, middles)
 end
 
 """
@@ -155,7 +158,7 @@ mutable struct DataSetInterpolator{To,N,N2,FT,ITPT}
         dfi = DataFrequencyInfo(fs)
         cache_size = 2
         if !stream
-            cache_size = sum((starttime-dfi.frequency) .<= dfi.centerpoints .<= (endtime+dfi.frequency))
+            cache_size = sum((starttime - dfi.frequency) .<= dfi.centerpoints .<= (endtime + dfi.frequency))
         end
 
         load_cache = zeros(To, repeat([1], length(metadata.varsize))...)
@@ -240,14 +243,14 @@ end
 function nexttimepoint(itp::DataSetInterpolator, t::DateTime)
     ti = DataFrequencyInfo(itp.fs)
     ci = centerpoint_index(ti, t)
-    ti.centerpoints[min(length(ti.centerpoints), ci+1)]
+    ti.centerpoints[min(length(ti.centerpoints), ci + 1)]
 end
 
 " Return the previous interpolation time point for this interpolator. "
 function prevtimepoint(itp::DataSetInterpolator, t::DateTime)
     ti = DataFrequencyInfo(itp.fs)
     ci = centerpoint_index(ti, t)
-    ti.centerpoints[max(1, ci-1)]
+    ti.centerpoints[max(1, ci - 1)]
 end
 
 " Return the current interpolation time point for this interpolator. "
@@ -264,17 +267,17 @@ function interp_cache_times!(itp::DataSetInterpolator, t::DateTime)
     ti = centerpoint_index(dfi, t)
     # Currently assuming we're going forwards in time.
     if t < dfi.centerpoints[ti]  # Load data starting with previous time step.
-        return @view dfi.centerpoints[(ti-1):(ti+cache_size-2)]
+        times = dfi.centerpoints[(ti-1):(ti+cache_size-2)]
     else  # Load data starting with previous time step.
-        return @view dfi.centerpoints[ti:(ti+cache_size-1)]
+        times = dfi.centerpoints[ti:(ti+cache_size-1)]
     end
+    times
 end
 
 # The time points when integration should be stopped to update the interpolator.
 function get_tstops(itp::DataSetInterpolator, starttime::DateTime)
-    cpts = DataFrequencyInfo(itp.fs).centerpoints
-    u_cpts = datetime2unix.(cpts)
-    [datetime2unix(starttime), [(u_cpts[i] + u_cpts[i+1])/2 for i in 1:(length(u_cpts)-1)]...]
+    dfi = DataFrequencyInfo(itp.fs)
+    datetime2unix.(sort([starttime, dfi.centerpoints...]))
 end
 
 " Asynchronously load data, anticipating which time will be requested next. "
@@ -362,7 +365,7 @@ function lazyload!(itp::DataSetInterpolator, t::DateTime)
             update!(itp, t)
             return
         end
-        if t <= itp.times[begin] || t > itp.times[end]
+        if t < itp.times[begin] || t >= itp.times[end]
             update!(itp, t)
         end
     end
@@ -424,7 +427,12 @@ Interpolate without checking if the data has been correctly loaded for the given
     end
 end
 
-(itp::DataSetInterpolator)(t, locs::Vararg{T,N}) where {T,N} = interp_unsafe(itp, t, locs...)
+mutable struct ITPWrapper{ITP}
+    itp::ITP
+    ITPWrapper(itp::ITP) where ITP = new{ITP}(itp)
+end
+
+(itp::ITPWrapper)(t, locs::Vararg{T,N}) where {T,N} = interp_unsafe(itp.itp, t, locs...)
 
 """
 Interpolation with a unix timestamp.
@@ -458,30 +466,34 @@ Create an equation that interpolates the given dataset at the given time and loc
 `wrapper_f` can specify a function to wrap the interpolated value, for example `eq -> eq / 2`
 to divide the interpolated value by 2.
 """
-function create_interp_equation(itp::DataSetInterpolator, filename, t, starttime, coords; wrapper_f=v -> v)
+function create_interp_equation(itp::DataSetInterpolator, filename, t, starttime, coords;
+    wrapper_f=v -> v)
+
     n = length(filename) > 0 ? Symbol("$(filename)₊$(itp.varname)") : Symbol("$(itp.varname)")
     n_p = Symbol(n, "_itp")
 
+    itp = ITPWrapper(itp)
     t_itp = typeof(itp)
-    p_itp = only(@parameters ($n_p::t_itp)(..)=itp [unit=units(itp), description = "Interpolated $(n)"])
+    p_itp = only(@parameters ($n_p::t_itp)(..) = itp [unit = units(itp.itp),
+        description = "Interpolated $(n)"])
 
     # Create right hand side of equation.
     rhs = wrapper_f(p_itp(t, coords...))
 
     # Create left hand side of equation.
-    desc = description(itp)
+    desc = description(itp.itp)
     uu = ModelingToolkit.get_unit(rhs)
     lhs = only(@variables $n(t) [unit = uu, description = desc])
 
     eq = lhs ~ rhs
 
-    event = get_tstops(itp, starttime) => (update_affect!, [], [p_itp], [], itp)
+    event = get_tstops(itp.itp, starttime) => (update_affect!, [], [p_itp], [], itp.itp)
 
     return eq, event, p_itp
 end
 
 function update_affect!(integ, u, p, ctx)
-    lazyload!(integ.p[only(p)], integ.t)
+    integ.p[only(p)].itp = lazyload!(integ.p[only(p)].itp, integ.t)
 end
 
 Latexify.@latexrecipe function f(itp::EarthSciData.DataSetInterpolator)

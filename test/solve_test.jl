@@ -17,7 +17,7 @@ domain = DomainInfo(
         lat ∈ Interval(deg2rad(25), deg2rad(53.71875)),
         lev ∈ Interval(1, 2)
     ),
-    grid_spacing = [deg2rad(15.0), deg2rad(15.0), 1])
+    grid_spacing=[deg2rad(15.0), deg2rad(15.0), 1])
 
 @variables ACET(t) = 0.0 [unit = u"kg*m^-3"]
 @constants c = 1000 [unit = u"s"]
@@ -32,6 +32,23 @@ end
 function EarthSciMLBase.couple2(sys::SysCoupler, emis::EarthSciData.NEI2016MonthlyEmisCoupler)
     sys, emis = sys.sys, emis.sys
     operator_compose(sys, emis)
+end
+
+@testset "single run" begin
+    emis = NEI2016MonthlyEmis("mrggrid_withbeis_withrwc", domain)
+    csys = couple(sys, emis, domain)
+    sys2, obs = convert(ODESystem, csys)
+
+    @test length(equations(sys2)) == 1
+    @test length(observed(sys2)) == 2
+    de = ModelingToolkit.get_discrete_events(sys2)
+    @test length(de) == 1
+    @test unix2datetime.(de[1].condition) == [DateTime("2016-02-15T12:00:00"),
+        DateTime("2016-03-01T00:00:00"), DateTime("2016-03-16T12:00:00"),
+        DateTime("2016-04-16T00:00:00"), DateTime("2016-05-16T12:00:00")]
+    prob = ODEProblem(sys2, [], get_tspan(domain), [])
+    sol = solve(prob)
+    @test only(sol.u[end]) ≈ 6.3645540358326396e-6
 end
 
 emis = NEI2016MonthlyEmis("mrggrid_withbeis_withrwc", domain)

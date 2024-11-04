@@ -13,7 +13,7 @@ domain = DomainInfo(DateTime(2016, 5, 1), DateTime(2016, 5, 2);
     levrange=1:10, dtype=Float64)
 lon, lat, lev = EarthSciMLBase.pvars(domain)
 
-ts, te = EarthSciMLBase.tspan_datetime(domain)
+ts, te = get_tspan_datetime(domain)
 sample_time = ts
 
 spatial_ref="+proj=longlat +datum=WGS84 +no_defs"
@@ -101,9 +101,9 @@ end
 @testset "Coupling with GEOS-FP" begin
     gfp = GEOSFP("4x5", domain)
 
-    sys = convert(ODESystem, couple(emis, gfp))
-    structural_simplify(sys)
-    eqs = equations(sys)
+    csys = couple(emis, gfp)
+    sys, _ = convert(ODESystem, csys, prune=false)
+    eqs = observed(sys)
 
     @test occursin("NEI2016MonthlyEmis₊lat(t) ~ GEOSFP₊lat", string(eqs))
 end

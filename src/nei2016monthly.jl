@@ -159,7 +159,7 @@ emissions mass, especially if the simulation grid is coarser than the emissions 
 """
 function NEI2016MonthlyEmis(sector::AbstractString, domaininfo::DomainInfo; scale=1.0,
     name=:NEI2016MonthlyEmis, stream=true)
-    starttime, endtime = EarthSciMLBase.tspan_datetime(domaininfo)
+    starttime, endtime = get_tspan_datetime(domaininfo)
     fs = NEI2016MonthlyEmisFileSet(sector, starttime, endtime)
     pvdict = Dict([Symbol(v) => v for v in EarthSciMLBase.pvars(domaininfo)]...)
     @assert :x in keys(pvdict) || :lon in keys(pvdict) "x or lon must be specified in the domaininfo"
