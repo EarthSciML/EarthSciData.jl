@@ -307,16 +307,20 @@ function partialderivatives_δPδlev_geosfp(geosfp; default_lev=1.0)
     # Find index for surface pressure.
     ii = findfirst((x) -> x == :I3₊PS, [Symbolics.tosymbol(eq.lhs, escape=false) for eq in equations(geosfp)])
     # Get interpolator for surface pressure.
-    ps = equations(geosfp)[ii].rhs
+    ps_eq = ModelingToolkit.namespace_equation(equations(geosfp)[ii], geosfp)
+    ps = ps_eq.rhs
     @constants P_unit = 1.0 [unit = u"Pa", description = "Unit pressure"]
     # Function to calculate pressure at a given level in the hybrid grid.
     # This is on a staggered grid so level=1 is the grid bottom.
     P(levx) = (P_unit * Ap(levx) + Bp(levx) * ps)
 
     (pvars::AbstractVector) -> begin
-        levindex = EarthSciMLBase.varindex(pvars, :lev)
-        if !isnothing(levindex)
-            lev = pvars[levindex]
+        levindex = EarthSciMLBase.matching_suffix_idx(pvars, :lev)
+        if length(levindex) > 1
+            throw(error("Multiple variables with suffix :lev found in pvars: $(pvars[levindex])"))
+        end
+        if length(levindex) > 0
+            lev = pvars[only(levindex)]
         else
             lev = default_lev
         end
@@ -324,6 +328,6 @@ function partialderivatives_δPδlev_geosfp(geosfp; default_lev=1.0)
         # d(u) / d(P) = d(u) / d(lev) / ( d(P) / d(lev) )
         δPδlev = 0.5 / (P(Num(lev) + 0.5) - P(Num(lev)))
 
-        return Dict(levindex => δPδlev)
+        return Dict(only(levindex) => δPδlev)
     end
 end

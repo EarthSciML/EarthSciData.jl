@@ -36,7 +36,7 @@ end
 
 "Set up the output file and the callback function."
 function EarthSciMLBase.init_callback(nc::NetCDFOutputter, sys::EarthSciMLBase.CoupledSystem,
-    sys_mtk, obs_eqs, dom::EarthSciMLBase.DomainInfo)
+    sys_mtk, dom::EarthSciMLBase.DomainInfo)
 
     rm(nc.filepath, force=true)
     ds = NCDataset(nc.filepath, "c")
