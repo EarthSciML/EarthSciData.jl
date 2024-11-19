@@ -102,7 +102,7 @@ end
     gfp = GEOSFP("4x5", domain)
 
     csys = couple(emis, gfp)
-    sys, _ = convert(ODESystem, csys, prune=false)
+    sys = convert(ODESystem, csys, prune=false)
     eqs = observed(sys)
 
     @test occursin("NEI2016MonthlyEmis₊lat(t) ~ GEOSFP₊lat", string(eqs))

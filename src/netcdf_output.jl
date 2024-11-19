@@ -34,6 +34,16 @@ mutable struct NetCDFOutputter
     end
 end
 
+function obs_function(mtk_sys, v, coord_setter, T)
+    obs_f! = ModelingToolkit.build_explicit_observed_function(mtk_sys, v, checkbounds=false)
+    obscache = zeros(T, length(unknowns(mtk_sys))) # Not used for anything (hopefully).
+    function data_f(p, t, x1, x2, x3)
+        coord_setter(p, (x1, x2, x3))
+        obs_f!(obscache, p, t)
+    end
+    data_f
+end
+
 "Set up the output file and the callback function."
 function EarthSciMLBase.init_callback(nc::NetCDFOutputter, sys::EarthSciMLBase.CoupledSystem,
     sys_mtk, dom::EarthSciMLBase.DomainInfo)
@@ -66,10 +76,12 @@ function EarthSciMLBase.init_callback(nc::NetCDFOutputter, sys::EarthSciMLBase.C
         d.attrib["units"] = string(DynamicQuantities.dimension(ModelingToolkit.get_unit(pv[i])))
         d[:] = grid[i]
     end
+    coords = EarthSciMLBase.coord_params(sys_mtk, dom)
+    coord_setter = ModelingToolkit.setp(sys_mtk, coords)
     if length(nc.extra_vars) > 0
-        obs_fs = EarthSciMLBase.obs_functions(obs_eqs, dom)
-        for j in eachindex(nc.extra_vars)
-            push!(nc.extra_var_fs, obs_fs(nc.extra_vars[j]))
+        for v in nc.extra_vars
+            obs_f = obs_function(sys_mtk, v, coord_setter, EarthSciMLBase.dtype(dom))
+            push!(nc.extra_var_fs, obs_f)
         end
     end
     nc.file = ds

@@ -37,7 +37,7 @@ end
 @testset "single run" begin
     emis = NEI2016MonthlyEmis("mrggrid_withbeis_withrwc", domain)
     csys = couple(sys, emis, domain)
-    sys2, obs = convert(ODESystem, csys)
+    sys2 = convert(ODESystem, csys)
 
     @test length(equations(sys2)) == 1
     @test length(observed(sys2)) == 2

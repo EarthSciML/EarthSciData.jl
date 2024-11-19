@@ -17,13 +17,13 @@ struct NEI2016MonthlyEmisFileSet <: FileSet
     end
     function NEI2016MonthlyEmisFileSet(mirror, sector, starttime, endtime)
         floormonth(t) = DateTime(Dates.year(t), Dates.month(t))
-        check_times = (floormonth(starttime-Day(16))):Month(1):(endtime+Day(16))
+        check_times = (floormonth(starttime - Day(16))):Month(1):(endtime+Day(16))
         fs = new(mirror, sector, nothing, DataFrequencyInfo(starttime, Day(1), check_times))
         filepaths = maybedownload.((fs,), check_times)
 
         start = floormonth(starttime)
         frequency = ((start + Dates.Month(1)) - start) # Only true for the first month.
-        centerpoints = [t + Second(t+Month(1)-t)/2 for t in check_times]
+        centerpoints = [t + Second(t + Month(1) - t) / 2 for t in check_times]
         dfi = DataFrequencyInfo(start, frequency, centerpoints)
 
         lock(nclock) do
