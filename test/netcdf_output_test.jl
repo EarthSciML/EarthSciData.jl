@@ -31,15 +31,13 @@ file = tempname() * ".nc"
 
 csys = couple(sys, domain)
 
-sys = convert(ODESystem, csys; extra_vars=[sys.v])
-obs = observed(sys)
-o = NetCDFOutputter(file, 1.0; extra_vars=[obs[1].lhs])
+o = NetCDFOutputter(file, 1.0; extra_vars=[sys.v])
 
 csys = couple(csys, o)
 
 dt = 0.01
 st = SolverStrangThreads(Tsit5(), dt)
-prob = ODEProblem(csys, st) # Error because need something like "extra_vars"
+prob = ODEProblem(csys, st; extra_vars=[sys.v])
 
 solve(prob, Euler(), dt=dt)
 
