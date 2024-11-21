@@ -39,11 +39,18 @@ To fix this, we create another equation system that is an ODE.
 (We don't actually end up using this system for anything, it's just necessary to get the system to compile.)
 
 ```@example geosfp
+struct ExampleCoupler sys end
 function Example()
     @parameters lat=0.0 [unit=u"rad"]
     @parameters lon=0.0 [unit=u"rad"]
     @variables c(t) = 5.0 [unit=u"s"]
-    ODESystem([D(c) ~ sin(lat * 6) + sin(lon * 6)], t, name=:Docs₊Example)
+    ODESystem([D(c) ~ sin(lat * 6) + sin(lon * 6)], t;
+        name=:Docs₊Example, metadata=Dict(:coupletype => ExampleCoupler))
+end
+function EarthSciMLBase.couple2(e::ExampleCoupler, g::EarthSciData.GEOSFPCoupler)
+    e, g = e.sys, g.sys
+    e = param_to_var(e, :lat, :lon)
+    ConnectorSystem([e.lat ~ g.lat, e.lon ~ g.lon], e, g)
 end
 examplesys = Example()
 ```
