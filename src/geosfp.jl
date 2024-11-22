@@ -174,6 +174,10 @@ const Ap = DataInterpolations.LinearInterpolation([
         1.197030e-01, 8.934502e-02, 6.600001e-02, 4.758501e-02, 3.270000e-02, 2.000000e-02,
         1.000000e-02] .* 100, 1:73) # Pa
 
+# Handle units
+ModelingToolkit.get_unit(::typeof(Ap)) = 1.0
+ModelingToolkit.get_unit(::typeof(DataInterpolations.derivative), args) = 1.0
+
 const Bp = DataInterpolations.LinearInterpolation([
         1.000000e+00, 9.849520e-01, 9.634060e-01, 9.418650e-01, 9.203870e-01, 8.989080e-01,
         8.774290e-01, 8.560180e-01, 8.346609e-01, 8.133039e-01, 7.919469e-01, 7.706375e-01,
@@ -269,12 +273,24 @@ function GEOSFP(domain::AbstractString, domaininfo::DomainInfo; name=:GEOSFP, st
     # Implement hybrid grid pressure: https://wiki.seas.harvard.edu/geos-chem/index.php/GEOS-Chem_vertical_grids
     @constants P_unit = 1.0 [unit = u"Pa", description = "Unit pressure"]
     @variables P(t) [unit = u"Pa", description = "Pressure"]
-    @variables I3₊PS(t) [unit = u"Pa", description = "Pressure at the surface"]
+    i3ps = vars[findfirst(isequal(:I3₊PS), EarthSciMLBase.var2symbol.(vars))]
     @assert :lev in keys(pvdict) "GEOSFP coordinate :lev not found in domaininfo coordinates ($(pvs))."
     lev = pvdict[:lev]
-    pressure_eq = P ~ P_unit * Ap(lev) + Bp(lev) * I3₊PS
+    pressure_eq = P ~ P_unit * Ap(lev) + Bp(lev) * i3ps
     push!(eqs, pressure_eq)
     push!(vars, P)
+
+    # Coordinate transforms.
+    @variables δxδlon(t) [unit = u"m/rad", description = "X gradient with respect to longitude"]
+    @variables δyδlat(t) [unit = u"m/rad", description = "Y gradient with respect to latitude"]
+    @variables δPδlev(t) [unit = u"Pa", description = "Pressure gradient with respect to hybrid grid level"]
+    @constants lat2meters = 111.32e3 * 180 / π [unit = u"m/rad"]
+    @constants lon2m = 40075.0e3 / 2π [unit = u"m/rad"]
+    lon_trans = δxδlon ~ lon2m * cos(pvdict[:lat])
+    lat_trans = δyδlat ~ lat2meters
+    lev_trans = δPδlev ~ expand_derivatives(Differential(lev)(pressure_eq.rhs))
+    push!(eqs, lon_trans, lat_trans, lev_trans)
+    push!(vars, δxδlon, δyδlat, δPδlev)
 
     sys = ODESystem(eqs, t, vars, [pvdict[:lon], pvdict[:lat], lev, params...]; name=name,
         metadata=Dict(:coupletype => GEOSFPCoupler), discrete_events=events)

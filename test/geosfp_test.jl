@@ -35,15 +35,15 @@ domain = DomainInfo(DateTime(2022, 1, 1), DateTime(2022, 1, 3);
         e, g, = e.sys, g.sys
         e = EarthSciMLBase.param_to_var(e, :lat, :lon)
         ConnectorSystem([
-            e.lat ~ g.lat,
-            e.lon ~ g.lon,
-        ], e, g)
+                e.lat ~ g.lat,
+                e.lon ~ g.lon,
+            ], e, g)
     end
 
     examplesys = Example()
 
-   composed_sys = couple(examplesys, domain2, Advection(), geosfp)
-   pde_sys = convert(PDESystem, composed_sys)
+    composed_sys = couple(examplesys, domain2, Advection(), geosfp)
+    pde_sys = convert(PDESystem, composed_sys)
 
     eqs = equations(pde_sys)
 
