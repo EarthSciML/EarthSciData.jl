@@ -177,6 +177,9 @@ const Ap = DataInterpolations.LinearInterpolation([
 # Handle units
 ModelingToolkit.get_unit(::typeof(Ap)) = 1.0
 ModelingToolkit.get_unit(::typeof(DataInterpolations.derivative), args) = 1.0
+Latexify.@latexrecipe function f(itp::typeof(Ap))
+    return "$(nameof(itp))_interp"
+end
 
 const Bp = DataInterpolations.LinearInterpolation([
         1.000000e+00, 9.849520e-01, 9.634060e-01, 9.418650e-01, 9.203870e-01, 8.989080e-01,
