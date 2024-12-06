@@ -49,50 +49,54 @@ function EarthSciMLBase.init_callback(nc::NetCDFOutputter, sys::EarthSciMLBase.C
     sys_mtk, dom::EarthSciMLBase.DomainInfo)
 
     rm(nc.filepath, force=true)
-    ds = NCDataset(nc.filepath, "c")
-    grid = EarthSciMLBase.grid(dom)
-    pv = EarthSciMLBase.pvars(dom)
-    @assert length(pv) == 3 "Currently only 3D simulations are supported."
-    @assert length(grid) == 3 "Currently only 3D simulations are supported."
-    pvstr = [String(Symbol(p)) for p in pv]
-    for (i, p) in enumerate(pvstr)
-        ds.dim[p] = length(grid[i])
-    end
-    ds.dim["time"] = Inf
-    function makencvar(v, dims)
-        n = string(Symbolics.tosymbol(v, escape=false))
-        ncvar = defVar(ds, n, Float32, dims)
-        ncvar.attrib["description"] = ModelingToolkit.getdescription(v)
-        ncvar.attrib["units"] = string(DynamicQuantities.dimension(ModelingToolkit.get_unit(v)))
-        ncvar
-    end
-    ncvars = [makencvar(v, [pvstr..., "time"]) for v in vcat(unknowns(sys_mtk), nc.extra_vars)]
-    nctvar = defVar(ds, "time", Float64, ("time",))
-    nctvar.attrib["description"] = "Time"
-    nctvar.attrib["units"] = "seconds since 1970-1-1"
-    for (i, p) in enumerate(pvstr)
-        d = defVar(ds, p, nc.dtype, (p,))
-        d.attrib["description"] = ModelingToolkit.getdescription(pv[i])
-        d.attrib["units"] = string(DynamicQuantities.dimension(ModelingToolkit.get_unit(pv[i])))
-        d[:] = grid[i]
-    end
-    coords = EarthSciMLBase.coord_params(sys_mtk, dom)
-    coord_setter = ModelingToolkit.setp(sys_mtk, coords)
-    if length(nc.extra_vars) > 0
-        for v in nc.extra_vars
-            obs_f = obs_function(sys_mtk, v, coord_setter, EarthSciMLBase.dtype(dom))
-            push!(nc.extra_var_fs, obs_f)
+    lock(nclock) do
+        ds = NCDataset(nc.filepath, "c")
+        grid = EarthSciMLBase.grid(dom)
+        pv = EarthSciMLBase.pvars(dom)
+        @assert length(pv) == 3 "Currently only 3D simulations are supported."
+        @assert length(grid) == 3 "Currently only 3D simulations are supported."
+        pvstr = [String(Symbol(p)) for p in pv]
+        for (i, p) in enumerate(pvstr)
+            ds.dim[p] = length(grid[i])
         end
+        ds.dim["time"] = Inf
+        function makencvar(v, dims)
+            n = string(Symbolics.tosymbol(v, escape=false))
+            ncvar = defVar(ds, n, Float32, dims)
+            ncvar.attrib["description"] = ModelingToolkit.getdescription(v)
+            ncvar.attrib["units"] = string(DynamicQuantities.dimension(ModelingToolkit.get_unit(v)))
+            ncvar
+        end
+        ncvars = [makencvar(v, [pvstr..., "time"]) for v in vcat(unknowns(sys_mtk), nc.extra_vars)]
+        nctvar = defVar(ds, "time", Float64, ("time",))
+        nctvar.attrib["description"] = "Time"
+        nctvar.attrib["units"] = "seconds since 1970-1-1"
+        for (i, p) in enumerate(pvstr)
+            d = defVar(ds, p, nc.dtype, (p,))
+            d.attrib["description"] = ModelingToolkit.getdescription(pv[i])
+            d.attrib["units"] = string(DynamicQuantities.dimension(ModelingToolkit.get_unit(pv[i])))
+            d[:] = grid[i]
+        end
+        coords = EarthSciMLBase.coord_params(sys_mtk, dom)
+        coord_setter = ModelingToolkit.setp(sys_mtk, coords)
+        if length(nc.extra_vars) > 0
+            for v in nc.extra_vars
+                obs_f = obs_function(sys_mtk, v, coord_setter, EarthSciMLBase.dtype(dom))
+                push!(nc.extra_var_fs, obs_f)
+            end
+        end
+        nc.file = ds
+        nc.vars = ncvars
+        nc.tvar = nctvar
+        nc.grid = grid
     end
-    nc.file = ds
-    nc.vars = ncvars
-    nc.tvar = nctvar
-    nc.grid = grid
     nc.h = 1
     start, finish = get_tspan(dom)
     return PresetTimeCallback(start:nc.time_interval:finish,
         (integrator) -> affect!(nc, integrator),
-        finalize=(c, u, t, integrator) -> close(nc.file),
+        finalize=(c, u, t, integrator) -> lock(nclock) do
+            close(nc.file)
+        end,
         save_positions=(false, false),
         filter_tstops=false,
     )
@@ -103,26 +107,28 @@ Write the current state of the system to the NetCDF file.
 """
 function affect!(nc::NetCDFOutputter, integrator)
     u = reshape(integrator.u, length(nc.vars) - length(nc.extra_vars), [length(g) for g in nc.grid]...)
-    for j in 1:(length(nc.vars)-length(nc.extra_vars))
-        v = nc.vars[j]
-        v[:, :, :, nc.h] = u[j, :, :, :]
-    end
-    if length(nc.extra_vars) > 0
-        u = zeros(length.(nc.grid)...) # Temporary array.
-        for j in eachindex(nc.extra_vars)
-            v = nc.vars[j+length(nc.vars)-length(nc.extra_vars)]
-            f = nc.extra_var_fs[j]
-            for (i, c1) ∈ enumerate(nc.grid[1])
-                for (j, c2) ∈ enumerate(nc.grid[2])
-                    for (k, c3) ∈ enumerate(nc.grid[3])
-                        u[i, j, k] = f(integrator.p, integrator.t, c1, c2, c3)
+    lock(nclock) do
+        for j in 1:(length(nc.vars)-length(nc.extra_vars))
+            v = nc.vars[j]
+            v[:, :, :, nc.h] = u[j, :, :, :]
+        end
+        if length(nc.extra_vars) > 0
+            u = zeros(length.(nc.grid)...) # Temporary array.
+            for j in eachindex(nc.extra_vars)
+                v = nc.vars[j+length(nc.vars)-length(nc.extra_vars)]
+                f = nc.extra_var_fs[j]
+                for (i, c1) ∈ enumerate(nc.grid[1])
+                    for (j, c2) ∈ enumerate(nc.grid[2])
+                        for (k, c3) ∈ enumerate(nc.grid[3])
+                            u[i, j, k] = f(integrator.p, integrator.t, c1, c2, c3)
+                        end
                     end
                 end
+                v[:, :, :, nc.h] = u
             end
-            v[:, :, :, nc.h] = u
         end
+        nc.tvar[nc.h] = integrator.t
     end
-    nc.tvar[nc.h] = integrator.t
     nc.h += 1
     return false
 end
