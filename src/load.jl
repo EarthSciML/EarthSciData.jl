@@ -48,7 +48,22 @@ function maybedownload(fs::FileSet, t::DateTime)
         @info "Creating directory $(dirname(p))"
         mkpath(dirname(p))
     end
-    u = url(fs, t)
+    #u = url(fs, t)
+    # Construct the filename manually
+    fname = "GEOSFP." * string(year(t)) * @sprintf("%02d", month(t)) * @sprintf("%02d", day(t)) * ".A1.4x5.nc"
+
+    # Correct URL construction
+    u = replace(
+        joinpath(
+            "http://geoschemdata.wustl.edu/ExtData", 
+            "GEOS_4x5",  # Add GEOS_4x5 explicitly
+            "GEOS_FP",   # Add GEOS_FP explicitly
+            string(year(t)), 
+            @sprintf("%02d", month(t)), 
+            fname        # Use constructed filename
+        ), 
+        "\\" => "/"
+    )
     try
         prog = Progress(100; desc="Downloading $(basename(u)):", dt=0.1)
         Downloads.download(u, p, progress=(total::Integer, now::Integer) -> begin
