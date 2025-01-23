@@ -50,7 +50,7 @@ struct GEOSFPFileSet <: FileSet
     ds
     freq_info::DataFrequencyInfo
     function GEOSFPFileSet(domain, filetype, starttime, endtime)
-        GEOSFPFileSet("http://geoschemdata.wustl.edu/ExtData/", domain, filetype,
+        GEOSFPFileSet("https://geos-chem.s3-us-west-2.amazonaws.com/", domain, filetype,
             starttime, endtime)
     end
     function GEOSFPFileSet(mirror, domain, filetype, starttime, endtime)
