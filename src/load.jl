@@ -407,7 +407,7 @@ end
 """
 Interpolate without checking if the data has been correctly loaded for the given time.
 """
-@generated function interp_unsafe(itp::DataSetInterpolator{T,N,N2}, t::DateTime, locs::Vararg{T,N2})::T where {T,N,N2}
+@generated function interp_unsafe(itp::DataSetInterpolator{T1,N,N2}, t::DateTime, locs::Vararg{T2,N2}) where {T1,T2,N,N2}
     if N2 == N - 1 # Number of locs has to be one less than the number of data dimensions so we can add the time in.
         quote
             locs = itp.coord_trans(locs)
