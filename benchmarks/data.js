@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1737988558952,
+  "lastUpdate": 1738116461630,
   "repoUrl": "https://github.com/EarthSciML/EarthSciData.jl",
   "entries": {
     "Julia benchmark result": [
@@ -1956,6 +1956,66 @@ window.BENCHMARK_DATA = {
             "value": 11495933448,
             "unit": "ns",
             "extra": "gctime=144858755\nmemory=1223411024\nallocs=36256074\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "ctessum@gmail.com",
+            "name": "Christopher Tessum",
+            "username": "ctessum"
+          },
+          "committer": {
+            "email": "ctessum@gmail.com",
+            "name": "Christopher Tessum",
+            "username": "ctessum"
+          },
+          "distinct": true,
+          "id": "7f268962003f9039ada22b2b8af097cddc45e78a",
+          "message": "Make type more flexible",
+          "timestamp": "2025-01-28T19:49:15-06:00",
+          "tree_id": "11abf39de8c2261e545e4ca80f17f3d18295740a",
+          "url": "https://github.com/EarthSciML/EarthSciData.jl/commit/7f268962003f9039ada22b2b8af097cddc45e78a"
+        },
+        "date": 1738116460506,
+        "tool": "julia",
+        "benches": [
+          {
+            "name": "GEOSFP/stream/Interpolation threaded",
+            "value": 553115463,
+            "unit": "ns",
+            "extra": "gctime=58680068.5\nmemory=232274680\nallocs=8775195\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
+          },
+          {
+            "name": "GEOSFP/stream/Interpolation serial",
+            "value": 514104609,
+            "unit": "ns",
+            "extra": "gctime=49235376.5\nmemory=211149064\nallocs=9069724\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
+          },
+          {
+            "name": "GEOSFP/nostream/Interpolation threaded",
+            "value": 125841443,
+            "unit": "ns",
+            "extra": "gctime=0\nmemory=26136656\nallocs=18621\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
+          },
+          {
+            "name": "GEOSFP/nostream/Interpolation serial",
+            "value": 334026693,
+            "unit": "ns",
+            "extra": "gctime=0\nmemory=448\nallocs=1\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
+          },
+          {
+            "name": "NEI Simulator/Serial",
+            "value": 11560797015,
+            "unit": "ns",
+            "extra": "gctime=138467365\nmemory=1223411024\nallocs=36256074\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
+          },
+          {
+            "name": "NEI Simulator/Threads",
+            "value": 11547867653,
+            "unit": "ns",
+            "extra": "gctime=129267249\nmemory=1223411024\nallocs=36256074\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
           }
         ]
       }
