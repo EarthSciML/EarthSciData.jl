@@ -176,7 +176,7 @@ mutable struct DataSetInterpolator{To,N,N2,FT,ITPT}
             t = Proj.Transformation("+proj=pipeline +step " * spatial_ref * " +step " * metadata.native_sr)
             coord_trans = (locs) -> begin
                 x, y = t(locs[metadata.xdim], locs[metadata.ydim])
-                replace_in_tuple(locs, metadata.xdim, To(x), metadata.ydim, To(y))
+                replace_in_tuple(locs, metadata.xdim, x, metadata.ydim, y)
             end
         end
         FT = typeof(coord_trans)
