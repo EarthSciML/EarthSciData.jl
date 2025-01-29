@@ -189,8 +189,8 @@ mutable struct DataSetInterpolator{To,N,N2,FT,ITPT}
     end
 end
 
-function replace_in_tuple(t::NTuple{N,T}, index1::Int, v1::T, index2::Int, v2::T) where {T,N}
-    ntuple(i -> i == index1 ? v1 : i == index2 ? v2 : t[i], N)
+function replace_in_tuple(t::NTuple{N,T1}, index1::Int, v1::T2, index2::Int, v2::T2) where {T1,T2,N}
+    ntuple(i -> i == index1 ? T1(v1) : i == index2 ? T1(v2) : t[i], N)
 end
 
 function Base.show(io::IO, itp::DataSetInterpolator)
