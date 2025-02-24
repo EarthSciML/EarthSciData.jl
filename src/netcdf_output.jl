@@ -34,19 +34,9 @@ mutable struct NetCDFOutputter
     end
 end
 
-function obs_function(mtk_sys, v, coord_setter, T)
-    obs_f! = ModelingToolkit.build_explicit_observed_function(mtk_sys, v, checkbounds=false)
-    obscache = zeros(T, length(unknowns(mtk_sys))) # Not used for anything (hopefully).
-    function data_f(p, t, x1, x2, x3)
-        coord_setter(p, (x1, x2, x3))
-        obs_f!(obscache, p, t)
-    end
-    data_f
-end
-
 "Set up the output file and the callback function."
 function EarthSciMLBase.init_callback(nc::NetCDFOutputter, sys::EarthSciMLBase.CoupledSystem,
-    sys_mtk, dom::EarthSciMLBase.DomainInfo)
+    sys_mtk, coord_args, dom::EarthSciMLBase.DomainInfo, alg::EarthSciMLBase.MapAlgorithm)
 
     rm(nc.filepath, force=true)
     lock(nclock) do
@@ -77,11 +67,9 @@ function EarthSciMLBase.init_callback(nc::NetCDFOutputter, sys::EarthSciMLBase.C
             d.attrib["units"] = string(DynamicQuantities.dimension(ModelingToolkit.get_unit(pv[i])))
             d[:] = grid[i]
         end
-        coords = EarthSciMLBase.coord_params(sys_mtk, dom)
-        coord_setter = ModelingToolkit.setp(sys_mtk, coords)
         if length(nc.extra_vars) > 0
             for v in nc.extra_vars
-                obs_f = obs_function(sys_mtk, v, coord_setter, EarthSciMLBase.dtype(dom))
+                obs_f = EarthSciMLBase.build_coord_observed_function(sys_mtk, coord_args, [v])
                 push!(nc.extra_var_fs, obs_f)
             end
         end
@@ -113,18 +101,19 @@ function affect!(nc::NetCDFOutputter, integrator)
             v[:, :, :, nc.h] = u[j, :, :, :]
         end
         if length(nc.extra_vars) > 0
-            u = zeros(length.(nc.grid)...) # Temporary array.
+            tmp = zeros(length.(nc.grid)...) # Temporary array.
             for j in eachindex(nc.extra_vars)
                 v = nc.vars[j+length(nc.vars)-length(nc.extra_vars)]
                 f = nc.extra_var_fs[j]
                 for (i, c1) ∈ enumerate(nc.grid[1])
                     for (j, c2) ∈ enumerate(nc.grid[2])
                         for (k, c3) ∈ enumerate(nc.grid[3])
-                            u[i, j, k] = f(integrator.p, integrator.t, c1, c2, c3)
+                            tmp[i, j, k] = only(f(view(u, :, i, j, k), integrator.p,
+                                integrator.t, c1, c2, c3))
                         end
                     end
                 end
-                v[:, :, :, nc.h] = u
+                v[:, :, :, nc.h] = tmp
             end
         end
         nc.tvar[nc.h] = integrator.t
