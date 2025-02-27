@@ -8,6 +8,9 @@ using ModelingToolkit: t
 using EarthSciMLBase, DiffEqCallbacks
 using DynamicQuantities, Latexify, ProgressMeter
 using Scratch
+using DomainSets
+
+import EarthSciData: dimnames
 
 # General utilities
 include("load.jl")
@@ -16,6 +19,7 @@ include("utils.jl")
 # Specific data sets
 include("netcdf.jl")
 include("geosfp.jl")
+include("wrf.jl")
 include("nei2016monthly.jl")
 include("netcdf_output.jl")
 
