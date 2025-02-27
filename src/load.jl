@@ -133,14 +133,19 @@ data records for the times immediately before and after the current time step.
 the interpolator. `spatial_ref` is the spatial reference system that the simulation will be using.
 `stream` specifies whether the data should be streamed in as needed or loaded all at once.
 """
-mutable struct DataSetInterpolator{To,N,N2,FT,ITPT}
+mutable struct DataSetInterpolator{To,N,N2,FT,ITPT,DomT}
     fs::FileSet
     varname::AbstractString
+    # This is the actual data.
     data::Array{To,N}
+    # This is buffer that is used to interpolate from.
     interp_cache::Array{To,N}
-    itp::ITPT
+    itp::ITPT # The interpolator.
+    # The buffer that the data is read into from the file.
+    # It is separate from `data` so that we can load it asynchronously.
     load_cache::Array{To,N2}
     metadata::MetaData
+    domain::DomT
     times::Vector{DateTime}
     currenttime::DateTime
     coord_trans::FT
@@ -151,7 +156,7 @@ mutable struct DataSetInterpolator{To,N,N2,FT,ITPT}
     initialized::Bool
 
     function DataSetInterpolator{To}(fs::FileSet, varname::AbstractString,
-        starttime::DateTime, endtime::DateTime, spatial_ref; stream=true) where {To<:Real}
+        starttime::DateTime, endtime::DateTime, domain::DomainInfo; stream=true) where {To<:Real}
         metadata = loadmetadata(fs, varname)
 
         # Check how many time indices we will need.
@@ -167,13 +172,15 @@ mutable struct DataSetInterpolator{To,N,N2,FT,ITPT}
         N = ndims(data)
         N2 = N - 1
         times = [DateTime(0, 1, 1) + Hour(i) for i ∈ 1:cache_size]
-        _, itp2 = create_interpolator!(To, interp_cache, data, metadata, times)
+        _, itp2 = create_interpolator!(To, interp_cache, data,
+            repeat([0:1], length(metadata.varsize)), times)
         ITPT = typeof(itp2)
 
-        if spatial_ref == metadata.native_sr
+        if domain.spatial_ref == metadata.native_sr
             coord_trans = (x) -> x # No transformation needed.
         else
-            t = Proj.Transformation("+proj=pipeline +step " * spatial_ref * " +step " * metadata.native_sr)
+            t = Proj.Transformation("+proj=pipeline +step " * domain.spatial_ref *
+                                    " +step " * metadata.native_sr)
             coord_trans = (locs) -> begin
                 x, y = t(locs[metadata.xdim], locs[metadata.ydim])
                 replace_in_tuple(locs, metadata.xdim, x, metadata.ydim, y)
@@ -181,8 +188,8 @@ mutable struct DataSetInterpolator{To,N,N2,FT,ITPT}
         end
         FT = typeof(coord_trans)
 
-        itp = new{To,N,N2,FT,ITPT}(fs, varname, data, interp_cache, itp2, load_cache,
-            metadata, times, DateTime(1, 1, 1), coord_trans,
+        itp = new{To,N,N2,FT,ITPT,typeof(domain)}(fs, varname, data, interp_cache, itp2,
+            load_cache, metadata, domain, times, DateTime(1, 1, 1), coord_trans,
             Channel{DateTime}(0), Channel(1), Channel{Int}(0),
             ReentrantLock(), false)
         itp
@@ -216,13 +223,7 @@ function knots2range(knots, reltol=0.05)
 end
 
 """Create a new interpolator, overwriting `interp_cache`."""
-function create_interpolator!(To, interp_cache, data, metadata::MetaData, times)
-    # We originally create the interpolator with a small array to avoid
-    # unnecessary memory use, so we size the coordinate to match the data size.
-    # However, when we're updating the interpolator below me make sure the
-    # data size matches the original coordinate size.
-    coords = [metadata.coords[i][1:size(data, i)] for i ∈ 1:length(metadata.coords)]
-
+function create_interpolator!(To, interp_cache, data, coords, times)
     grid = Tuple(knots2range.([coords..., datetime2unix.(times)]))
     copyto!(interp_cache, data)
     itp = interpolate!(interp_cache, BSpline(Linear()))
@@ -234,7 +235,7 @@ function update_interpolator!(itp::DataSetInterpolator{To}) where {To}
     if size(itp.interp_cache) != size(itp.data)
         itp.interp_cache = similar(itp.data)
     end
-    grid, itp2 = create_interpolator!(To, itp.interp_cache, itp.data, itp.metadata, itp.times)
+    grid, itp2 = create_interpolator!(To, itp.interp_cache, itp.data, itp.metadata.coords, itp.times)
     @assert all([length(g) for g in grid] .== size(itp.data)) "invalid data size: $([length(g) for g in grid]) != $(size(itp.data))"
     itp.itp = itp2
 end
@@ -346,13 +347,20 @@ function update!(itp::DataSetInterpolator, t::DateTime)
         if r != 0
             throw(r)
         end
-        d .= itp.load_cache # Copy results to correct location
+        interpolate_from!(itp, d, itp.load_cache) # Copy results to correct location
         put!(itp.copyfinish, 0) # Let the loader know we've finished copying
     end
     itp.times = times
     itp.currenttime = t
     @assert issorted(itp.times) "Interpolator times are in wrong order"
     update_interpolator!(itp)
+end
+
+function interpolate_from!(dsi::DataSetInterpolator, dst, src)
+    data_grid = Tuple(knots2range.(dsi.metadata.coords))
+    itp = interpolate!(src, BSpline(Linear()))
+    itp = scale(itp, data_grid)
+    dst .= src
 end
 
 function lazyload!(itp::DataSetInterpolator, t::DateTime)
@@ -429,7 +437,7 @@ end
 
 mutable struct ITPWrapper{ITP}
     itp::ITP
-    ITPWrapper(itp::ITP) where ITP = new{ITP}(itp)
+    ITPWrapper(itp::ITP) where {ITP} = new{ITP}(itp)
 end
 
 (itp::ITPWrapper)(t, locs::Vararg{T,N}) where {T,N} = interp_unsafe(itp.itp, t, locs...)
@@ -466,7 +474,7 @@ Create an equation that interpolates the given dataset at the given time and loc
 `wrapper_f` can specify a function to wrap the interpolated value, for example `eq -> eq / 2`
 to divide the interpolated value by 2.
 """
-function create_interp_equation(itp::DataSetInterpolator, filename, t, starttime, coords;
+function create_interp_equation(itp::DataSetInterpolator, filename, t, starttime, coords, staggering;
     wrapper_f=v -> v)
 
     n = length(filename) > 0 ? Symbol("$(filename)₊$(itp.varname)") : Symbol("$(itp.varname)")
@@ -483,7 +491,8 @@ function create_interp_equation(itp::DataSetInterpolator, filename, t, starttime
     # Create left hand side of equation.
     desc = description(itp.itp)
     uu = ModelingToolkit.get_unit(rhs)
-    lhs = only(@variables $n(t) [unit = uu, description = desc])
+    lhs = only(@variables $n(t) [unit = uu, description = desc,
+        misc = Dict(:staggering => staggering)])
 
     eq = lhs ~ rhs
 
@@ -498,4 +507,10 @@ end
 
 Latexify.@latexrecipe function f(itp::EarthSciData.DataSetInterpolator)
     return "$(split(string(typeof(itp.fs)), ".")[end]).$(itp.varname)"
+end
+
+function _get_staggering(var)
+    misc = getmisc(var)
+    @assert :staggering in keys(misc) "Staggering is not specified for variable $(var)."
+    return misc[:staggering]
 end

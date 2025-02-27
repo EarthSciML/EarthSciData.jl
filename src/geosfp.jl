@@ -257,7 +257,7 @@ function GEOSFP(domain::AbstractString, domaininfo::DomainInfo; name=:GEOSFP, st
         for varname ∈ varnames(fs)
             dt = EarthSciMLBase.dtype(domaininfo)
             itp = DataSetInterpolator{dt}(fs, varname, starttime, endtime,
-                domaininfo.spatial_ref; stream=stream)
+                domaininfo; stream=stream)
             dims = dimnames(itp)
             coords = Num[]
             for dim in dims
@@ -265,7 +265,9 @@ function GEOSFP(domain::AbstractString, domaininfo::DomainInfo; name=:GEOSFP, st
                 @assert d ∈ keys(pvdict) "GEOSFP coordinate $d not found in domaininfo coordinates ($(pvs))."
                 push!(coords, pvdict[d])
             end
-            eq, event, param = create_interp_equation(itp, filename, t, starttime, coords)
+            staggering = geosfp_staggering(filename, varname, dims)
+            eq, event, param = create_interp_equation(itp, filename, t, starttime, coords,
+                staggering)
             push!(eqs, eq)
             push!(events, event)
             push!(params, param)
@@ -349,4 +351,19 @@ function partialderivatives_δPδlev_geosfp(geosfp; default_lev=1.0)
 
         return Dict(only(levindex) => δPδlev)
     end
+end
+
+# Return grid staggering for the given variable,
+# true for edge-aligned and false for center-aligned.
+function geosfp_staggering(filename, varname, dims)
+    if filename == "A3dyn"
+        if varname == "U"
+            return (true, false, false)
+        elseif varname == "V"
+            return (false, true, false)
+        elseif varname == "OMEGA"
+            return (false, false, true)
+        end
+    end
+    return (false for _ in 1:length(dims))
 end

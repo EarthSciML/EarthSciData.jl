@@ -1,4 +1,5 @@
 using EarthSciData
+using EarthSciMLBase
 using Dates
 using ModelingToolkit
 using Random
@@ -11,7 +12,12 @@ using Test
 t = DateTime(2022, 5, 1)
 te = DateTime(2022, 5, 3)
 fs = EarthSciData.GEOSFPFileSet("4x5", "A3dyn", t, te)
-spatial_ref = "+proj=longlat +datum=WGS84 +no_defs"
+
+domain = DomainInfo(t, te;
+    latrange=deg2rad(-85.0f0):deg2rad(2):deg2rad(85.0f0),
+    lonrange=deg2rad(-180.0f0):deg2rad(2.5):deg2rad(175.0f0),
+    levrange=1:10, dtype=Float64)
+
 @test EarthSciData.url(fs, t) == "https://geos-chem.s3-us-west-2.amazonaws.com/GEOS_4x5/GEOS_FP/2022/05/GEOSFP.20220501.A3dyn.4x5.nc"
 
 @test endswith(EarthSciData.localpath(fs, t), joinpath("GEOS_4x5", "GEOS_FP", "2022", "05", "GEOSFP.20220501.A3dyn.4x5.nc"))
@@ -26,7 +32,7 @@ metadata = EarthSciData.loadmetadata(fs, "U")
 @test metadata.varsize == [72, 46, 72]
 @test metadata.dimnames == ["lon", "lat", "lev"]
 
-itp = EarthSciData.DataSetInterpolator{Float32}(fs, "U", t, te, spatial_ref)
+itp = EarthSciData.DataSetInterpolator{Float32}(fs, "U", t, te, domain)
 
 @test String(latexify(itp)) == "\$\\mathrm{GEOSFPFileSet}\\left( U \\right)\$"
 
@@ -83,11 +89,11 @@ end
 
     @testset "big cache" begin
         @test_nowarn EarthSciData.DataSetInterpolator{Float32}(fs, "U", DateTime(2022, 5, 1), DateTime(2022, 5, 3),
-            spatial_ref; stream=false)
+            domain; stream=false)
     end
 
     itp = EarthSciData.DataSetInterpolator{Float32}(fs, "U", DateTime(2022, 5, 1), DateTime(2022, 5, 3),
-        spatial_ref; stream=true)
+        domain; stream=true)
     dfi = EarthSciData.DataFrequencyInfo(fs)
 
     answerdata = [tv(fs, t) * v for t ∈ dfi.centerpoints, v ∈ [1.0, 0.5, 2.0]]
@@ -127,7 +133,7 @@ end
 
     @testset "no stream" begin
         itp = EarthSciData.DataSetInterpolator{Float32}(fs, "U", DateTime(2022, 5, 1),
-            DateTime(2022, 5, 2), spatial_ref; stream=false)
+            DateTime(2022, 5, 2), domain; stream=false)
 
         uvals = zeros(Float32, length(times), length(xs))
         answers = zeros(Float32, length(times), length(xs))
@@ -143,7 +149,7 @@ end
 end
 
 @testset "allocations" begin
-    itp = EarthSciData.DataSetInterpolator{Float64}(fs, "U", t, te, spatial_ref)
+    itp = EarthSciData.DataSetInterpolator{Float64}(fs, "U", t, te, domain)
     tt = DateTime(2022, 5, 1)
     interp!(itp, tt, 1.0, 0.0, 1.0)
 
@@ -157,7 +163,7 @@ end
             rethrow(err)
         end
 
-        itp2 = EarthSciData.DataSetInterpolator{Float32}(fs, "U", t, te, spatial_ref)
+        itp2 = EarthSciData.DataSetInterpolator{Float32}(fs, "U", t, te, domain)
         interp!(itp2, tt, 1.0f0, 0.0f0, 1.0f0)
         checkf(itp2, tt, 1.0f0, 0.0f0, 1.0f0)
         true

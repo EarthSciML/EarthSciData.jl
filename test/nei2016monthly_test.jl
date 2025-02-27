@@ -16,8 +16,6 @@ lon, lat, lev = EarthSciMLBase.pvars(domain)
 ts, te = get_tspan_datetime(domain)
 sample_time = ts
 
-spatial_ref="+proj=longlat +datum=WGS84 +no_defs"
-
 emis = NEI2016MonthlyEmis("mrggrid_withbeis_withrwc", domain)
 fileset = EarthSciData.NEI2016MonthlyEmisFileSet("mrggrid_withbeis_withrwc", ts, te)
 
@@ -28,18 +26,22 @@ eqs = equations(emis)
 sample_time = DateTime(2016, 5, 1)
 
 @testset "correct projection" begin
-    itp = EarthSciData.DataSetInterpolator{Float32}(fileset, "NOX", ts, te, spatial_ref)
+    itp = EarthSciData.DataSetInterpolator{Float32}(fileset, "NOX", ts, te, domain)
     @test interp!(itp, sample_time, deg2rad(-97.0f0), deg2rad(40.0f0)) ≈ 9.211331f-10
 end
 
 @testset "incorrect projection" begin
-    itp = EarthSciData.DataSetInterpolator{Float32}(fileset, "NOX", ts, te,
-        "+proj=axisswap +order=2,1 +step +proj=longlat +datum=WGS84 +no_defs")
+    domain = DomainInfo(DateTime(2016, 5, 1), DateTime(2016, 5, 2);
+    latrange=deg2rad(-85.0f0):deg2rad(2):deg2rad(85.0f0),
+    lonrange=deg2rad(-180.0f0):deg2rad(2.5):deg2rad(175.0f0),
+    levrange=1:10, dtype=Float64,
+    spatial_ref="+proj=axisswap +order=2,1 +step +proj=longlat +datum=WGS84 +no_defs")
+    itp = EarthSciData.DataSetInterpolator{Float32}(fileset, "NOX", ts, te,domain)
     @test_throws Proj.PROJError interp!(itp, sample_time, deg2rad(-97.0f0), deg2rad(40.0f0))
 end
 
 @testset "Out of domain" begin
-    itp = EarthSciData.DataSetInterpolator{Float32}(fileset, "NOX", ts, te, spatial_ref)
+    itp = EarthSciData.DataSetInterpolator{Float32}(fileset, "NOX", ts, te, domain)
     @test_throws BoundsError interp!(itp, sample_time, deg2rad(0.0f0), deg2rad(40.0f0))
 end
 
@@ -48,7 +50,7 @@ end
     ts, te = DateTime(2016, 5, 1), DateTime(2016, 6, 1)
     fileset = EarthSciData.NEI2016MonthlyEmisFileSet("mrggrid_withbeis_withrwc", ts, te)
     sample_time = DateTime(2016, 5, 1)
-    itp = EarthSciData.DataSetInterpolator{Float32}(fileset, "NOX", ts, te, spatial_ref)
+    itp = EarthSciData.DataSetInterpolator{Float32}(fileset, "NOX", ts, te, domain)
     EarthSciData.lazyload!(itp, sample_time)
     ti = EarthSciData.DataFrequencyInfo(itp.fs)
     @test month(itp.times[1]) == 4
@@ -75,7 +77,7 @@ end
     @check_allocs checkf(itp, t, loc1, loc2) = EarthSciData.interp_unsafe(itp, t, loc1, loc2)
 
     sample_time = DateTime(2016, 5, 1)
-    itp = EarthSciData.DataSetInterpolator{Float32}(fileset, "NOX", ts, te, spatial_ref)
+    itp = EarthSciData.DataSetInterpolator{Float32}(fileset, "NOX", ts, te, domain)
     interp!(itp, sample_time, deg2rad(-97.0f0), deg2rad(40.0f0))
     # If there is an error, it should occur in the proj library.
     # https://github.com/JuliaGeo/Proj.jl/issues/104
@@ -87,7 +89,7 @@ end
         contains(string(s), "libproj.proj_trans")
     end
 
-    itp2 = EarthSciData.DataSetInterpolator{Float64}(fileset, "NOX", ts, te, spatial_ref)
+    itp2 = EarthSciData.DataSetInterpolator{Float64}(fileset, "NOX", ts, te, domain)
     interp!(itp2, sample_time, deg2rad(-97.0), deg2rad(40.0))
     try # If there is an error, it should occur in the proj library.
         checkf(itp2, sample_time, deg2rad(-97.0), deg2rad(40.0))
@@ -110,7 +112,7 @@ end
 
 @testset "wrong year" begin
     sample_time = DateTime(2016, 5, 1)
-    itp = EarthSciData.DataSetInterpolator{Float32}(fileset, "NOX", ts, te, spatial_ref)
+    itp = EarthSciData.DataSetInterpolator{Float32}(fileset, "NOX", ts, te, domain)
     sample_time = DateTime(2017, 5, 1)
     @test_throws ArgumentError EarthSciData.lazyload!(itp, sample_time)
 end
