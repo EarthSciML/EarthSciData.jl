@@ -82,7 +82,8 @@ end
         cache .= [v, v * 0.5, v * 2.0]
     end
     function EarthSciData.loadmetadata(fs::DummyFileSet, varname)
-        return EarthSciData.MetaData([[0.0, 0.5, 1.0]], u"m", "description", ["x"], [3], "+proj=longlat +datum=WGS84 +no_defs", 1, 1)
+        return EarthSciData.MetaData([[0.0, 0.5, 1.0]], u"m", "description", ["x"], [3],
+            "+proj=longlat +datum=WGS84 +no_defs", 1, 1, -1, (false, false, false))
     end
 
     fs = DummyFileSet(DateTime(2022, 4, 30), DateTime(2022, 5, 4))

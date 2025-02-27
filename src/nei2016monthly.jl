@@ -113,7 +113,8 @@ function loadmetadata(fs::NEI2016MonthlyEmisFileSet, varname)::MetaData
         @assert xdim > 0 "NEI2016 `COL` dimension not found"
         @assert ydim > 0 "NEI2016 `ROW` dimension not found"
 
-        return MetaData(coords, units, description, dims, varsize, native_sr, xdim, ydim)
+        return MetaData(coords, units, description, dims, varsize, native_sr,
+            xdim, ydim, -1, (false, false, false))
     end
 end
 

@@ -84,6 +84,10 @@ struct MetaData
     xdim::Int
     "The index number of the y-dimension (e.g. latitude)"
     ydim::Int
+    "The index number of the z-dimension (e.g. vertical level)"
+    zdim::Int
+    "Grid staggering for each dimension. (true=edge-aligned, false=center-aligned)"
+    staggering::NTuple{3, Bool}
 end
 
 """
@@ -358,6 +362,7 @@ end
 
 function interpolate_from!(dsi::DataSetInterpolator, dst, src)
     data_grid = Tuple(knots2range.(dsi.metadata.coords))
+    model_grid = EarthSciMLBase.grid(dsi.domain, dsi.metadata.staggering)
     itp = interpolate!(src, BSpline(Linear()))
     itp = scale(itp, data_grid)
     dst .= src

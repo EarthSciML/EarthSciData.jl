@@ -133,17 +133,22 @@ function loadmetadata(fs::GEOSFPFileSet, varname)::MetaData
 
         xdim = findfirst((x) -> x == "lon", dims)
         ydim = findfirst((x) -> x == "lat", dims)
+        zdim = findfirst((x) -> x == "lev", dims)
+        zdim = isnothing(zdim) ? -1 : zdim
         @assert xdim > 0 "GEOSFP `lon` dimension not found"
         @assert ydim > 0 "GEOSFP `lat` dimension not found"
         # Convert from degrees to radians (so we are using SI units)
         coords[xdim] .= deg2rad.(coords[xdim])
         coords[ydim] .= deg2rad.(coords[ydim])
 
+        staggering = geosfp_staggering(fs.filetype, varname)
+
         # This projection will assume the inputs are radians when used within
         # a Proj pipeline: https://proj.org/en/9.3/operations/pipeline.html
         prj = "+proj=longlat +datum=WGS84 +no_defs"
 
-        return MetaData(coords, units, description, dims, varsize, prj, xdim, ydim)
+        return MetaData(coords, units, description, dims, varsize, prj,
+            xdim, ydim, zdim, staggering)
     end
 end
 
@@ -265,7 +270,7 @@ function GEOSFP(domain::AbstractString, domaininfo::DomainInfo; name=:GEOSFP, st
                 @assert d ∈ keys(pvdict) "GEOSFP coordinate $d not found in domaininfo coordinates ($(pvs))."
                 push!(coords, pvdict[d])
             end
-            staggering = geosfp_staggering(filename, varname, dims)
+            staggering = geosfp_staggering(filename, varname)
             eq, event, param = create_interp_equation(itp, filename, t, starttime, coords,
                 staggering)
             push!(eqs, eq)
@@ -355,7 +360,10 @@ end
 
 # Return grid staggering for the given variable,
 # true for edge-aligned and false for center-aligned.
-function geosfp_staggering(filename, varname, dims)
+# It should always be a triple of booleans for the
+# x, y, and z dimensions, respectively, regardless
+# of the dimensions of the variable.
+function geosfp_staggering(filename, varname)::NTuple{3, Bool}
     if filename == "A3dyn"
         if varname == "U"
             return (true, false, false)
@@ -365,5 +373,5 @@ function geosfp_staggering(filename, varname, dims)
             return (false, false, true)
         end
     end
-    return (false for _ in 1:length(dims))
+    return (false, false, false)
 end
