@@ -14,8 +14,8 @@ te = DateTime(2022, 5, 3)
 fs = EarthSciData.GEOSFPFileSet("4x5", "A3dyn", t, te)
 
 domain = DomainInfo(t, te;
-    latrange=deg2rad(-85.0f0):deg2rad(2):deg2rad(85.0f0),
-    lonrange=deg2rad(-180.0f0):deg2rad(2.5):deg2rad(175.0f0),
+    lonrange=deg2rad(-175.0):deg2rad(2.5):deg2rad(175.0),
+    latrange=deg2rad(-85.0):deg2rad(2):deg2rad(85.0),
     levrange=1:10, dtype=Float64)
 
 @test EarthSciData.url(fs, t) == "https://geos-chem.s3-us-west-2.amazonaws.com/GEOS_4x5/GEOS_FP/2022/05/GEOSFP.20220501.A3dyn.4x5.nc"
@@ -39,6 +39,14 @@ itp = EarthSciData.DataSetInterpolator{Float32}(fs, "U", t, te, domain)
 @test EarthSciData.dimnames(itp) == ["lon", "lat", "lev"]
 @test issetequal(EarthSciData.varnames(fs), ["U", "OMEGA", "RH", "DTRAIN", "V"])
 
+@testset "grid" begin
+    grd = EarthSciData._model_grid(itp)
+    length.(grd) == (142, 86, 10)
+    grd[1] ≈ deg2rad(-175.0 - 1.25):deg2rad(2.5):deg2rad(175.0 + 1.25)
+    grd[2] ≈ deg2rad(-85.0):deg2rad(2):deg2rad(85.0)
+    grd[3] ≈ 1:1.0:10
+end
+
 @testset "interpolation" begin
     uvals = []
     times = DateTime(2022, 5, 1):Hour(1):DateTime(2022, 5, 3)
@@ -48,8 +56,8 @@ itp = EarthSciData.DataSetInterpolator{Float32}(fs, "U", t, te, domain)
     for i ∈ 4:3:length(uvals)-1
         @test uvals[i] ≈ (uvals[i-1] + uvals[i+1]) / 2 atol = 1e-2
     end
-    want_uvals = [-0.047425747f0, 0.064035736f0, 0.11166346f0, 0.09545743f0, 0.07925139f0,
-        -0.011301707f0, -0.17620188f0, -0.34110206f0, -0.501398f0, -0.65708977f0]
+    want_uvals = [-0.07933916f0, 0.03189625f0, 0.079422876f0, 0.06324073f0, 0.047058582f0,
+        -0.044040862f0, -0.21005762f0, -0.37607434f0, -0.53645617f0, -0.6912031f0]
     @test uvals[1:10] ≈ want_uvals
 
     # Test that shuffling the times doesn't change the results.
@@ -79,11 +87,13 @@ end
         dfi = EarthSciData.DataFrequencyInfo(fs)
         tt = dfi.centerpoints[EarthSciData.centerpoint_index(dfi, t)]
         v = tv(fs, tt)
-        cache .= [v, v * 0.5, v * 2.0]
+        cache[:, 1] .= [v, v * 0.5, v * 2.0]
+        cache[:, 2] .= [v, v * 0.5, v * 2.0]
     end
     function EarthSciData.loadmetadata(fs::DummyFileSet, varname)
-        return EarthSciData.MetaData([[0.0, 0.5, 1.0]], u"m", "description", ["x"], [3],
-            "+proj=longlat +datum=WGS84 +no_defs", 1, 1, -1, (false, false, false))
+        return EarthSciData.MetaData([[0.0, 0.5, 1.0], [0.0, 1.0]], u"m",
+            "description", ["x"], [3, 2],
+            "+proj=longlat +datum=WGS84 +no_defs", 1, 2, -1, (false, false, false))
     end
 
     fs = DummyFileSet(DateTime(2022, 4, 30), DateTime(2022, 5, 4))
@@ -99,7 +109,8 @@ end
 
     answerdata = [tv(fs, t) * v for t ∈ dfi.centerpoints, v ∈ [1.0, 0.5, 2.0]]
 
-    grid = Tuple(EarthSciData.knots2range.([datetime2unix.(dfi.centerpoints), [0.0, 0.5, 1.0]]))
+    grid = Tuple(EarthSciData.knots2range.([datetime2unix.(dfi.centerpoints),
+        [0.0, 0.5, 1.0]]))
     answer_itp = scale(interpolate(answerdata, BSpline(Linear())), grid)
 
     times = DateTime(2022, 5, 1):Hour(1):DateTime(2022, 5, 3)
@@ -109,14 +120,14 @@ end
     answers = zeros(Float32, length(times), length(xs))
     for (i, tt) ∈ enumerate(times)
         for (j, x) ∈ enumerate(xs)
-            uvals[i, j] = interp!(itp, tt, x)
+            uvals[i, j] = interp!(itp, tt, (x, x)...)
             answers[i, j] = answer_itp(datetime2unix(tt), x)
         end
     end
 
     @test uvals ≈ answers
 
-    interp!(itp, times[end], xs[end])
+    interp!(itp, times[end], xs[end], xs[end])
     @test length(itp.times) == 2
     @test itp.times == [DateTime("2022-05-02T22:30:00"), DateTime("2022-05-03T01:30:00")]
 
@@ -126,7 +137,7 @@ end
         tt = times[i]
         for j ∈ randperm(length(xs))
             x = xs[j]
-            uvals[i, j] = interp!(itp, tt, x)
+            uvals[i, j] = interp!(itp, tt, x, x)
             answers[i, j] = answer_itp(datetime2unix(tt), x)
         end
     end
@@ -140,7 +151,7 @@ end
         answers = zeros(Float32, length(times), length(xs))
         for (i, tt) ∈ enumerate(times)
             for (j, x) ∈ enumerate(xs)
-                uvals[i, j] = interp!(itp, tt, x)
+                uvals[i, j] = interp!(itp, tt, x, x)
                 answers[i, j] = answer_itp(datetime2unix(tt), x)
             end
         end
@@ -169,4 +180,10 @@ end
         checkf(itp2, tt, 1.0f0, 0.0f0, 1.0f0)
         true
     end
+end
+
+@testset "tuple_from_vals" begin
+    @test EarthSciData.tuple_from_vals(1, 1, 2, 2, 3, 3) == (1, 2, 3)
+    @test EarthSciData.tuple_from_vals(2, 2, 1, 1, 3, 3) == (1, 2, 3)
+    @test EarthSciData.tuple_from_vals(3, 3, 2, 2, 1, 1) == (1, 2, 3)
 end

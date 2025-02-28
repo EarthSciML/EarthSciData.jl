@@ -87,7 +87,7 @@ struct MetaData
     "The index number of the z-dimension (e.g. vertical level)"
     zdim::Int
     "Grid staggering for each dimension. (true=edge-aligned, false=center-aligned)"
-    staggering::NTuple{3, Bool}
+    staggering::NTuple{3,Bool}
 end
 
 """
@@ -176,8 +176,8 @@ mutable struct DataSetInterpolator{To,N,N2,FT,ITPT,DomT}
         N = ndims(data)
         N2 = N - 1
         times = [DateTime(0, 1, 1) + Hour(i) for i ∈ 1:cache_size]
-        _, itp2 = create_interpolator!(To, interp_cache, data,
-            repeat([0:1], length(metadata.varsize)), times)
+        _, itp2 = create_interpolator!(interp_cache, data,
+            repeat([0:0.1:0.1], length(metadata.varsize)), times)
         ITPT = typeof(itp2)
 
         if domain.spatial_ref == metadata.native_sr
@@ -203,6 +203,14 @@ end
 function replace_in_tuple(t::NTuple{N,T1}, index1::Int, v1::T2, index2::Int, v2::T2) where {T1,T2,N}
     ntuple(i -> i == index1 ? T1(v1) : i == index2 ? T1(v2) : t[i], N)
 end
+function tuple_from_vals(index1::Int, v1::T, index2::Int, v2::T) where {T}
+    ntuple(i -> i == index1 ? v1 : i == index2 ? v2 :
+                throw(ArgumentError("missing index")), 2)
+end
+function tuple_from_vals(index1::Int, v1::T, index2::Int, v2::T, index3::Int, v3::T) where {T}
+    ntuple(i -> i == index1 ? v1 : i == index2 ? v2 : i == index3 ? v3 :
+                throw(ArgumentError("missing index")), 3)
+end
 
 function Base.show(io::IO, itp::DataSetInterpolator)
     print(io, "DataSetInterpolator{$(typeof(itp.fs)), $(itp.varname)}")
@@ -227,8 +235,8 @@ function knots2range(knots, reltol=0.05)
 end
 
 """Create a new interpolator, overwriting `interp_cache`."""
-function create_interpolator!(To, interp_cache, data, coords, times)
-    grid = Tuple(knots2range.([coords..., datetime2unix.(times)]))
+function create_interpolator!(interp_cache, data, coords, times)
+    grid = tuple(coords..., knots2range(datetime2unix.(times)))
     copyto!(interp_cache, data)
     itp = interpolate!(interp_cache, BSpline(Linear()))
     itp = scale(itp, grid)
@@ -239,7 +247,8 @@ function update_interpolator!(itp::DataSetInterpolator{To}) where {To}
     if size(itp.interp_cache) != size(itp.data)
         itp.interp_cache = similar(itp.data)
     end
-    grid, itp2 = create_interpolator!(To, itp.interp_cache, itp.data, itp.metadata.coords, itp.times)
+    coords = _model_grid(itp)
+    grid, itp2 = create_interpolator!(itp.interp_cache, itp.data, coords, itp.times)
     @assert all([length(g) for g in grid] .== size(itp.data)) "invalid data size: $([length(g) for g in grid]) != $(size(itp.data))"
     itp.itp = itp2
 end
@@ -312,9 +321,25 @@ function async_loader(itp::DataSetInterpolator)
     end
 end
 
+# Get the model grid for this interpolator.
+function _model_grid(itp::DataSetInterpolator)
+    grid = EarthSciMLBase.grid(itp.domain, itp.metadata.staggering)
+    if length(itp.metadata.varsize) == 2 && itp.metadata.zdim <= 0
+        grid_size = tuple_from_vals(itp.metadata.xdim, grid[1],
+            itp.metadata.ydim, grid[2])
+    elseif length(itp.metadata.varsize) == 3
+        grid_size = tuple_from_vals(itp.metadata.xdim, grid[1],
+            itp.metadata.ydim, grid[2], itp.metadata.zdim, grid[3])
+    else
+        error("Invalid data size")
+    end
+end
+
 function initialize!(itp::DataSetInterpolator, t::DateTime)
     itp.load_cache = zeros(eltype(itp.load_cache), itp.metadata.varsize...)
-    itp.data = zeros(eltype(itp.data), itp.metadata.varsize..., size(itp.data, length(size(itp.data)))) # Add a dimension for time.
+    grid_size = length.(_model_grid(itp))
+    itp.data = zeros(eltype(itp.data), grid_size...,
+        size(itp.data, length(size(itp.data)))) # Add a dimension for time.
     Threads.@spawn async_loader(itp)
     itp.initialized = true
 end
@@ -343,6 +368,7 @@ function update!(itp::DataSetInterpolator, t::DateTime)
         error("Unexpected time ordering, can't reorder indexes $(idxs_in_times) to $(idxs_in_cache)")
     end
 
+    model_grid = EarthSciMLBase.grid(itp.domain, itp.metadata.staggering)
     # Load the additional times we need
     for idx in idxs_not_in_times
         d = selectdim(itp.data, N, idx)
@@ -351,7 +377,7 @@ function update!(itp::DataSetInterpolator, t::DateTime)
         if r != 0
             throw(r)
         end
-        interpolate_from!(itp, d, itp.load_cache) # Copy results to correct location
+        interpolate_from!(itp, d, itp.load_cache, model_grid) # Copy results to correct location
         put!(itp.copyfinish, 0) # Let the loader know we've finished copying
     end
     itp.times = times
@@ -360,12 +386,40 @@ function update!(itp::DataSetInterpolator, t::DateTime)
     update_interpolator!(itp)
 end
 
-function interpolate_from!(dsi::DataSetInterpolator, dst, src)
+function interpolate_from!(dsi::DataSetInterpolator, dst::AbstractArray{T,N}, src::AbstractArray{T,N},
+    model_grid, extrapolate_type=Flat()) where {T,N}
     data_grid = Tuple(knots2range.(dsi.metadata.coords))
-    model_grid = EarthSciMLBase.grid(dsi.domain, dsi.metadata.staggering)
+    dsi.metadata.xdim, dsi.metadata.ydim
     itp = interpolate!(src, BSpline(Linear()))
-    itp = scale(itp, data_grid)
-    dst .= src
+    itp = extrapolate(scale(itp, data_grid), extrapolate_type)
+    if N == 3
+        for (i, x) in enumerate(model_grid[1])
+            for (j, y) in enumerate(model_grid[2])
+                for (k, z) in enumerate(model_grid[3])
+                    idx = tuple_from_vals(dsi.metadata.xdim, i,
+                        dsi.metadata.ydim, j, dsi.metadata.zdim, k)
+                    locs = tuple_from_vals(dsi.metadata.xdim, x,
+                        dsi.metadata.ydim, y, dsi.metadata.zdim, z)
+                    locs = dsi.coord_trans(locs)
+                    dst[idx...] = itp(locs...)
+                end
+            end
+        end
+    elseif N == 2 && dsi.metadata.zdim <= 0
+        for (i, x) in enumerate(model_grid[1])
+            for (j, y) in enumerate(model_grid[2])
+                idx = tuple_from_vals(dsi.metadata.xdim, i,
+                    dsi.metadata.ydim, j)
+                locs = tuple_from_vals(dsi.metadata.xdim, x,
+                    dsi.metadata.ydim, y)
+                locs = dsi.coord_trans(locs)
+                dst[idx...] = itp(locs...)
+            end
+        end
+    else
+        error("Invalid dimension configuration")
+    end
+    dst
 end
 
 function lazyload!(itp::DataSetInterpolator, t::DateTime)
@@ -423,7 +477,7 @@ Interpolate without checking if the data has been correctly loaded for the given
 @generated function interp_unsafe(itp::DataSetInterpolator{T1,N,N2}, t::DateTime, locs::Vararg{T2,N2}) where {T1,T2,N,N2}
     if N2 == N - 1 # Number of locs has to be one less than the number of data dimensions so we can add the time in.
         quote
-            locs = itp.coord_trans(locs)
+            #locs = itp.coord_trans(locs)
             try
                 itp.itp(locs..., datetime2unix(t))
             catch err

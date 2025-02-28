@@ -27,7 +27,7 @@ sample_time = DateTime(2016, 5, 1)
 
 @testset "correct projection" begin
     itp = EarthSciData.DataSetInterpolator{Float32}(fileset, "NOX", ts, te, domain)
-    @test interp!(itp, sample_time, deg2rad(-97.0f0), deg2rad(40.0f0)) ≈ 9.211331f-10
+    @test interp!(itp, sample_time, deg2rad(-97.0f0), deg2rad(40.0f0)) ≈ 1.256768f-9
 end
 
 @testset "incorrect projection" begin
@@ -42,7 +42,7 @@ end
 
 @testset "Out of domain" begin
     itp = EarthSciData.DataSetInterpolator{Float32}(fileset, "NOX", ts, te, domain)
-    @test_throws BoundsError interp!(itp, sample_time, deg2rad(0.0f0), deg2rad(40.0f0))
+    @test interp!(itp, sample_time, deg2rad(0.0f0), deg2rad(40.0f0)) ≈ 0.0
 end
 
 

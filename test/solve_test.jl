@@ -48,7 +48,7 @@ end
         DateTime("2016-04-16T00:00:00"), DateTime("2016-05-16T12:00:00")]
     prob = ODEProblem(sys2, [], get_tspan(domain), [])
     sol = solve(prob)
-    @test only(sol.u[end]) ≈ 6.3645540358326396e-6
+    @test only(sol.u[end]) ≈ 5.322912896619149e-6
 end
 
 emis = NEI2016MonthlyEmis("mrggrid_withbeis_withrwc", domain)
