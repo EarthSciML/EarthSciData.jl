@@ -160,25 +160,27 @@ end
     end
 end
 
-@testset "allocations" begin
-    itp = EarthSciData.DataSetInterpolator{Float64}(fs, "U", t, te, domain)
-    tt = DateTime(2022, 5, 1)
-    interp!(itp, tt, 1.0, 0.0, 1.0)
+if !Sys.iswindows() # Allocation tests don't seem to work on windows.
+    @testset "allocations" begin
+        itp = EarthSciData.DataSetInterpolator{Float64}(fs, "U", t, te, domain)
+        tt = DateTime(2022, 5, 1)
+        interp!(itp, tt, 1.0, 0.0, 1.0)
 
-    @test begin
-        @check_allocs checkf(itp, t, loc1, loc2, loc3) = EarthSciData.interp_unsafe(itp, t, loc1, loc2, loc3)
+        @test begin
+            @check_allocs checkf(itp, t, loc1, loc2, loc3) = EarthSciData.interp_unsafe(itp, t, loc1, loc2, loc3)
 
-        try
-            checkf(itp, tt, 1.0, 0.0, 1.0)
-        catch err
-            @warn err.errors
-            rethrow(err)
+            try
+                checkf(itp, tt, 1.0, 0.0, 1.0)
+            catch err
+                @warn err.errors
+                rethrow(err)
+            end
+
+            itp2 = EarthSciData.DataSetInterpolator{Float32}(fs, "U", t, te, domain)
+            interp!(itp2, tt, 1.0f0, 0.0f0, 1.0f0)
+            checkf(itp2, tt, 1.0f0, 0.0f0, 1.0f0)
+            true
         end
-
-        itp2 = EarthSciData.DataSetInterpolator{Float32}(fs, "U", t, te, domain)
-        interp!(itp2, tt, 1.0f0, 0.0f0, 1.0f0)
-        checkf(itp2, tt, 1.0f0, 0.0f0, 1.0f0)
-        true
     end
 end
 

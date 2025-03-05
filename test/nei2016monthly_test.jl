@@ -32,11 +32,11 @@ end
 
 @testset "incorrect projection" begin
     domain = DomainInfo(DateTime(2016, 5, 1), DateTime(2016, 5, 2);
-    latrange=deg2rad(-85.0f0):deg2rad(2):deg2rad(85.0f0),
-    lonrange=deg2rad(-180.0f0):deg2rad(2.5):deg2rad(175.0f0),
-    levrange=1:10, dtype=Float64,
-    spatial_ref="+proj=axisswap +order=2,1 +step +proj=longlat +datum=WGS84 +no_defs")
-    itp = EarthSciData.DataSetInterpolator{Float32}(fileset, "NOX", ts, te,domain)
+        latrange=deg2rad(-85.0f0):deg2rad(2):deg2rad(85.0f0),
+        lonrange=deg2rad(-180.0f0):deg2rad(2.5):deg2rad(175.0f0),
+        levrange=1:10, dtype=Float64,
+        spatial_ref="+proj=axisswap +order=2,1 +step +proj=longlat +datum=WGS84 +no_defs")
+    itp = EarthSciData.DataSetInterpolator{Float32}(fileset, "NOX", ts, te, domain)
     @test_throws Proj.PROJError interp!(itp, sample_time, deg2rad(-97.0f0), deg2rad(40.0f0))
 end
 
@@ -73,30 +73,32 @@ end
     @test 2 > sol.u[end][end] > 1
 end
 
-@testset "allocations" begin
-    @check_allocs checkf(itp, t, loc1, loc2) = EarthSciData.interp_unsafe(itp, t, loc1, loc2)
+if !Sys.iswindows() # Allocation tests don't seem to work on windows.
+    @testset "allocations" begin
+        @check_allocs checkf(itp, t, loc1, loc2) = EarthSciData.interp_unsafe(itp, t, loc1, loc2)
 
-    sample_time = DateTime(2016, 5, 1)
-    itp = EarthSciData.DataSetInterpolator{Float32}(fileset, "NOX", ts, te, domain)
-    interp!(itp, sample_time, deg2rad(-97.0f0), deg2rad(40.0f0))
-    # If there is an error, it should occur in the proj library.
-    # https://github.com/JuliaGeo/Proj.jl/issues/104
-    try
-        checkf(itp, sample_time, deg2rad(-97.0f0), deg2rad(40.0f0))
-    catch err
-        @test length(err.errors) == 1
-        s = err.errors[1]
-        contains(string(s), "libproj.proj_trans")
-    end
+        sample_time = DateTime(2016, 5, 1)
+        itp = EarthSciData.DataSetInterpolator{Float32}(fileset, "NOX", ts, te, domain)
+        interp!(itp, sample_time, deg2rad(-97.0f0), deg2rad(40.0f0))
+        # If there is an error, it should occur in the proj library.
+        # https://github.com/JuliaGeo/Proj.jl/issues/104
+        try
+            checkf(itp, sample_time, deg2rad(-97.0f0), deg2rad(40.0f0))
+        catch err
+            @test length(err.errors) == 1
+            s = err.errors[1]
+            contains(string(s), "libproj.proj_trans")
+        end
 
-    itp2 = EarthSciData.DataSetInterpolator{Float64}(fileset, "NOX", ts, te, domain)
-    interp!(itp2, sample_time, deg2rad(-97.0), deg2rad(40.0))
-    try # If there is an error, it should occur in the proj library.
-        checkf(itp2, sample_time, deg2rad(-97.0), deg2rad(40.0))
-    catch err
-        @test length(err.errors) == 1
-        s = err.errors[1]
-        contains(string(s), "libproj.proj_trans")
+        itp2 = EarthSciData.DataSetInterpolator{Float64}(fileset, "NOX", ts, te, domain)
+        interp!(itp2, sample_time, deg2rad(-97.0), deg2rad(40.0))
+        try # If there is an error, it should occur in the proj library.
+            checkf(itp2, sample_time, deg2rad(-97.0), deg2rad(40.0))
+        catch err
+            @test length(err.errors) == 1
+            s = err.errors[1]
+            contains(string(s), "libproj.proj_trans")
+        end
     end
 end
 
