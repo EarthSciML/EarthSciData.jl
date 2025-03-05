@@ -20,7 +20,7 @@ domain = DomainInfo(t, te;
 
 @test EarthSciData.url(fs, t) == "https://geos-chem.s3-us-west-2.amazonaws.com/GEOS_4x5/GEOS_FP/2022/05/GEOSFP.20220501.A3dyn.4x5.nc"
 
-@test endswith(EarthSciData.localpath(fs, t), joinpath("GEOS_4x5", "GEOS_FP", "2022", "05", "GEOSFP.20220501.A3dyn.4x5.nc"))
+@test endswith(EarthSciData.localpath(fs, t), join(["GEOS_4x5", "GEOS_FP", "2022", "05", "GEOSFP.20220501.A3dyn.4x5.nc"], "/"))
 
 ti = EarthSciData.DataFrequencyInfo(fs)
 epp = EarthSciData.endpoints(ti)

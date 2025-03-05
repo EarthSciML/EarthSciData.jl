@@ -25,14 +25,14 @@ $(SIGNATURES)
 Return the URL for the file for the given `DateTime`.
 
 """
-url(fs::FileSet, t::DateTime) = joinpath(fs.mirror, relpath(fs, t))
+url(fs::FileSet, t::DateTime) = join([fs.mirror, relpath(fs, t)], "/")
 
 """
 $(SIGNATURES)
 
 Return the local path for the file for the given `DateTime`.
 """
-localpath(fs::FileSet, t::DateTime) = joinpath(download_cache, relpath(fs, t))
+localpath(fs::FileSet, t::DateTime) = join([download_cache, relpath(fs, t)], "/")
 
 """
 $(SIGNATURES)

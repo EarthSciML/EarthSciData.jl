@@ -50,7 +50,7 @@ struct GEOSFPFileSet <: FileSet
     ds
     freq_info::DataFrequencyInfo
     function GEOSFPFileSet(domain, filetype, starttime, endtime)
-        GEOSFPFileSet("https://geos-chem.s3-us-west-2.amazonaws.com/", domain, filetype,
+        GEOSFPFileSet("https://geos-chem.s3-us-west-2.amazonaws.com", domain, filetype,
             starttime, endtime)
     end
     function GEOSFPFileSet(mirror, domain, filetype, starttime, endtime)
@@ -89,7 +89,7 @@ function relpath(fs::GEOSFPFileSet, t::DateTime)
     day = @sprintf("%.2d", Dates.day(t))
     domain = replace(fs.domain, '.' => "")
     domain = replace(domain, '_' => ".")
-    return joinpath("GEOS_$(fs.domain)/GEOS_FP/$yr/$month", "GEOSFP.$(yr)$(month)$day.$(fs.filetype).$(domain).nc")
+    return join(["GEOS_$(fs.domain)/GEOS_FP/$yr/$month", "GEOSFP.$(yr)$(month)$day.$(fs.filetype).$(domain).nc"], "/")
 end
 
 DataFrequencyInfo(fs::GEOSFPFileSet)::DataFrequencyInfo = fs.freq_info
