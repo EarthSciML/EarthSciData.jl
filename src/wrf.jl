@@ -75,13 +75,13 @@ struct WRFFileSet <: EarthSciData.FileSet
                 push!(filepaths, filepath)
             end
         end
-    
+
         if isempty(filepaths)
             throw(ErrorException("No valid files downloaded for the specified range."))
         end
 
         lock(nclock) do
-            ds = NCDataset(filepaths, aggdim="time")            
+            ds = NCDataset(filepaths, aggdim="time")
             sdt = ds.attrib["START_DATE"]
             sd, st = split(sdt, '_')
             dt = ds.attrib["DT"]
@@ -132,7 +132,7 @@ function loadslice_w!(data::AbstractArray{T}, fs::WRFFileSet, ds::Union{NCDatase
         ArgumentError("Data array is not the correct size for variable $varname.")
     end
     var
-    
+
 
 end
 
@@ -143,19 +143,19 @@ function loadmetadata_w(fs::WRFFileSet, varname)::Union{MetaData, Nothing}
         if length(dims) < 4
             return nothing
         end
-        
+
         if haskey(var.attrib, "coordinates")
             coord_names = String.(split(var.attrib["coordinates"]))
             if "XTIME" ∉ coord_names
                 println("Skipping variable $varname: Dimension 'time' not found.")
                 return nothing
             end
-            
+
         else
             println("Skipping variable $varname: No 'coordinates' attribute found.")
             return nothing
         end
-        
+
         time_index = findfirst(isequal("XTIME"), coord_names)
         coord_names = deleteat!(coord_names, time_index)
         varsize = deleteat!(collect(size(var)), time_index)
@@ -179,11 +179,11 @@ function loadmetadata_w(fs::WRFFileSet, varname)::Union{MetaData, Nothing}
 
 
         scalar, unit_quantity = to_unit(var.attrib["units"])
-        
+
         description = var.attrib["description"]
-        
+
         scale_factor = get(var.attrib, "scale_factor", 1.0)
-        
+
         coords = []
         for d in coord_names
             if haskey(fs.ds, d)
@@ -195,18 +195,18 @@ function loadmetadata_w(fs::WRFFileSet, varname)::Union{MetaData, Nothing}
         end
 
         xdim = findfirst((x) -> occursin("XLONG", x), coord_names)
-        
+
         ydim = findfirst((x) -> occursin("XLAT", x), coord_names)
-        
+
 
         zdim_index = findfirst((x) -> occursin("bottom_top", x), dimnames(var))
-        
+
 
         varsize = deleteat!(collect(size(var)), time_index+1)
 
         @assert xdim > 0 "WRF `lon` dimension not found"
         @assert ydim > 0 "WRF `lat` dimension not found"
-        
+
         coords[xdim] .= deg2rad.(coords[xdim])
         coords[ydim] .= deg2rad.(coords[ydim])
 
@@ -219,7 +219,7 @@ end
 
 function varnames(fs::WRFFileSet)
     lock(nclock) do
-        exclude_vars = Set(keys(fs.ds.dim)) ∪ Set(["XLAT", "XLONG", "XLAT_U", "XLAT_V", 
+        exclude_vars = Set(keys(fs.ds.dim)) ∪ Set(["XLAT", "XLONG", "XLAT_U", "XLAT_V",
                                                    "XLONG_U", "XLONG_V", "Times"])
         return [name for name in keys(fs.ds) if name ∉ exclude_vars]
     end
@@ -230,10 +230,10 @@ struct WRFCoupler
 end
 
 function create_interpolator_w!(To, interp_cache, data, metadata::MetaData, times)
-    
+
     longitude = collect(range(first(metadata.coords[metadata.xdim]), stop=last(metadata.coords[metadata.xdim]), length=size(data, 1)))
     latitude = collect(range(first(metadata.coords[metadata.ydim]), stop=last(metadata.coords[metadata.ydim]), length=size(data, 2)))
-    
+
     if length(times) > 1
         time_step = datetime2unix(times[2]) - datetime2unix(times[1])
         time_range = range(datetime2unix(times[1]), stop=datetime2unix(times[end]), step=time_step)
@@ -333,10 +333,10 @@ end
             sec_int = floor(Int, second(t))
             t_int = DateTime(year(t), month(t), day(t), hour(t), minute(t), sec_int)
             try
-                
+
                 #result = itp.itp(locs..., datetime2unix(t))
                 result = itp.itp(locs..., datetime2unix(t_int))
-                
+
             catch err
                 # FIXME(CT): This is needed because ModelingToolkit sometimes
                 # calls the interpolator for the beginning of the simulation time period,
@@ -345,7 +345,7 @@ end
                 @warn "Interpolation for $(itp.varname) failed at t=$(t_int), locs=$(locs); trying to update interpolator."
 
                 lazyload!(itp, t)
-                
+
                 #itp.itp(locs..., datetime2unix(t))
                 itp.itp(locs..., datetime2unix(t_int))
             end
@@ -446,7 +446,7 @@ function WRF_2(domain::AbstractString, domaininfo::DomainInfo; name=:WRF, stream
         :lev_stag => lev,
         :emissions_zdim => lev
     )
-    
+
     eqs = Equation[]
     params = []
     events = []
@@ -468,7 +468,7 @@ function WRF_2(domain::AbstractString, domaininfo::DomainInfo; name=:WRF, stream
         :west_east_stag => :lon_stag,
         :south_north_stag => :lat_stag
     )
-    
+
     metadata = nothing
     for (filename, fs) in filesets
         for varname ∈ varnames(fs)
@@ -478,8 +478,8 @@ function WRF_2(domain::AbstractString, domaininfo::DomainInfo; name=:WRF, stream
             end
             try
                 metadata = loadmetadata_w(fs, varname)
-                
-        
+
+
                 if metadata === nothing
                     continue
                 end
@@ -501,7 +501,7 @@ function WRF_2(domain::AbstractString, domaininfo::DomainInfo; name=:WRF, stream
                 end
                 push!(coords, pvdict[translated_dim])
             end
-            
+
             if any(x -> string(x) == string(lev), coords)
                 eq, event, param = create_interp_equation_w(itp, filename, t, starttime, coords)
                 push!(eqs, eq)
@@ -532,12 +532,12 @@ function WRF_2(domain::AbstractString, domaininfo::DomainInfo; name=:WRF, stream
     push!(vars, δxδlon, δyδlat)
 
     @variables δPδlev(t) [unit = u"Pa", description = "Pressure gradient with respect to vertical level"]
-    
+
     sys = ODESystem(
-        eqs, 
-        t, 
-        vars, 
-        [pvdict[:lon], pvdict[:lat], pvdict[:lev], params...]; 
+        eqs,
+        t,
+        vars,
+        [pvdict[:lon], pvdict[:lat], pvdict[:lev], params...];
         name=name,
         metadata=Dict(
             :coupletype => WRFCoupler,
@@ -545,7 +545,7 @@ function WRF_2(domain::AbstractString, domaininfo::DomainInfo; name=:WRF, stream
         ),
         discrete_events=events
     )
-            
+
     return sys, (lon=lon, lat=lat, lev=lev)
 end
 
@@ -554,8 +554,8 @@ function couple2(mw::EarthSciMLBase.MeanWindCoupler, w::WRFCoupler)
     eqs = []
 
     push!(eqs, mw.v_lon ~ w.hourly₊U)
-    length(unknowns(mw)) > 1 ? push!(eqs, mw.v_lat ~ w.hourly₊V) : nothing 
-    length(unknowns(mw)) > 2 ? push!(eqs, mw.v_lev ~ w.hourly₊W) : nothing 
+    length(unknowns(mw)) > 1 ? push!(eqs, mw.v_lat ~ w.hourly₊V) : nothing
+    length(unknowns(mw)) > 2 ? push!(eqs, mw.v_lev ~ w.hourly₊W) : nothing
 
     ConnectorSystem(
         eqs,
@@ -591,7 +591,7 @@ function partialderivatives_δlevδz(wrf)
         else
             levx_numeric = levx
         end
-    
+
         try
             ph_val  = ph_itp_param(time_val, lon_val, lat_val, levx_numeric)
             phb_val = phb_itp_param(time_val, lon_val, lat_val, levx_numeric)
@@ -601,7 +601,7 @@ function partialderivatives_δlevδz(wrf)
             throw(e)
         end
     end
-    
+
     return (pvars::AbstractVector) -> begin
         levindex = EarthSciMLBase.matching_suffix_idx(pvars, :lev)
         if isempty(levindex)

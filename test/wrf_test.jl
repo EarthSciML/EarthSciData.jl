@@ -25,14 +25,14 @@ domain = DomainInfo(
     latv = deg2rad(34.0059)
     levv = 1.0
     tt = DateTime(2023, 8, 15, 0, 0, 0)
-    
+
     coord_defaults = Dict(
         :lon => lonv,
         :lat => latv,
         :lev => levv,
         :time => tt
     )
-    
+
     wrf_sys, params = WRF(
         "CONUS",
         DomainInfo(
@@ -47,7 +47,7 @@ domain = DomainInfo(
         stream=true,
         coord_defaults=coord_defaults
     )
-    
+
     domain2 = EarthSciMLBase.add_partial_derivative_func(domain,
         partialderivatives_δlevδz(wrf_sys))
 
@@ -78,7 +78,7 @@ domain = DomainInfo(
     eqs = equations(pde_sys)
 
     want_terms = [
-        "MeanWind₊v_lon(t, lon, lat, lev)", "WRF₊hourly₊U(t, lon, lat, lev)", 
+        "MeanWind₊v_lon(t, lon, lat, lev)", "WRF₊hourly₊U(t, lon, lat, lev)",
         "MeanWind₊v_lat(t, lon, lat, lev)", "WRF₊hourly₊V(t, lon, lat, lev)",
         "MeanWind₊v_lev(t, lon, lat, lev)", "WRF₊hourly₊W(t, lon, lat, lev)",
         "WRF₊hourly₊U_itp(t, lon, lat, lev)", "WRF₊hourly₊V_itp(t, lon, lat, lev)",
@@ -161,7 +161,7 @@ end
     itp_pb = ITPWrapper_w(event_pb.affects.ctx)
 
     P_total = [
-        myf([tt, lonv, latv, levv, itp_p(tt, lonv, latv, levv), itp_pb(tt, lonv, latv, levv)]) 
+        myf([tt, lonv, latv, levv, itp_p(tt, lonv, latv, levv), itp_pb(tt, lonv, latv, levv)])
         for levv in [1, 1.5, 2, 21.5, 30, 31.5]
     ]
     println("P_total: ", P_total)
@@ -223,7 +223,7 @@ end
     itp_pb = ITPWrapper_w(event_pb.affects.ctx)
 
     P_total = [
-        myf([tt, lonv, latv, levv, itp_p(tt, lonv, latv, levv), itp_pb(tt, lonv, latv, levv)]) 
+        myf([tt, lonv, latv, levv, itp_p(tt, lonv, latv, levv), itp_pb(tt, lonv, latv, levv)])
         for levv in [1, 1.5, 2, 21.5, 30, 31.5]
     ]
     println("P_total: ", P_total)
@@ -349,9 +349,8 @@ end
     itp_pb = ITPWrapper_w(event_pb.affects.ctx)
 
     P_total = [
-        myf([tt, lonv, latv, levv, itp_p(tt, lonv, latv, levv), itp_pb(tt, lonv, latv, levv)]) 
+        myf([tt, lonv, latv, levv, itp_p(tt, lonv, latv, levv), itp_pb(tt, lonv, latv, levv)])
         for levv in [1, 1.5, 2, 21.5, 30, 31.5]
     ]
     println("P_total: ", P_total)
 end
-
