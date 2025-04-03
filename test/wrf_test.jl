@@ -104,7 +104,6 @@ end
     end
 end
 
-
 @testset "wrf total pressures at exact-hour timestamps" begin
     lonv = deg2rad(-118.2707)
     latv = deg2rad(34.0059)
@@ -154,7 +153,7 @@ end
         xrange=-2.334e6:12000:2.334e6,
         yrange=-1.374e6:12000:1.374e6,
         levrange=1:32,
-        spatial_ref = "+proj=lcc +lat_1=30.0 +lat_2=60.0 +lat_0=38.999996 +lon_0=-97.0 +x_0=0 +y_0=0 +a=6370000 +b=6370000 +to_meter=1",
+        spatial_ref="+proj=lcc +lat_1=30.0 +lat_2=60.0 +lat_0=38.999996 +lon_0=-97.0 +x_0=0 +y_0=0 +a=6370000 +b=6370000 +to_meter=1",
         dtype=Float64
     )
 
@@ -246,40 +245,15 @@ end
 end
 
 
-@testset "wrf δlevδz" begin
+@testset "wrf δzδlev" begin
     lonv = deg2rad(-118.2707)
     latv = deg2rad(34.0059)
     levv = 1.0
     tt = DateTime(2023, 8, 15, 0, 0, 0)
 
-    coord_defaults = Dict(
-        :lon => lonv,
-        :lat => latv,
-        :lev => levv,
-        :time => tt
-    )
-
     @parameters lat, [unit = u"rad"], lon, [unit = u"rad"], lev
 
-    wrf_sys, params = WRF(
-        "CONUS",
-        DomainInfo(
-            DateTime(2023, 8, 15, 0, 0, 0),
-            DateTime(2023, 8, 15, 3, 0, 0);
-            latrange=deg2rad(25.0f0):deg2rad(0.1):deg2rad(50.0f0),
-            lonrange=deg2rad(-125.0f0):deg2rad(0.1):deg2rad(-65.0f0),
-            levrange=1:2,
-            dtype=Float64
-        );
-        name=:WRF,
-        stream=true,
-        coord_defaults=coord_defaults
-    )
-
-    wrf_sys.metadata[:coord_defaults][:time] = tt
-    wrf_sys.metadata[:coord_defaults][:lon] = lonv
-    wrf_sys.metadata[:coord_defaults][:lat] = latv
-    wrf_sys.metadata[:coord_defaults][:lev] = lev
+    wrf_sys = WRF(domain)
 
     events = ModelingToolkit.get_discrete_events(wrf_sys)
     e_ph = only(events[[only(e.affects.pars_syms) == :PH_itp for e in events]])
@@ -288,21 +262,21 @@ end
     Main.EarthSciData.lazyload!(e_ph.affects.ctx, tt)
     Main.EarthSciData.lazyload!(e_phb.affects.ctx, tt)
 
-    itp_ph = ITPWrapper_w(e_ph.affects.ctx)
-    itp_phb = ITPWrapper_w(e_phb.affects.ctx)
+    itp_ph = EarthSciData.ITPWrapper(e_ph.affects.ctx)
+    itp_phb = EarthSciData.ITPWrapper(e_phb.affects.ctx)
 
-    dp = partialderivatives_δlevδz(wrf_sys)
+    eqs = equations(wrf_sys)
+    δzδlev_var = eqs[findfirst(x -> EarthSciMLBase.var2symbol(x.lhs) == :δzδlev, eqs)].rhs
+    δzδlev_sub = ModelingToolkit.subs_constants(δzδlev_var)
 
-    ff = dp([lon, lat, lev])
+    vars_in_expr = get_variables(δzδlev_sub)
+    PH_itp = vars_in_expr[findfirst(isequal(:PH_itp), EarthSciMLBase.var2symbol.(vars_in_expr))]
+    PHB_itp = vars_in_expr[findfirst(isequal(:PHB_itp), EarthSciMLBase.var2symbol.(vars_in_expr))]
 
-    fff = ModelingToolkit.subs_constants(ff[3])
+    δzδlev_expr = build_function(δzδlev_sub, [t, lon, lat, lev, PH_itp, PHB_itp])
+    δzδlev_f = eval(δzδlev_expr)
 
-    vars_in_expr = get_variables(fff)
-    ph_itp = vars_in_expr[findfirst(isequal(:PH_itp), EarthSciMLBase.var2symbol.(vars_in_expr))]
-    phb_itp = vars_in_expr[findfirst(isequal(:PHB_itp), EarthSciMLBase.var2symbol.(vars_in_expr))]
-    f_expr = build_function(fff, [t, lon, lat, lev, ph_itp, phb_itp])
-    myf = eval(f_expr)
-    δlevδz = [myf([tt, lonv, latv, levv, itp_ph, itp_phb]) for levv in [1, 1.5, 2, 21.5, 30, 31.5]]
-    println("δlevδz: ", δlevδz)
-
+    δzδlev_want = [10.605308519529093, 16.96470420154144, 23.33493331829344, 655.5566269461963, 352.24392973192874, 279.69888985290606]
+    δzδlev = [δzδlev_f([tt, lonv, latv, levv, itp_ph, itp_phb]) for levv in [1, 1.5, 2, 21.5, 30, 31.5]]
+    @test δzδlev ≈ δzδlev_want
 end
