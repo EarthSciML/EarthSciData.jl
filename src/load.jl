@@ -533,7 +533,7 @@ Create an equation that interpolates the given dataset at the given time and loc
 `wrapper_f` can specify a function to wrap the interpolated value, for example `eq -> eq / 2`
 to divide the interpolated value by 2.
 """
-function create_interp_equation(itp::DataSetInterpolator, filename, t, starttime, coords, staggering;
+function create_interp_equation(itp::DataSetInterpolator, filename, t, starttime, coords;
     wrapper_f=v -> v)
 
     n = length(filename) > 0 ? Symbol("$(filename)₊$(itp.varname)") : Symbol("$(itp.varname)")
@@ -551,7 +551,7 @@ function create_interp_equation(itp::DataSetInterpolator, filename, t, starttime
     desc = description(itp.itp)
     uu = ModelingToolkit.get_unit(rhs)
     lhs = only(@variables $n(t) [unit = uu, description = desc,
-        misc = Dict(:staggering => staggering)])
+        misc = Dict(:staggering => itp.itp.metadata.staggering)])
 
     eq = lhs ~ rhs
 

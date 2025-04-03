@@ -1,5 +1,5 @@
 
-export WRF, partialderivatives_δlevδz, WRFCoupler, ITPWrapper_w
+export WRF, partialderivatives_δlevδz
 
 const BASE_DIR = joinpath(homedir(), "WRF_Data")
 
@@ -16,16 +16,16 @@ function get_tspan_datetime(domaininfo::DomainInfo)
         time_domain = const_ic.indepdomain.domain
 
         starttime = Dates.unix2datetime(minimum(time_domain))
-        endtime   = Dates.unix2datetime(maximum(time_domain))
+        endtime = Dates.unix2datetime(maximum(time_domain))
     catch
         println("Warning: Temporal information missing. Using default times.")
         starttime = DateTime(2023, 8, 15, 0, 0, 0)
-        endtime   = DateTime(2023, 8, 15, 2, 59, 59)
+        endtime = DateTime(2023, 8, 15, 2, 59, 59)
     end
     return starttime, endtime
 end
 
-function download_wrf_data(url::String, save_dir::String = BASE_DIR)
+function download_wrf_data(url::String, save_dir::String=BASE_DIR)
     function download_with_wget(url::String, save_path::String)
         try
             run(`wget --quiet -O $save_path $url`)
@@ -52,29 +52,29 @@ end
 struct WRFFileSet <: EarthSciData.FileSet
     mirror::AbstractString
     domain
-    filetype
     ds
     freq_info::DataFrequencyInfo
-    function WRFFileSet(domain, filetype, starttime, endtime)
-        WRFFileSet("https://data.rda.ucar.edu/d340000/", domain, filetype,
-            starttime, endtime)
+    function WRFFileSet(domain)
+        WRFFileSet("https://data.rda.ucar.edu/d340000/", domain)
     end
-    function WRFFileSet(mirror, domain, filetype, starttime, endtime)
-        check_times = collect((starttime - Hour(1)):Hour(1):(endtime + Hour(1)))
+    function WRFFileSet(mirror, domain)
+        starttime, endtime = get_tspan_datetime(domain)
+        check_times = collect((starttime-Hour(1)):Hour(1):(endtime+Hour(1)))
         filepaths = String[]
-        fs_temp = new(mirror, domain, filetype, nothing,
+        fs_temp = new(mirror, domain, nothing,
             DataFrequencyInfo(starttime, Day(1), check_times))
-        for time in check_times
-            y = Dates.year(time)
-            m = @sprintf("%02d", Dates.month(time))
-            d = @sprintf("%02d", Dates.day(time))
-            hour = Dates.format(floor(time, Hour), "HH:MM:SS")
-            url = string(mirror, "$y$m/", "wrfout_hourly_d01_", "$y-$m-$d", "_", hour, ".nc")
-            filepath = download_wrf_data(url)
-            if filepath != ""
-                push!(filepaths, filepath)
-            end
-        end
+        filepaths = maybedownload.((fs_temp,), check_times)
+        # for time in check_times
+        #     y = Dates.year(time)
+        #     m = @sprintf("%02d", Dates.month(time))
+        #     d = @sprintf("%02d", Dates.day(time))
+        #     hour = Dates.format(floor(time, Hour), "HH:MM:SS")
+        #     url = string(mirror, "$y$m/", "wrfout_hourly_d01_", "$y-$m-$d", "_", hour, ".nc")
+        #     filepath = download_wrf_data(url)
+        #     if filepath != ""
+        #         push!(filepaths, filepath)
+        #     end
+        # end
 
         if isempty(filepaths)
             throw(ErrorException("No valid files downloaded for the specified range."))
@@ -86,21 +86,28 @@ struct WRFFileSet <: EarthSciData.FileSet
             sd, st = split(sdt, '_')
             dt = ds.attrib["DT"]
             file_start = DateTime(sd * " " * st, dateformat"yyyy-mm-dd HH:MM:SS")
-            frequency = Second(dt);
+            frequency = Second(dt)
             times = ds["time"][:]
             dfi = DataFrequencyInfo(file_start, frequency, times)
 
-            return new(mirror, domain, filetype, ds, dfi)
+            return new(mirror, domain, ds, dfi)
         end
     end
+end
 
+function relpath(::WRFFileSet, time::DateTime)
+    y = Dates.year(time)
+    m = @sprintf("%02d", Dates.month(time))
+    d = @sprintf("%02d", Dates.day(time))
+    hour = Dates.format(floor(time, Hour), "HH:MM:SS")
+    string("$y$m/", "wrfout_hourly_d01_", "$y-$m-$d", "_", hour, ".nc")
 end
 
 DataFrequencyInfo(fs::WRFFileSet)::DataFrequencyInfo = fs.freq_info
 
-function loadslice_w!(data::AbstractArray, fs::WRFFileSet, t::DateTime, varname)
+function loadslice!(data::AbstractArray, fs::WRFFileSet, t::DateTime, varname)
     lock(nclock) do
-        var = loadslice_w!(data, fs, fs.ds, t, varname, "time")
+        var = loadslice!(data, fs, fs.ds, t, varname, "time")
 
         scale, _ = to_unit(var.attrib["units"])
         if scale != 1
@@ -136,91 +143,72 @@ function loadslice_w!(data::AbstractArray{T}, fs::WRFFileSet, ds::Union{NCDatase
 
 end
 
-function loadmetadata_w(fs::WRFFileSet, varname)::Union{MetaData, Nothing}
+function loadmetadata(fs::WRFFileSet, varname)::MetaData
     lock(nclock) do
+        timedim = "time"
         var = fs.ds[varname]
-        dims = NCDatasets.dimnames(var)
-        if length(dims) < 4
-            return nothing
-        end
-
-        if haskey(var.attrib, "coordinates")
-            coord_names = String.(split(var.attrib["coordinates"]))
-            if "XTIME" ∉ coord_names
-                println("Skipping variable $varname: Dimension 'time' not found.")
-                return nothing
-            end
-
-        else
-            println("Skipping variable $varname: No 'coordinates' attribute found.")
-            return nothing
-        end
-
-        time_index = findfirst(isequal("XTIME"), coord_names)
-        coord_names = deleteat!(coord_names, time_index)
+        dims = collect(NCDatasets.dimnames(var))
+        @assert timedim ∈ dims "Variable $varname does not have a dimension named '$timedim'."
+        time_index = findfirst(isequal(timedim), dims)
+        dims = deleteat!(dims, time_index)
         varsize = deleteat!(collect(size(var)), time_index)
 
-
-        zdim_index = findfirst((x) -> occursin("bottom_top", x), dimnames(var))
-        if zdim_index !== nothing
-            zdim_name = dimnames(var)[zdim_index]
-            if zdim_name ∉ coord_names
-                push!(coord_names, zdim_name)
-            end
-        end
-
-        emissions_zdim_index = findfirst((x) -> occursin("emissions_zdim", x), dimnames(var))
-        if emissions_zdim_index !== nothing
-            emissions_zdim_name = dimnames(var)[emissions_zdim_index]
-            if emissions_zdim_name ∉ coord_names
-                push!(coord_names, emissions_zdim_name)
-            end
-        end
-
-
-        scalar, unit_quantity = to_unit(var.attrib["units"])
-
+        _, unit_quantity = to_unit(var.attrib["units"])
         description = var.attrib["description"]
 
-        scale_factor = get(var.attrib, "scale_factor", 1.0)
+        xdim = findfirst(x -> occursin("west_east", x), dims)
+        ydim = findfirst(x -> occursin("south_north", x), dims)
+        @assert xdim > 0 "WRF x dimension not found"
+        @assert ydim > 0 "WRF y dimension not found"
+
+        # Find the z dimension; set to -1 if not found
+        zdim = findfirst((x) -> occursin("bottom_top", x), dims)
+        zdim = isnothing(zdim) ? findfirst((x) -> occursin("emissions_zdim", x), dims) : zdim
+        zdim = isnothing(zdim) ? -1 : zdim
+
+        @assert fs.ds.attrib["MAP_PROJ"] == 1 "Only Lambert Conformal Conic projection is currently supported for WRF data."
+        truelat1 = fs.ds.attrib["TRUELAT1"]
+        truelat2 = fs.ds.attrib["TRUELAT2"]
+        moad_cen_lat = fs.ds.attrib["MOAD_CEN_LAT"]
+        stand_lon = fs.ds.attrib["STAND_LON"]
+        prj = "+proj=lcc +lat_1=$(truelat1) +lat_2=$(truelat2) +lat_0=$(moad_cen_lat) +lon_0=$(stand_lon) +x_0=0 +y_0=0 +a=6370000 +b=6370000 +to_meter=1"
+        @assert moad_cen_lat ≈ fs.ds.attrib["CEN_LAT"] "CEN_LAT must match MOAD_CEN_LAT"
+        @assert stand_lon ≈ fs.ds.attrib["CEN_LON"] "CEN_LON must match STAND_LON"
 
         coords = []
-        for d in coord_names
+        for d in dims
             if haskey(fs.ds, d)
                 push!(coords, Float64.(fs.ds[d][:]))
+            elseif occursin("west_east", d)
+                nx = fs.ds.dim[d]
+                dx = fs.ds.attrib["DX"]
+                offset = 0.0 # This would be nonzero if cen_lon != stand_lon
+                start = -(nx - 1) / 2.0 * dx + offset
+                coord = start:dx:(start+(nx-1)*dx)
+                push!(coords, coord)
+            elseif occursin("south_north", d)
+                ny = fs.ds.dim[d]
+                dy = fs.ds.attrib["DY"]
+                offset = 0.0 # This would be nonzero if cen_lat != moad_cen_lat
+                start = -(ny - 1) / 2.0 * dy + offset
+                coord = start:dy:(start+(ny-1)*dy)
+                push!(coords, coord)
             else
-                dim_index = findfirst(isequal(d), dimnames(var))
-                push!(coords, collect(1:size(var, dim_index)))
+                push!(coords, 1.0:fs.ds.dim[d])
             end
         end
 
-        xdim = findfirst((x) -> occursin("XLONG", x), coord_names)
+        staggering = wrf_staggering(dims, xdim, ydim, zdim)
 
-        ydim = findfirst((x) -> occursin("XLAT", x), coord_names)
-
-
-        zdim_index = findfirst((x) -> occursin("bottom_top", x), dimnames(var))
-
-
-        varsize = deleteat!(collect(size(var)), time_index+1)
-
-        @assert xdim > 0 "WRF `lon` dimension not found"
-        @assert ydim > 0 "WRF `lat` dimension not found"
-
-        coords[xdim] .= deg2rad.(coords[xdim])
-        coords[ydim] .= deg2rad.(coords[ydim])
-
-        # This projection will assume the inputs are radians when used within
-        # a Proj pipeline: https://proj.org/en/9.3/operations/pipeline.html
-        prj = "+proj=longlat +datum=WGS84 +no_defs"
-        return MetaData(coords, unit_quantity, description, coord_names, varsize, prj, xdim, ydim)
+        return MetaData(coords, unit_quantity, description, dims, varsize, prj,
+            xdim, ydim, zdim, staggering)
     end
 end
 
 function varnames(fs::WRFFileSet)
     lock(nclock) do
         exclude_vars = Set(keys(fs.ds.dim)) ∪ Set(["XLAT", "XLONG", "XLAT_U", "XLAT_V",
-                                                   "XLONG_U", "XLONG_V", "Times"])
+            "XLONG_U", "XLONG_V", "Times"])
         return [name for name in keys(fs.ds) if name ∉ exclude_vars]
     end
 end
@@ -313,7 +301,7 @@ description(itp::DataSetInterpolator_w) = itp.metadata.description
 
 mutable struct ITPWrapper_w{ITP}
     itp::ITP
-    ITPWrapper_w(itp::ITP) where ITP = new{ITP}(itp)
+    ITPWrapper_w(itp::ITP) where {ITP} = new{ITP}(itp)
 end
 
 (itp::ITPWrapper_w)(t, locs::Vararg{T,N}) where {T,N} = begin
@@ -386,167 +374,161 @@ function create_interp_equation_w(itp::DataSetInterpolator_w, filename, t, start
     return eq, event, p_itp
 end
 
-function WRF(domain::AbstractString, domaininfo::DomainInfo; name=:WRF, stream=true, kwargs...)
-    coord_defaults = get(kwargs, :coord_defaults, Dict())
-    dtype = get(kwargs, :dtype, Float64)
-    cache_size = get(kwargs, :cache_size, 0)
+function WRF(domaininfo::DomainInfo; name=:WRF, stream=true)
     starttime, endtime = get_tspan_datetime(domaininfo)
+    fs = WRFFileSet("https://data.rda.ucar.edu/d340000/", domaininfo)
 
-    lon = coord_defaults[:lon]
-    lat = coord_defaults[:lat]
-    lev = coord_defaults[:lev]
-    time = coord_defaults[:time]
+    # lon = coord_defaults[:lon]
+    # lat = coord_defaults[:lat]
+    # lev = coord_defaults[:lev]
+    # time = coord_defaults[:time]
 
-    lon_bounds = (-2.2659069376520424, -1.1200319443750113)
-    lat_bounds = (0.4136259352284578, 0.9026160669338227)
+    # lon_bounds = (-2.2659069376520424, -1.1200319443750113)
+    # lat_bounds = (0.4136259352284578, 0.9026160669338227)
 
-    coord_defaults[:lon] = lon_bounds
-    coord_defaults[:lat] = lat_bounds
+    # coord_defaults[:lon] = lon_bounds
+    # coord_defaults[:lat] = lat_bounds
 
-    lon_interval = Interval(lon_bounds...)
-    lat_interval = Interval(lat_bounds...)
-    lev_interval = Interval(extrema(lev)...)
+    # lon_interval = Interval(lon_bounds...)
+    # lat_interval = Interval(lat_bounds...)
+    # lev_interval = Interval(extrema(lev)...)
 
-    time_interval = Interval(datetime2unix(starttime), datetime2unix(endtime))
+    # time_interval = Interval(datetime2unix(starttime), datetime2unix(endtime))
 
-    lon = only(@parameters lon [unit = u"rad", description = "Longitude"])
-    lat = only(@parameters lat [unit = u"rad", description = "Latitude"])
-    lev = only(@parameters lev [unit = u"1", description = "Vertical Level"])
+    # lon = only(@parameters lon [unit = u"rad", description = "Longitude"])
+    # lat = only(@parameters lat [unit = u"rad", description = "Latitude"])
+    # lev = only(@parameters lev [unit = u"1", description = "Vertical Level"])
 
-    boundaries = [
-        lon ∈ lon_interval,
-        lat ∈ lat_interval,
-        lev ∈ lev_interval,
-        t ∈ time_interval
-    ]
+    # boundaries = [
+    #     lon ∈ lon_interval,
+    #     lat ∈ lat_interval,
+    #     lev ∈ lev_interval,
+    #     t ∈ time_interval
+    # ]
 
-    ic = constIC(0.0u"s", t ∈ time_interval)
-    bcs = constBC(0.0u"s", boundaries...)
+    # ic = constIC(0.0u"s", t ∈ time_interval)
+    # bcs = constBC(0.0u"s", boundaries...)
 
-    domaininfo = EarthSciMLBase.DomainInfo(ic, bcs; dtype=dtype)
+    # domaininfo = EarthSciMLBase.DomainInfo(ic, bcs; dtype=dtype)
 
-    return WRF_2(domain, domaininfo; name=name, stream=stream, coord_defaults=coord_defaults,
-               lon=lon, lat=lat, lev=lev)
-end
-
-function WRF_2(domain::AbstractString, domaininfo::DomainInfo; name=:WRF, stream=true,
-    coord_defaults=Dict(), lon, lat, lev)
-    starttime, endtime = get_tspan_datetime(domaininfo)
-    wrf_fileset = WRFFileSet("https://data.rda.ucar.edu/d340000/", domain, "hourly", starttime, endtime)
-    filesets = Dict{String, WRFFileSet}(
-        "hourly" => wrf_fileset
-    )
-    pvdict = Dict(
-        :lon => lon,
-        :lat => lat,
-        :lev => lev,
-        :t => t,
-        :lon_stag => lon,
-        :lat_stag => lat,
-        :lev_stag => lev,
-        :emissions_zdim => lev
-    )
+    pvs = EarthSciMLBase.pvars(domaininfo)
+    pvdict = Dict([Symbol(v) => v for v in pvs]...)
+    # pvdict = Dict(
+    #     :lon => lon,
+    #     :lat => lat,
+    #     :lev => lev,
+    #     :t => t,
+    #     :lon_stag => lon,
+    #     :lat_stag => lat,
+    #     :lev_stag => lev,
+    #     :emissions_zdim => lev
+    # )
 
     eqs = Equation[]
     params = []
     events = []
     vars = Num[]
 
-    wrf_to_domain_mapping = Dict(
-        :XLONG => :lon,
-        :XLAT => :lat,
-        :XLONG_U => :lon_stag,
-        :XLAT_V => :lat_stag,
-        :XLONG_V => :lon_stag,
-        :XLAT_U => :lat_stag,
+    xdim = :x in keys(pvdict) ? :x : :lon
+    ydim = :y in keys(pvdict) ? :y : :lat
+    coord_map = Dict(
         :bottom_top => :lev,
-        :bottom_top_stag => :lev_stag,
-        :t => :t,
-        :emissions_zdim => :emissions_zdim,
-        :west_east => :lon,
-        :south_north => :lat,
-        :west_east_stag => :lon_stag,
-        :south_north_stag => :lat_stag
+        :bottom_top_stag => :lev,
+        :emissions_zdim => :lev,  # For emissions vertical dimension
+        :west_east => xdim,
+        :west_east_stag => xdim,
+        :south_north => ydim,
+        :south_north_stag => ydim,
     )
+    # wrf_to_domain_mapping = Dict(
+    #     :XLONG => :lon,
+    #     :XLAT => :lat,
+    #     :XLONG_U => :lon_stag,
+    #     :XLAT_V => :lat_stag,
+    #     :XLONG_V => :lon_stag,
+    #     :XLAT_U => :lat_stag,
+    #     :bottom_top => :lev,
+    #     :bottom_top_stag => :lev_stag,
+    #     :t => :t,
+    #     :emissions_zdim => :emissions_zdim,
+    #     :west_east => :lon,
+    #     :south_north => :lat,
+    #     :west_east_stag => :lon_stag,
+    #     :south_north_stag => :lat_stag
+    # )
 
-    metadata = nothing
-    for (filename, fs) in filesets
-        for varname ∈ varnames(fs)
-            if varname == "Times"
-                println("Skipping variable: $varname")
-                continue
-            end
-            try
-                metadata = loadmetadata_w(fs, varname)
-
-
-                if metadata === nothing
-                    continue
-                end
-            catch e
-                println("Error loading metadata for $varname: ", e)
-                continue
-            end
-            dt = EarthSciMLBase.dtype(domaininfo)
-            itp = DataSetInterpolator_w{dt}(fs, varname, starttime, endtime,
-            domaininfo.spatial_ref; stream=stream)
-            dims = itp.metadata.dimnames
-            coords = Num[]
-            for dim in dims
-                d = Symbol(dim)
-                translated_dim = get(wrf_to_domain_mapping, d, d)
-                if !(translated_dim ∈ keys(pvdict))
-                    println("Dimension $d (translated to $translated_dim) is not in the domaininfo coordinates. Ignoring and continuing...")
-                    continue
-                end
-                push!(coords, pvdict[translated_dim])
-            end
-
-            if any(x -> string(x) == string(lev), coords)
-                eq, event, param = create_interp_equation_w(itp, filename, t, starttime, coords)
-                push!(eqs, eq)
-                push!(events, event)
-                push!(params, param)
-                push!(vars, eq.lhs)
-            else
-            end
+    for varname ∈ varnames(fs)
+        #try
+        # metadata = loadmetadata_w(fs, varname)
+        # if metadata === nothing
+        #     continue
+        # end
+        #catch e
+        #    println("Error loading metadata for $varname: ", e)
+        #    continue
+        #end
+        dt = EarthSciMLBase.dtype(domaininfo)
+        itp = DataSetInterpolator{dt}(fs, varname, starttime, endtime,
+            domaininfo; stream=stream)
+        dims = dimnames(itp)
+        coords = Num[]
+        for dim in dims
+            d = Symbol(dim)
+            translated_dim = get(coord_map, d, d)
+            @assert translated_dim ∈ keys(pvdict) "Dimension $d (translated to $translated_dim) is not in the domaininfo coordinates ($(pvs))."
+            push!(coords, pvdict[translated_dim])
         end
+        eq, event, param = create_interp_equation(itp, "", t, starttime, coords)
+        push!(eqs, eq)
+        push!(events, event)
+        push!(params, param)
+        push!(vars, eq.lhs)
     end
 
+    # Total Pressure
     @variables P_total(t) [unit = u"Pa", description = "Total pressure"]
-    @variables hourly₊P_itp(t) [unit = u"Pa", description = "Interpolated perturbation pressure"]
-    @variables hourly₊PB_itp(t) [unit = u"Pa", description = "Interpolated base state pressure"]
-
-    pressure_eq = P_total ~ hourly₊P_itp + hourly₊PB_itp
-    push!(vars, hourly₊P_itp, hourly₊PB_itp)
+    P = eqs[findfirst(x -> EarthSciMLBase.var2symbol(x.lhs) == :P, eqs)].rhs
+    PB = eqs[findfirst(x -> EarthSciMLBase.var2symbol(x.lhs) == :PB, eqs)].rhs
+    pressure_eq = P_total ~ P + PB
     push!(eqs, pressure_eq)
     push!(vars, P_total)
 
-    @variables δxδlon(t) [unit = u"m/rad", description = "X gradient with respect to longitude"]
-    @variables δyδlat(t) [unit = u"m/rad", description = "Y gradient with respect to latitude"]
-    @constants lat2meters = 111.32e3 * 180 / π [unit = u"m/rad"]
-    @constants lon2m = 40075.0e3 / 2π [unit = u"m/rad"]
-    lon_trans = δxδlon ~ lon2m * cos(pvdict[:lat])
-    lat_trans = δyδlat ~ lat2meters
-    push!(eqs, lon_trans, lat_trans)
-    push!(vars, δxδlon, δyδlat)
+    # Horizontal coordinate transforms
+    if :lat in keys(pvdict)
+        @variables δxδlon(t) [unit = u"m/rad", description = "X gradient with respect to longitude"]
+        @variables δyδlat(t) [unit = u"m/rad", description = "Y gradient with respect to latitude"]
+        @constants lat2meters = 111.32e3 * 180 / π [unit = u"m/rad"]
+        @constants lon2m = 40075.0e3 / 2π [unit = u"m/rad"]
+        lon_trans = δxδlon ~ lon2m * cos(pvdict[:lat])
+        lat_trans = δyδlat ~ lat2meters
+        push!(eqs, lon_trans, lat_trans)
+        push!(vars, δxδlon, δyδlat)
+    end
 
-    @variables δPδlev(t) [unit = u"Pa", description = "Pressure gradient with respect to vertical level"]
+
+    @variables z(t) [unit = u"m", description = "Geopotential height"]
+    @variables δzδlev(t) [unit = u"m", description = "Height derivative with respect to vertical level"]
+    @constants g = 9.81 [unit = u"m/s^2", description = "Acceleration due to gravity"]
+    PH = eqs[findfirst(x -> EarthSciMLBase.var2symbol(x.lhs) == :PH, eqs)].rhs
+    PHB = eqs[findfirst(x -> EarthSciMLBase.var2symbol(x.lhs) == :PHB, eqs)].rhs
+    z_expr = (PH + PHB) / g
+    #lev_trans = expand_derivatives(Differential(pvdict[:lev])(z_expr))
+    push!(eqs, z ~ z_expr)#, lev_trans)
+    push!(vars, z)#, δzδlev)
 
     sys = ODESystem(
         eqs,
         t,
         vars,
-        [pvdict[:lon], pvdict[:lat], pvdict[:lev], params...];
+        [pvdict[xdim], pvdict[ydim], pvdict[:lev], params...];
         name=name,
         metadata=Dict(
             :coupletype => WRFCoupler,
-            :coord_defaults => coord_defaults
         ),
         discrete_events=events
     )
 
-    return sys, (lon=lon, lat=lat, lev=lev)
+    return sys
 end
 
 function couple2(mw::EarthSciMLBase.MeanWindCoupler, w::WRFCoupler)
@@ -570,13 +552,13 @@ function partialderivatives_δlevδz(wrf)
     time_val = datetime2unix(coord_defaults[:time])
 
     param_symbols = Symbolics.tosymbol.(wrf.ps)
-    idx_ph  = findfirst(x -> occursin("hourly₊PH_itp",  string(x)), param_symbols)
+    idx_ph = findfirst(x -> occursin("hourly₊PH_itp", string(x)), param_symbols)
     idx_phb = findfirst(x -> occursin("hourly₊PHB_itp", string(x)), param_symbols)
     if idx_ph === nothing || idx_phb === nothing
         error("Could not find PH or PHB interpolators in the WRF system parameters.")
     end
 
-    ph_itp_param  = wrf.ps[idx_ph]
+    ph_itp_param = wrf.ps[idx_ph]
     phb_itp_param = wrf.ps[idx_phb]
 
     function PH_total_numeric(levx)
@@ -593,7 +575,7 @@ function partialderivatives_δlevδz(wrf)
         end
 
         try
-            ph_val  = ph_itp_param(time_val, lon_val, lat_val, levx_numeric)
+            ph_val = ph_itp_param(time_val, lon_val, lat_val, levx_numeric)
             phb_val = phb_itp_param(time_val, lon_val, lat_val, levx_numeric)
             return ph_val + phb_val
         catch e
@@ -684,8 +666,8 @@ end
 function initialize!(itp::DataSetInterpolator_w{To,N,N2,FT,ITPT}, t::DateTime) where {To,N,N2,FT,ITPT}
     itp.load_cache = zeros(eltype(itp.load_cache), itp.metadata.varsize...)
     itp.data = zeros(eltype(itp.data),
-                     itp.metadata.varsize...,
-                     size(itp.data, ndims(itp.data)))  # Add a dimension for time.
+        itp.metadata.varsize...,
+        size(itp.data, ndims(itp.data)))  # Add a dimension for time.
     Threads.@spawn async_loader(itp)
     itp.initialized = true
 end
@@ -751,3 +733,23 @@ end
 
 lazyload!(itp::DataSetInterpolator_w{To,N,N2,FT,ITPT}, t::AbstractFloat) where {To,N,N2,FT,ITPT} =
     lazyload!(itp, Dates.unix2datetime(t))
+
+# Return grid staggering for the given variable,
+# true for edge-aligned and false for center-aligned.
+# It should always be a triple of booleans for the
+# x, y, and z dimensions, respectively, regardless
+# of the dimensions of the variable.
+function wrf_staggering(dims, xdim, ydim, zdim)::NTuple{3,Bool}
+    if zdim < 1
+        return (
+            occursin("_stag", dims[xdim]),
+            occursin("_stag", dims[ydim]),
+            false
+        )
+    end
+    return (
+        occursin("_stag", dims[xdim]),
+        occursin("_stag", dims[ydim]),
+        occursin("_stag", dims[zdim])
+    )
+end

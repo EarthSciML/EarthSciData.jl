@@ -182,8 +182,7 @@ function NEI2016MonthlyEmis(sector::AbstractString, domaininfo::DomainInfo; scal
             domaininfo; stream=stream)
         @constants zero_emis = 0 [unit = units(itp) / u"m"]
         zero_emis = ModelingToolkit.unwrap(zero_emis) # Unsure why this is necessary.
-        eq, event, param = create_interp_equation(itp, "", t, starttime, [x, y],
-            (false, false); # staggering
+        eq, event, param = create_interp_equation(itp, "", t, starttime, [x, y];
             wrapper_f=(eq) -> ifelse(lev < 2, eq / Δz * scale, zero_emis),
         )
         push!(eqs, eq)
