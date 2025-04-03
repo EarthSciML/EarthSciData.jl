@@ -253,7 +253,8 @@ function GEOSFP(domain::AbstractString, domaininfo::DomainInfo; name=:GEOSFP, st
         "A3mstE" => GEOSFPFileSet(domain, "A3mstE", starttime, endtime),
         "I3" => GEOSFPFileSet(domain, "I3", starttime, endtime))
 
-    pvdict = Dict([Symbol(v) => v for v in EarthSciMLBase.pvars(domaininfo)]...)
+    pvs = EarthSciMLBase.pvars(domaininfo)
+    pvdict = Dict([Symbol(v) => v for v in pvs]...)
     eqs = Equation[]
     params = []
     events = []
@@ -270,9 +271,7 @@ function GEOSFP(domain::AbstractString, domaininfo::DomainInfo; name=:GEOSFP, st
                 @assert d ∈ keys(pvdict) "GEOSFP coordinate $d not found in domaininfo coordinates ($(pvs))."
                 push!(coords, pvdict[d])
             end
-            staggering = geosfp_staggering(filename, varname)
-            eq, event, param = create_interp_equation(itp, filename, t, starttime, coords,
-                staggering)
+            eq, event, param = create_interp_equation(itp, filename, t, starttime, coords)
             push!(eqs, eq)
             push!(events, event)
             push!(params, param)
