@@ -457,6 +457,7 @@ function WRF(domaininfo::DomainInfo; name=:WRF, stream=true)
     #     :south_north_stag => :lat_stag
     # )
 
+    z_params = Dict()
     for varname ∈ varnames(fs)
         #try
         # metadata = loadmetadata_w(fs, varname)
@@ -483,6 +484,12 @@ function WRF(domaininfo::DomainInfo; name=:WRF, stream=true)
         push!(events, event)
         push!(params, param)
         push!(vars, eq.lhs)
+        if varname ∈ ["PH", "PHB"]
+            # Special handling for PH and PHB to calculate the total pressure
+            # as they are needed for geopotential height calculation.
+            z_params[varname] = param
+            z_params[varname*"_coords"] = coords
+        end
     end
 
     # Total Pressure
@@ -505,16 +512,26 @@ function WRF(domaininfo::DomainInfo; name=:WRF, stream=true)
         push!(vars, δxδlon, δyδlat)
     end
 
-
+    # Layer height
     @variables z(t) [unit = u"m", description = "Geopotential height"]
-    @variables δzδlev(t) [unit = u"m", description = "Height derivative with respect to vertical level"]
-    @constants g = 9.81 [unit = u"m/s^2", description = "Acceleration due to gravity"]
     PH = eqs[findfirst(x -> EarthSciMLBase.var2symbol(x.lhs) == :PH, eqs)].rhs
     PHB = eqs[findfirst(x -> EarthSciMLBase.var2symbol(x.lhs) == :PHB, eqs)].rhs
+    @constants g = 9.80665 [unit = u"m/s^2", description = "Acceleration due to gravity"]
     z_expr = (PH + PHB) / g
-    #lev_trans = expand_derivatives(Differential(pvdict[:lev])(z_expr))
-    push!(eqs, z ~ z_expr)#, lev_trans)
-    push!(vars, z)#, δzδlev)
+    push!(eqs, z ~ z_expr)
+    push!(vars, z)
+
+    # Height per level
+    @variables δzδlev(t) [unit = u"m", description = "Height derivative with respect to vertical level"]
+    ph = z_params["PH"]
+    phb = z_params["PHB"]
+    phc = z_params["PH_coords"]
+    phbc = z_params["PHB_coords"]
+    Δph = ph(t, phc[1], phc[2], phc[3]+1) - ph(t, phc...)
+    Δphb = phb(t, phbc[1], phbc[2], phbc[3]+1) - phb(t, phbc...)
+    lev_trans = δzδlev ~ (Δph + Δphb) / g
+    push!(eqs, lev_trans)
+    push!(vars, δzδlev)
 
     sys = ODESystem(
         eqs,
@@ -544,6 +561,34 @@ function couple2(mw::EarthSciMLBase.MeanWindCoupler, w::WRFCoupler)
         mw, w,
     )
 end
+
+# # Calculate the derivative of the layer thickness
+# # in units of meters per level.
+# struct δzδlev_wrf{T,UT}
+#     ph_itp::T
+#     phb_itp::T
+#     u::UT
+
+#     function δzδlev_wrf(fs::WRFFileSet, domaininfo::DomainInfo; stream=true)
+#         starttime, endtime = get_tspan_datetime(domaininfo)
+#         dt = EarthSciMLBase.dtype(domaininfo)
+#         ph_itp = ITPWrapper(DataSetInterpolator{dt}(fs, "PH", starttime, endtime,
+#             domaininfo; stream=stream))
+#         phb_itp = ITPWrapper(DataSetInterpolator{dt}(fs, "PHB", starttime, endtime,
+#             domaininfo; stream=stream))
+#         itp_u = (ModelingToolkit.get_unit(ph_itp) +
+#                  ModelingToolkit.get_unit(phb_itp)) / u"m/s^2"
+#         new(ph_itp, phb_itp, itp_u)
+#     end
+# end
+
+# ModelingToolkit.get_unit(f::δzδlev_wrf) = f.u
+# function (f::f_δlevδz)(t, x, y, lev)
+#     g = 9.80665 # Acceleration due to gravity in m/s²
+#     Δph = f.ph_itp(t, x, y, lev + 1) - f.ph_itp(t, x, y, lev)
+#     Δphb = f.phb_itp(t, x, y, lev + 1) - f.phb_itp(t, x, y, lev)
+#     return (Δph + Δphb) / g
+# end
 
 function partialderivatives_δlevδz(wrf)
     coord_defaults = wrf.metadata[:coord_defaults]
