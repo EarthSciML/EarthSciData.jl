@@ -32,7 +32,11 @@ $(SIGNATURES)
 
 Return the local path for the file for the given `DateTime`.
 """
-localpath(fs::FileSet, t::DateTime) = join([download_cache, relpath(fs, t)], "/")
+function localpath(fs::FileSet, t::DateTime)
+    file = relpath(fs, t)
+    file = replace(file, ':' => '_')
+    joinpath(download_cache, replace(fs.mirror, "://" => "_"), file)
+end
 
 """
 $(SIGNATURES)
