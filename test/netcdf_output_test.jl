@@ -63,4 +63,6 @@ ds = NCDataset(file, "r")
 @test ds["sys₊u"].attrib["description"] == "u value"
 @test ds["sys₊u"].attrib["units"] == "kg"
 
+close(ds)
+
 rm(file, force=true)
