@@ -40,7 +40,7 @@ function relpath(::WRFFileSet, time::DateTime)
     y = Dates.year(time)
     m = @sprintf("%02d", Dates.month(time))
     d = @sprintf("%02d", Dates.day(time))
-    hour = Dates.format(floor(time, Hour), "HH:MM:SS")
+    hour = Dates.format(floor(time, Hour), "HH_MM_SS")
     string("$y$m/", "wrfout_hourly_d01_", "$y-$m-$d", "_", hour, ".nc")
 end
 
@@ -99,21 +99,27 @@ function loadmetadata(fs::WRFFileSet, varname)::MetaData
                 dx = fs.ds.attrib["DX"]
                 offset = 0.0 # This would be nonzero if cen_lon != stand_lon
                 start = -(nx - 1) / 2.0 * dx + offset
-                coord = start:dx:(start+(nx-1)*dx)
+                coord = range(start, step=dx, length=nx)
                 push!(coords, coord)
             elseif occursin("south_north", d)
                 ny = fs.ds.dim[d]
                 dy = fs.ds.attrib["DY"]
                 offset = 0.0 # This would be nonzero if cen_lat != moad_cen_lat
                 start = -(ny - 1) / 2.0 * dy + offset
-                coord = start:dy:(start+(ny-1)*dy)
+                coord = range(start, step=dy, length=ny)
                 push!(coords, coord)
             else
                 push!(coords, 1.0:fs.ds.dim[d])
             end
         end
 
-        staggering = wrf_staggering(dims, xdim, ydim, zdim)
+        staggering = wrf_staggering(var)
+        for i in 1:length(coords)
+            staggered = staggering[i]
+            if staggered && (length(coords[i]) == varsize[i]+1)
+                coords[i] = 0.5 .* (coords[i][1:end-1] .+ coords[i][2:end])
+            end
+        end
 
         return MetaData(coords, unit_quantity, description, dims, varsize, prj,
             xdim, ydim, zdim, staggering)
@@ -251,17 +257,11 @@ end
 # It should always be a triple of booleans for the
 # x, y, and z dimensions, respectively, regardless
 # of the dimensions of the variable.
-function wrf_staggering(dims, xdim, ydim, zdim)::NTuple{3,Bool}
-    if zdim < 1
-        return (
-            occursin("_stag", dims[xdim]),
-            occursin("_stag", dims[ydim]),
-            false
-        )
-    end
+function wrf_staggering(var)::NTuple{3,Bool}
+    stag = get(var.attrib, "stagger", "")
     return (
-        occursin("_stag", dims[xdim]),
-        occursin("_stag", dims[ydim]),
-        occursin("_stag", dims[zdim])
+        occursin("X", stag),
+        occursin("Y", stag),
+        occursin("Z", stag)
     )
 end
