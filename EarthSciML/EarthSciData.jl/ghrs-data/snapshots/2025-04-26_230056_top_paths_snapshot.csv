@@ -1,0 +1,11 @@
+url_path,views_total,views_unique
+/EarthSciML/EarthSciData.jl,8,3
+/EarthSciML/EarthSciData.jl/fork,3,1
+/EarthSciML/EarthSciData.jl/blob/main/src/geosfp.jl,2,1
+/EarthSciML/EarthSciData.jl/tree/main/src,2,1
+/EarthSciML/EarthSciData.jl/blob/aeb9d6fc8567c8c3a49e1ca6a15ff8d7c330933c/test/geosfp_test.jl,1,1
+/EarthSciML/EarthSciData.jl/blob/aeb9d6fc8567c8c3a49e1ca6a15ff8d7c330933c/test/nei2016monthly_test.jl,1,1
+/EarthSciML/EarthSciData.jl/blob/main/src/coupling.jl,1,1
+/EarthSciML/EarthSciData.jl/blob/main/src/nei2016monthly.jl,1,1
+/EarthSciML/EarthSciData.jl/compare/main...hemamipour:EarthSciData.jl:main,1,1
+/EarthSciML/EarthSciData.jl/pull/98,1,1
