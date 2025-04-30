@@ -8,4 +8,5 @@ using Test, SafeTestsets
     @safetestset "nei2016monthly" begin include("nei2016monthly_test.jl") end
     @safetestset "NetCDFOutputter" begin include("netcdf_output_test.jl") end
     @safetestset "Solve" begin include("solve_test.jl") end
+    @safetestset "NCEP-NCAR Reanalysis" begin include("NCEP-NCAR_Reanalysis_test.jl") end
 end

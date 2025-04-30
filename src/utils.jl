@@ -5,10 +5,13 @@ function to_unit(u)
     u = strip(u)
     d = Dict(
         "m s-1" => (1, u"m/s"),
+        "m/s" => (1, u"m/s"),
         "Pa s-1" => (1, u"Pa/s"),
+        "Pascal/s" => (1, u"Pa/s"),
         "kg m-2 s-2" => (1, u"kg/m^2/s^2"),
         "kg kg-1" => (1, u"kg/kg"),
         "K" => (1, u"K"),
+        "degK" => (1, u"K"),
         "K m-2 kg-1 s-1" => (1, u"K/m^2/kg/s"),
         "hPa" => (100, u"Pa"),
         "kg m-2 s-1" => (1, u"kg/m^2/s"),
