@@ -19,6 +19,7 @@ include("geosfp.jl")
 include("wrf.jl")
 include("nei2016monthly.jl")
 include("netcdf_output.jl")
+include("NCEP-NCAR_Reanalysis.jl")
 
 # Coupling
 include("coupling.jl")
