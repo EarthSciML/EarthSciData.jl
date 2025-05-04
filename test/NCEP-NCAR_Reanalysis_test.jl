@@ -22,7 +22,8 @@ latv = deg2rad(40)
 levv = 5.0
 tt = DateTime(2019, 1, 1, 0, 0, 0)
 
-mirror = "https://psl.noaa.gov/data/gridded/data.ncep.reanalysis.html"
+mirror = "https://downloads.psl.noaa.gov/Datasets/ncep.reanalysis/pressure/"
+
 # Use the following if files are stored locally:
 #mirror = "file:///path/to/NCEP-NCAR-Reanalysis/"  # Example: "file:///home/user/data/NCEP-NCAR-Reanalysis/"
 
