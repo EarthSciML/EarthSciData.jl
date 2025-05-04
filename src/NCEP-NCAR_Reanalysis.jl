@@ -1,5 +1,6 @@
 
 export NCEPNCARReanalysis
+import Base: download
 
 struct NCEPNCARReanalysisFileSet <: EarthSciData.FileSet
     mirror::AbstractString
@@ -10,10 +11,19 @@ struct NCEPNCARReanalysisFileSet <: EarthSciData.FileSet
         starttime, endtime = get_tspan_datetime(domain)
         years = year(starttime):year(endtime)
         vars  = ["air", "hgt", "omega", "uwnd", "vwnd"] 
-        filepaths = [string(mirror, v, ".", y, ".nc") for v in vars for y in years]
+        filepaths = String[]
+        fs_temp = new(mirror, domain, Dict{Symbol, NCDataset}(),
+                    DataFrequencyInfo(starttime, Day(1), DateTime[]))
+                    
+        for v in vars, y in years
+            time = DateTime(y, 1, 1)
+            rel = relpath(fs_temp, time, v)
+            fullpath = startswith(mirror, "file://") ?
+                replace(string(mirror, rel), "file://" => "") :
+                maybedownload(fs_temp, time, v)
+            push!(filepaths, fullpath)
+        end
 
-        filepaths = replace.(filepaths, "file://" => "")
-        filepaths = replace.(filepaths, "%20" => " ")
         if Sys.iswindows()
             filepaths = replace.(filepaths, r"^/([A-Z]):" => s"\1:")
         end
@@ -38,6 +48,26 @@ struct NCEPNCARReanalysisFileSet <: EarthSciData.FileSet
             return new(mirror, domain, datasets, dfi)
         end
     end
+end
+
+function relpath(::NCEPNCARReanalysisFileSet, time::DateTime, var::String)
+    y = year(time)
+    return "$(var).$y.nc"
+end
+
+function maybedownload(fs::NCEPNCARReanalysisFileSet, time::DateTime, var::String)
+    filename = relpath(fs, time, var)
+    y = year(time)
+    local_dir = joinpath("data", "NCEP-NCAR Reanalysis", string(y))
+    mkpath(local_dir)
+    local_file = joinpath(local_dir, filename)
+
+    if !isfile(local_file)
+        @info "Downloading $filename..."
+        full_url = string(fs.mirror, filename)
+        download(full_url, local_file)
+    end
+    return local_file
 end
 
 DataFrequencyInfo(fs::NCEPNCARReanalysisFileSet)::DataFrequencyInfo = fs.freq_info
@@ -88,7 +118,11 @@ function EarthSciData.loadmetadata(fs::NCEPNCARReanalysisFileSet, varname)::Meta
                 push!(coords, 1.0:vardim_sizes[i])
             end
         end
-
+        
+        if coords[ydim][1] > coords[ydim][end]
+            reverse!(coords[ydim])
+        end
+        
         staggering = (false, false, false)
 
         return MetaData(coords, unit_quantity, description, dims, varsize, prj,
@@ -231,4 +265,3 @@ function build_pressure_expr(lev)
         + 5.3378676414996389e+03
     )
 end
-
