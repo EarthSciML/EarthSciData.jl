@@ -9,20 +9,22 @@ using Test
 
 
 domain = DomainInfo(
-    DateTime(2019, 1, 1, 0, 0, 0),
-    DateTime(2019, 1, 1, 12, 0, 0);
-    latrange=deg2rad(25.0):deg2rad(0.1):deg2rad(50.0),
-    lonrange=deg2rad(-125.0):deg2rad(0.1):deg2rad(-65.0),
-    levrange=1:17,
-    dtype=Float64
+    DateTime(2019, 8, 14, 0, 0, 0),
+    DateTime(2019, 8, 16, 0, 0, 0);
+    latrange = range(deg2rad(-90.0), deg2rad(90.0), step=deg2rad(2.5)),
+    lonrange = range(deg2rad(0.0), deg2rad(360.0), step=deg2rad(2.5)),
+    levrange = 1:17,
+    dtype = Float64
 )
 
-lonv = deg2rad(-118.2707)
-latv = deg2rad(34.0059)
-levv = 1.0
+lonv = deg2rad(262.5)
+latv = deg2rad(40)
+levv = 5.0
 tt = DateTime(2019, 1, 1, 0, 0, 0)
 
-mirror = "file:///path/to/NCEP-NCAR-Reanalysis/"  # Example: "file:///home/user/data/NCEP-NCAR-Reanalysis/"
+mirror = "https://psl.noaa.gov/data/gridded/data.ncep.reanalysis.html"
+# Use the following if files are stored locally:
+#mirror = "file:///path/to/NCEP-NCAR-Reanalysis/"  # Example: "file:///home/user/data/NCEP-NCAR-Reanalysis/"
 
 @parameters lat [unit=u"rad"] lon [unit=u"rad"] lev
 ncep_sys = NCEPNCARReanalysis(mirror, domain)
@@ -35,18 +37,19 @@ fs = EarthSciData.NCEPNCARReanalysisFileSet(mirror, domain)
     @testset "uwnd" begin
         dataset_uwnd = fs.ds[:uwnd]
 
-        @test ≈((mdU.coords[mdU.xdim])[1], (dataset_uwnd["lon"][:])[1]; rtol=1e-5)
-        @test ≈((mdU.coords[mdU.xdim])[end], (dataset_uwnd["lon"][:])[end]; rtol=1e-5)
-        @test ≈((mdU.coords[mdU.ydim])[1], (dataset_uwnd["lat"][:])[1]; rtol=1e-5)
+        @test ≈(mdU.coords[mdU.xdim][1], dataset_uwnd["lon"][:][1]; rtol=1e-5)
+        @test ≈(mdU.coords[mdU.xdim][end], dataset_uwnd["lon"][:][end]; rtol=1e-5)
+        @test ≈(mdU.coords[mdU.ydim][1], reverse(dataset_uwnd["lat"][:])[1]; rtol=1e-5)
+
     end
 
     @testset "vwnd" begin
         mdV = EarthSciData.loadmetadata(fs, "vwnd")
         dataset_vwnd = fs.ds[:vwnd]
 
-        @test ≈((mdV.coords[mdV.xdim])[1], (dataset_vwnd["lon"][:])[1]; rtol=1e-5)
-        @test ≈((mdV.coords[mdV.xdim])[end], (dataset_vwnd["lon"][:])[end]; rtol=1e-5)
-        @test ≈((mdV.coords[mdV.ydim])[1], (dataset_vwnd["lat"][:])[1]; rtol=1e-5)
+        @test ≈(mdV.coords[mdV.xdim][1], dataset_vwnd["lon"][:][1]; rtol=1e-5)
+        @test ≈(mdV.coords[mdV.xdim][end], dataset_vwnd["lon"][:][end]; rtol=1e-5)
+        @test ≈(mdV.coords[mdV.ydim][1], reverse(dataset_vwnd["lat"][:])[1]; rtol=1e-5)
     end
 end
 
@@ -134,14 +137,16 @@ end
     itp_air = EarthSciData.ITPWrapper(event_air.affects.ctx)
 
     W_val_want = [
-        -0.0025533453253696018,
-        -0.004046474500535103,
-        -0.00954129987778605,
-        -0.006372359248134648,
-        0.017025481409511784,
-        0.09550985884199029
+        -0.003359336207843997,
+        -0.0037465322475567888,
+        -0.011940569712646513,
+        -0.00782479152393089,
+        -0.011482186331740963,
+        -0.059994436216555695
     ]
+
     W_val= [myf([tt, lonv, latv, levv, itp_omega, itp_air]) for levv in [1, 2, 5, 7.5, 12, 16]]
+
     @test W_val ≈ W_val_want rtol=1e-4
 
 end
@@ -190,12 +195,12 @@ end
     δzδlev_f = eval(δzδlev_expr)
 
     δzδlev_want = [
-        575.0,
-        619.0,
-        1250.0,
-        1483.0,
-        2240.0,
-        4964.0
+        606.0,
+        648.0,
+        1288.000244140625,
+        1515.5,
+        2446.0,
+        4988.0
     ]
     δzδlev_vals = [δzδlev_f([tt, lonv, latv, levv, itp_hgt]) for levv in [1, 2, 5, 7.5, 12, 16]]
     @test δzδlev_vals ≈ δzδlev_want rtol=1e-4
