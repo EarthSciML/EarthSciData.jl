@@ -1,6 +1,5 @@
 
 export NCEPNCARReanalysis
-import Base: download
 
 struct NCEPNCARReanalysisFileSet <: EarthSciData.FileSet
     mirror::AbstractString
@@ -79,6 +78,11 @@ function loadslice!(data::AbstractArray, fs::NCEPNCARReanalysisFileSet, t::DateT
         if scale != 1
             data .*= scale
         end
+        latdim = 2
+        latvals = fs.ds[Symbol(varname)]["lat"][:]
+        if latvals[1] > latvals[end]
+            data .= reverse(data, dims=2)
+        end
     end
     nothing
 end
@@ -105,7 +109,7 @@ function EarthSciData.loadmetadata(fs::NCEPNCARReanalysisFileSet, varname)::Meta
         @assert xdim > 0 "Longitude (x) dimension not found."
         @assert ydim > 0 "Latitude (y) dimension not found."
 
-        prj = "+proj=eqc +lat_ts=0 +lat_0=0 +lon_0=0 +a=6371000 +b=6371000 +units=m +no_defs"
+        prj = "+proj=longlat +datum=WGS84 +no_defs"
 
         coords = []
         vardim_sizes = size(var)
@@ -113,7 +117,11 @@ function EarthSciData.loadmetadata(fs::NCEPNCARReanalysisFileSet, varname)::Meta
             if d == "level"
                 push!(coords, 1:vardim_sizes[i])
             elseif d in keys(var_ds)
-                push!(coords, Float64.(var_ds[d][:]))
+                vals = Float64.(var_ds[d][:])
+                if occursin("lon", d) || occursin("lat", d)
+                    vals = deg2rad.(vals)
+                end
+                push!(coords, vals)
             else
                 push!(coords, 1.0:vardim_sizes[i])
             end
