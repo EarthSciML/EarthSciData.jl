@@ -22,10 +22,11 @@ latv = deg2rad(40)
 levv = 5.0
 tt = DateTime(2019, 1, 2, 0, 0, 0)
 
-mirror = "https://downloads.psl.noaa.gov/Datasets/ncep.reanalysis/pressure/"
+mirror = "https://downloads.psl.noaa.gov/Datasets/ncep.reanalysis/"
 
 # Use the following if files are stored locally:
 #mirror = "file:///path/to/NCEP-NCAR-Reanalysis/"  # Example: "file:///home/user/data/NCEP-NCAR-Reanalysis/"
+# NOTE: Local folder must have subfolders "pressure/" and "surface/"
 
 @parameters lat [unit=u"rad"] lon [unit=u"rad"] lev
 ncep_sys = NCEPNCARReanalysis(mirror, domain)
