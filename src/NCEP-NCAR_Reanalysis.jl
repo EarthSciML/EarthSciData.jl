@@ -9,7 +9,8 @@ struct NCEPNCARReanalysisFileSet <: EarthSciData.FileSet
     function NCEPNCARReanalysisFileSet(mirror, domain)
         starttime, endtime = get_tspan_datetime(domain)
         years = year(starttime):year(endtime)
-        vars  = ["air", "hgt", "omega", "uwnd", "vwnd"] 
+        vars  = ["air", "hgt", "omega", "uwnd", "vwnd"]
+        surf_vars = ["hgt_sfc"]
         filepaths = String[]
         fs_temp = new(mirror, domain, Dict{Symbol, NCDataset}(),
                     DataFrequencyInfo(starttime, Day(1), DateTime[]))
@@ -23,6 +24,14 @@ struct NCEPNCARReanalysisFileSet <: EarthSciData.FileSet
             push!(filepaths, fullpath)
         end
 
+        for v in surf_vars
+            rel = relpath(fs_temp, starttime, v)
+            fullpath = startswith(mirror, "file://") ?
+                replace(string(mirror, rel), "file://" => "") :
+                maybedownload(fs_temp, starttime, v)
+            push!(filepaths, fullpath)
+        end
+
         if Sys.iswindows()
             filepaths = replace.(filepaths, r"^/([A-Z]):" => s"\1:")
         end
@@ -31,8 +40,12 @@ struct NCEPNCARReanalysisFileSet <: EarthSciData.FileSet
 
         lock(nclock) do
             datasets = Dict{Symbol, NCDataset}()
-            for f in filepaths
-                varname = split(basename(f), '.')[1]
+            
+            for f in filepaths                
+                parts = split(basename(f), '.')
+                varname = ("sfc" in parts) ?
+                    Symbol(parts[1] * "_sfc") :
+                    Symbol(parts[1])
                 datasets[Symbol(varname)] = NCDataset(f)
             end
 
@@ -49,49 +62,69 @@ struct NCEPNCARReanalysisFileSet <: EarthSciData.FileSet
     end
 end
 
+var_name(varname::AbstractString) = occursin("_sfc", varname) ? split(varname, "_")[1] : varname
+
 function relpath(::NCEPNCARReanalysisFileSet, time::DateTime, var::String)
-    y = year(time)
-    return "$(var).$y.nc"
+    if occursin("sfc", var)
+        base = split(var, "_")[1]
+        return "surface/$(base).sfc.nc"
+    else
+        return "pressure/$(var).$(year(time)).nc"
+    end
 end
 
 function maybedownload(fs::NCEPNCARReanalysisFileSet, time::DateTime, var::String)
     filename = relpath(fs, time, var)
-    y = year(time)
-    local_dir = joinpath("data", "NCEP-NCAR Reanalysis", string(y))
-    mkpath(local_dir)
-    local_file = joinpath(local_dir, filename)
+
+    local_file = joinpath("data", "NCEP-NCAR Reanalysis", filename)
+
+    mkpath(dirname(local_file))
 
     if !isfile(local_file)
         @info "Downloading $filename..."
         full_url = string(fs.mirror, filename)
-        download(full_url, local_file)
+        Downloads.download(full_url, local_file)
     end
+
     return local_file
 end
 
 DataFrequencyInfo(fs::NCEPNCARReanalysisFileSet)::DataFrequencyInfo = fs.freq_info
 
-function loadslice!(data::AbstractArray, fs::NCEPNCARReanalysisFileSet, t::DateTime, varname)
-    lock(nclock) do
-        var = loadslice!(data, fs, fs.ds[Symbol(varname)], t, varname, "time")
-        scale, _ = to_unit(var.attrib["units"])
-        if scale != 1
-            data .*= scale
-        end
-        latdim = 2
-        latvals = fs.ds[Symbol(varname)]["lat"][:]
-        if latvals[1] > latvals[end]
-            data .= reverse(data, dims=2)
-        end
+function loadslice!(data::AbstractArray, fs::NCEPNCARReanalysisFileSet, t::DateTime, varname::String)
+
+    ds   = fs.ds[Symbol(varname)]
+    vraw = ds[var_name(varname)]
+    dims = NCDatasets.dimnames(vraw)
+
+    t_index = 1
+    if "time" in dims && !occursin("_sfc", varname)
+        time_vec = DateTime.(ds["time"][:])
+        tidx = findfirst(==(t), time_vec)
+        @assert tidx !== nothing "Time $t not found in $varname"
+        t_index = tidx
     end
-    nothing
+
+    idx = [d == "time" ? t_index : Colon() for d in dims]
+    slice = vraw[idx...]
+    copyto!(data, slice)
+    
+    latvals = fs.ds[Symbol(varname)]["lat"][:]
+    if latvals[1] > latvals[end]
+        data .= reverse(data, dims=2)
+    end
+
+    s, _ = to_unit(vraw.attrib["units"])
+    s ≠ 1 && (data .*= s)
+
+    return nothing
 end
 
 function EarthSciData.loadmetadata(fs::NCEPNCARReanalysisFileSet, varname)::MetaData
     lock(nclock) do
         timedim = "time"
         var_ds = fs.ds[Symbol(varname)]
-        var = var_ds[varname]
+        var = var_ds[var_name(varname)]
         dims = collect(NCDatasets.dimnames(var))
         @assert timedim ∈ dims "Variable $varname does not have a dimension named '$timedim'."
         time_index = findfirst(isequal(timedim), dims)
