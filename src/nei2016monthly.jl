@@ -9,15 +9,15 @@ Currently, only data for year 2016 is available.
 """
 struct NEI2016MonthlyEmisFileSet <: FileSet
     mirror::AbstractString
-    sector
-    ds
+    sector::Any
+    ds::Any
     freq_info::DataFrequencyInfo
     function NEI2016MonthlyEmisFileSet(sector, starttime, endtime)
         NEI2016MonthlyEmisFileSet("https://gaftp.epa.gov/Air/", sector, starttime, endtime)
     end
     function NEI2016MonthlyEmisFileSet(mirror, sector, starttime, endtime)
         floormonth(t) = DateTime(Dates.year(t), Dates.month(t))
-        check_times = (floormonth(starttime - Day(16))):Month(1):(endtime+Day(16))
+        check_times = (floormonth(starttime - Day(16))):Month(1):(endtime + Day(16))
         fs = new(mirror, sector, nothing, DataFrequencyInfo(starttime, Day(1), check_times))
         filepaths = maybedownload.((fs,), check_times)
 
@@ -27,7 +27,7 @@ struct NEI2016MonthlyEmisFileSet <: FileSet
         dfi = DataFrequencyInfo(start, frequency, centerpoints)
 
         lock(nclock) do
-            ds = NCDataset(filepaths, aggdim="TSTEP")
+            ds = NCDataset(filepaths, aggdim = "TSTEP")
             new(mirror, sector, ds, dfi)
         end
     end
@@ -51,7 +51,12 @@ $(SIGNATURES)
 
 Load the data in place for the given variable name at the given time.
 """
-function loadslice!(data::AbstractArray, fs::NEI2016MonthlyEmisFileSet, t::DateTime, varname)
+function loadslice!(
+        data::AbstractArray,
+        fs::NEI2016MonthlyEmisFileSet,
+        t::DateTime,
+        varname
+)
     lock(nclock) do
         data = reshape(data, size(data)..., 1)
         var = loadslice!(data, fs, fs.ds, t, varname, "TSTEP")
@@ -82,7 +87,7 @@ function loadmetadata(fs::NEI2016MonthlyEmisFileSet, varname)::MetaData
         dims = deleteat!(dims, time_index)
         varsize = deleteat!(collect(size(var)), time_index)
         @assert varsize[end] == 1 "Only 2D data is supported."
-        varsize = varsize[1:end-1] # Last dimension is 1.
+        varsize = varsize[1:(end - 1)] # Last dimension is 1.
 
         Δx = fs.ds.attrib["XCELL"]
         Δy = fs.ds.attrib["YCELL"]
@@ -96,8 +101,8 @@ function loadmetadata(fs::NEI2016MonthlyEmisFileSet, varname)::MetaData
         Δy = fs.ds.attrib["YCELL"]
         nx = fs.ds.attrib["NCOLS"]
         ny = fs.ds.attrib["NROWS"]
-        xs = x₀ + Δx / 2 .+ Δx .* (0:nx-1)
-        ys = y₀ + Δy / 2 .+ Δy .* (0:ny-1)
+        xs = x₀ + Δx / 2 .+ Δx .* (0:(nx - 1))
+        ys = y₀ + Δy / 2 .+ Δy .* (0:(ny - 1))
 
         coords = [xs, ys]
 
@@ -113,8 +118,18 @@ function loadmetadata(fs::NEI2016MonthlyEmisFileSet, varname)::MetaData
         @assert xdim > 0 "NEI2016 `COL` dimension not found"
         @assert ydim > 0 "NEI2016 `ROW` dimension not found"
 
-        return MetaData(coords, units, description, dims, varsize, native_sr,
-            xdim, ydim, -1, (false, false, false))
+        return MetaData(
+            coords,
+            units,
+            description,
+            dims,
+            varsize,
+            native_sr,
+            xdim,
+            ydim,
+            -1,
+            (false, false, false)
+        )
     end
 end
 
@@ -130,7 +145,7 @@ function varnames(fs::NEI2016MonthlyEmisFileSet)
 end
 
 struct NEI2016MonthlyEmisCoupler
-    sys
+    sys::Any
 end
 
 """
@@ -158,8 +173,13 @@ NOTE: This is an interpolator that returns an emissions value by interpolating b
 centers of the nearest grid cells in the underlying emissions grid, so it may not exactly conserve the total
 emissions mass, especially if the simulation grid is coarser than the emissions grid.
 """
-function NEI2016MonthlyEmis(sector::AbstractString, domaininfo::DomainInfo; scale=1.0,
-    name=:NEI2016MonthlyEmis, stream=true)
+function NEI2016MonthlyEmis(
+        sector::AbstractString,
+        domaininfo::DomainInfo;
+        scale = 1.0,
+        name = :NEI2016MonthlyEmis,
+        stream = true
+)
     starttime, endtime = get_tspan_datetime(domaininfo)
     fs = NEI2016MonthlyEmisFileSet(sector, starttime, endtime)
     pvdict = Dict([Symbol(v) => v for v in EarthSciMLBase.pvars(domaininfo)]...)
@@ -169,28 +189,46 @@ function NEI2016MonthlyEmis(sector::AbstractString, domaininfo::DomainInfo; scal
     x = :x in keys(pvdict) ? pvdict[:x] : pvdict[:lon]
     y = :y in keys(pvdict) ? pvdict[:y] : pvdict[:lat]
     lev = pvdict[:lev]
-    @parameters(
-        Δz = 60.0, [unit = u"m", description = "Height of the first vertical grid layer"],
-    )
+    @parameters(Δz = 60.0,
+        [unit = u"m", description = "Height of the first vertical grid layer"],)
     eqs = Equation[]
     events = []
     params = []
     vars = Num[]
-    for varname ∈ varnames(fs)
+    for varname in varnames(fs)
         dt = EarthSciMLBase.dtype(domaininfo)
-        itp = DataSetInterpolator{dt}(fs, varname, starttime, endtime,
-            domaininfo; stream=stream)
+        itp = DataSetInterpolator{dt}(
+            fs,
+            varname,
+            starttime,
+            endtime,
+            domaininfo;
+            stream = stream
+        )
         @constants zero_emis = 0 [unit = units(itp) / u"m"]
         zero_emis = ModelingToolkit.unwrap(zero_emis) # Unsure why this is necessary.
-        eq, event, param = create_interp_equation(itp, "", t, starttime, [x, y];
-            wrapper_f=(eq) -> ifelse(lev < 2, eq / Δz * scale, zero_emis),
+        eq, event,
+        param = create_interp_equation(
+            itp,
+            "",
+            t,
+            starttime,
+            [x, y];
+            wrapper_f = (eq) -> ifelse(lev < 2, eq / Δz * scale, zero_emis)
         )
         push!(eqs, eq)
         push!(events, event)
         push!(params, param)
         push!(vars, eq.lhs)
     end
-    sys = ODESystem(eqs, t, vars, [x, y, lev, Δz, params...]; name=name,
-        metadata=Dict(:coupletype => NEI2016MonthlyEmisCoupler), discrete_events=events)
+    sys = ODESystem(
+        eqs,
+        t,
+        vars,
+        [x, y, lev, Δz, params...];
+        name = name,
+        metadata = Dict(:coupletype => NEI2016MonthlyEmisCoupler),
+        discrete_events = events
+    )
     return sys
 end

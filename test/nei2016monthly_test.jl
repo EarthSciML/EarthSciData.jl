@@ -7,10 +7,14 @@ using DifferentialEquations
 import Proj
 using AllocCheck
 
-domain = DomainInfo(DateTime(2016, 5, 1), DateTime(2016, 5, 2);
-    latrange=deg2rad(-85.0f0):deg2rad(2):deg2rad(85.0f0),
-    lonrange=deg2rad(-180.0f0):deg2rad(2.5):deg2rad(175.0f0),
-    levrange=1:10, dtype=Float64)
+domain = DomainInfo(
+    DateTime(2016, 5, 1),
+    DateTime(2016, 5, 2);
+    latrange = deg2rad(-85.0f0):deg2rad(2):deg2rad(85.0f0),
+    lonrange = deg2rad(-180.0f0):deg2rad(2.5):deg2rad(175.0f0),
+    levrange = 1:10,
+    dtype = Float64
+)
 lon, lat, lev = EarthSciMLBase.pvars(domain)
 
 ts, te = get_tspan_datetime(domain)
@@ -31,11 +35,15 @@ sample_time = DateTime(2016, 5, 1)
 end
 
 @testset "incorrect projection" begin
-    domain = DomainInfo(DateTime(2016, 5, 1), DateTime(2016, 5, 2);
-        latrange=deg2rad(-85.0f0):deg2rad(2):deg2rad(85.0f0),
-        lonrange=deg2rad(-180.0f0):deg2rad(2.5):deg2rad(175.0f0),
-        levrange=1:10, dtype=Float64,
-        spatial_ref="+proj=axisswap +order=2,1 +step +proj=longlat +datum=WGS84 +no_defs")
+    domain = DomainInfo(
+        DateTime(2016, 5, 1),
+        DateTime(2016, 5, 2);
+        latrange = deg2rad(-85.0f0):deg2rad(2):deg2rad(85.0f0),
+        lonrange = deg2rad(-180.0f0):deg2rad(2.5):deg2rad(175.0f0),
+        levrange = 1:10,
+        dtype = Float64,
+        spatial_ref = "+proj=axisswap +order=2,1 +step +proj=longlat +datum=WGS84 +no_defs"
+    )
     itp = EarthSciData.DataSetInterpolator{Float32}(fileset, "NOX", ts, te, domain)
     @test_throws Proj.PROJError interp!(itp, sample_time, deg2rad(-97.0f0), deg2rad(40.0f0))
 end
@@ -44,7 +52,6 @@ end
     itp = EarthSciData.DataSetInterpolator{Float32}(fileset, "NOX", ts, te, domain)
     @test interp!(itp, sample_time, deg2rad(0.0f0), deg2rad(40.0f0)) ≈ 0.0
 end
-
 
 @testset "monthly frequency" begin
     ts, te = DateTime(2016, 5, 1), DateTime(2016, 6, 1)
@@ -65,17 +72,23 @@ end
 @testset "run" begin
     @constants uc = 1.0 [unit = u"s" description = "unit conversion"]
     eq = Differential(t)(emis.ACET) ~ equations(emis)[1].rhs * 1e10 / uc
-    sys = extend(ODESystem([eq], t, [], []; name=:test_sys), emis)
+    sys = extend(ODESystem([eq], t, [], []; name = :test_sys), emis)
     sys = structural_simplify(sys)
     tt = Dates.datetime2unix(sample_time)
-    prob = ODEProblem(sys, zeros(1), (tt, tt + 60.0), [lat => deg2rad(40.0), lon => deg2rad(-97.0), lev => 1.0])
+    prob = ODEProblem(
+        sys,
+        zeros(1),
+        (tt, tt + 60.0),
+        [lat => deg2rad(40.0), lon => deg2rad(-97.0), lev => 1.0]
+    )
     sol = solve(prob)
     @test 2 > sol.u[end][end] > 1
 end
 
 if !Sys.iswindows() # Allocation tests don't seem to work on windows.
     @testset "allocations" begin
-        @check_allocs checkf(itp, t, loc1, loc2) = EarthSciData.interp_unsafe(itp, t, loc1, loc2)
+        @check_allocs checkf(
+            itp, t, loc1, loc2) = EarthSciData.interp_unsafe(itp, t, loc1, loc2)
 
         sample_time = DateTime(2016, 5, 1)
         itp = EarthSciData.DataSetInterpolator{Float32}(fileset, "NOX", ts, te, domain)
@@ -106,7 +119,7 @@ end
     gfp = GEOSFP("4x5", domain)
 
     csys = couple(emis, gfp)
-    sys = convert(ODESystem, csys, prune=false)
+    sys = convert(ODESystem, csys, prune = false)
     eqs = observed(sys)
 
     @test occursin("NEI2016MonthlyEmis₊lat(t) ~ GEOSFP₊lat", string(eqs))

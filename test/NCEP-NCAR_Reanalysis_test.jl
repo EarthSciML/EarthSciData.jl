@@ -7,12 +7,11 @@ using DynamicQuantities
 using Proj
 using Test
 
-
 domain = DomainInfo(
     DateTime(2019, 1, 1, 0, 0, 0),
     DateTime(2019, 1, 3, 0, 0, 0);
-    latrange = range(deg2rad(-90.0), deg2rad(90.0), step=deg2rad(2.5)),
-    lonrange = range(deg2rad(0.0), deg2rad(360.0), step=deg2rad(2.5)),
+    latrange = range(deg2rad(-90.0), deg2rad(90.0), step = deg2rad(2.5)),
+    lonrange = range(deg2rad(0.0), deg2rad(360.0), step = deg2rad(2.5)),
     levrange = 1:17,
     dtype = Float64
 )
@@ -33,7 +32,6 @@ ncep_sys = NCEPNCARReanalysis(mirror, domain)
 fs = EarthSciData.NCEPNCARReanalysisFileSet(mirror, domain)
 
 @testset "coordinates" begin
-
     mdU = EarthSciData.loadmetadata(fs, "uwnd")
     @test mdU.staggering == (false, false, false)
 
@@ -58,31 +56,34 @@ fs = EarthSciData.NCEPNCARReanalysisFileSet(mirror, domain)
         @test mdV.coords[mdV.xdim][1] ≈ lonvals[1] rtol=1e-5
         @test mdV.coords[mdV.xdim][end] ≈ lonvals[end] rtol=1e-5
     end
-
 end
 
 @testset "ncepncar" begin
-
     lon, lat, lev = EarthSciMLBase.pvars(domain)
     @constants c_unit = 6.0 [unit = u"rad" description = "constant to make units cancel out"]
 
     struct ExampleCoupler
-        sys
+        sys::Any
     end
 
     function Example()
         @variables c(t) [unit = u"mol/m^3"]
         eqs = [D(c) ~ (sin(lat * c_unit) + sin(lon * c_unit)) * c / t]
-        return ODESystem(eqs, t; name=:ExampleSys, metadata=Dict(:coupletype => ExampleCoupler))
+        return ODESystem(
+            eqs,
+            t;
+            name = :ExampleSys,
+            metadata = Dict(:coupletype => ExampleCoupler)
+        )
     end
 
-    function EarthSciMLBase.couple2(e::ExampleCoupler, w::EarthSciData.NCEPNCARReanalysisCoupler)
+    function EarthSciMLBase.couple2(
+            e::ExampleCoupler,
+            w::EarthSciData.NCEPNCARReanalysisCoupler
+    )
         e, w = e.sys, w.sys
         e = EarthSciMLBase.param_to_var(e, :lat, :lon)
-        ConnectorSystem([
-                e.lat ~ w.lat,
-                e.lon ~ w.lon,
-            ], e, w)
+        ConnectorSystem([e.lat ~ w.lat, e.lon ~ w.lon], e, w)
     end
 
     examplesys = Example()
@@ -93,8 +94,10 @@ end
     eqs = equations(pde_sys)
 
     want_terms = [
-        "MeanWind₊v_lon(t, lon, lat, lev)", "NCEPNCARReanalysis₊uwnd(t, lon, lat, lev)",
-        "MeanWind₊v_lat(t, lon, lat, lev)", "NCEPNCARReanalysis₊vwnd(t, lon, lat, lev)",
+        "MeanWind₊v_lon(t, lon, lat, lev)",
+        "NCEPNCARReanalysis₊uwnd(t, lon, lat, lev)",
+        "MeanWind₊v_lat(t, lon, lat, lev)",
+        "NCEPNCARReanalysis₊vwnd(t, lon, lat, lev)",
         "NCEPNCARReanalysis₊air(t, lon, lat, lev)",
         "NCEPNCARReanalysis₊omega(t, lon, lat, lev)",
         "NCEPNCARReanalysis₊hgt(t, lon, lat, lev)",
@@ -103,35 +106,42 @@ end
         "NCEPNCARReanalysis₊air_itp(t, lon, lat, lev)",
         "NCEPNCARReanalysis₊omega_itp(t, lon, lat, lev)",
         "NCEPNCARReanalysis₊hgt_itp(t, lon, lat, lev)",
-        "lon2m", "lat2meters",
+        "lon2m",
+        "lat2meters",
         "Differential(lat)(ExampleSys₊c(t, lon, lat, lev))",
         "Differential(t)(ExampleSys₊c(t, lon, lat, lev))",
         "Differential(lon)(ExampleSys₊c(t, lon, lat, lev))",
         "sin(ExampleSys₊c_unit*ExampleSys₊lat(t, lon, lat, lev))",
         "sin(ExampleSys₊c_unit*ExampleSys₊lon(t, lon, lat, lev))",
-        "ExampleSys₊c(t, lon, lat, lev)", "t",
-        "Differential(lev)(ExampleSys₊c(t, lon, lat, lev))",
+        "ExampleSys₊c(t, lon, lat, lev)",
+        "t",
+        "Differential(lev)(ExampleSys₊c(t, lon, lat, lev))"
     ]
 
     have_eqs = string.(eqs)
     have_eqs = replace.(have_eqs, ("Main." => "",))
 
-    for term ∈ want_terms
+    for term in want_terms
         @test any(occursin.((term,), have_eqs))
     end
-
 end
 
 @testset "ncep vertical velocity wwnd" begin
-
-    iipt = findfirst(eq -> string(Symbolics.tosymbol(eq.lhs)) == "wwnd(t)", equations(ncep_sys))
+    iipt = findfirst(
+        eq -> string(Symbolics.tosymbol(eq.lhs)) == "wwnd(t)",
+        equations(ncep_sys)
+    )
     W_eq = equations(ncep_sys)[iipt]
 
     W_sub = ModelingToolkit.subs_constants(W_eq.rhs)
     vars_in_expr = get_variables(W_sub)
 
-    omega_itp = vars_in_expr[findfirst(isequal(:omega_itp), EarthSciMLBase.var2symbol.(vars_in_expr))]
-    air_itp = vars_in_expr[findfirst(isequal(:air_itp), EarthSciMLBase.var2symbol.(vars_in_expr))]
+    omega_itp = vars_in_expr[findfirst(
+        isequal(:omega_itp),
+        EarthSciMLBase.var2symbol.(vars_in_expr)
+    )]
+    air_itp = vars_in_expr[findfirst(
+        isequal(:air_itp), EarthSciMLBase.var2symbol.(vars_in_expr))]
 
     W_expr = build_function(W_sub, [t, lon, lat, lev, omega_itp, air_itp])
     myf = eval(W_expr)
@@ -148,14 +158,13 @@ end
 
     W_val_want = [0.00525, 0.00255, -0.01597, -0.00248, 0.01633, 0.08086]
 
-    W_val= [myf([tt, lonv, latv, levv, itp_omega, itp_air]) for levv in [1, 2, 5, 7.5, 12, 16]]
+    W_val = [myf([tt, lonv, latv, levv, itp_omega, itp_air])
+             for levv in [1, 2, 5, 7.5, 12, 16]]
 
     @test W_val ≈ W_val_want rtol=1e-3
-
 end
 
 @testset "ncep pressure" begin
-
     eqs = equations(ncep_sys)
     p_var = eqs[findfirst(x -> EarthSciMLBase.var2symbol(x.lhs) == :p, eqs)].rhs
     p_sub = ModelingToolkit.subs_constants(p_var)
@@ -166,11 +175,9 @@ end
     p_want = [100000, 92500, 60000, 35000, 10000, 2000]
     p_vals = [p_f([tt, lonv, latv, levv]) for levv in [1, 2, 5, 7.5, 12, 16]]
     @test p_vals ≈ p_want rtol=1e-2
-
 end
 
 @testset "ncep δzδlev" begin
-    
     events = ModelingToolkit.get_discrete_events(ncep_sys)
     e_hgt = only(events[[only(e.affects.pars_syms) == :hgt_itp for e in events]])
 
@@ -183,13 +190,14 @@ end
     δzδlev_sub = ModelingToolkit.subs_constants(δzδlev_var)
 
     vars_in_expr = get_variables(δzδlev_sub)
-    hgt_itp = vars_in_expr[findfirst(isequal(:hgt_itp), EarthSciMLBase.var2symbol.(vars_in_expr))]
+    hgt_itp = vars_in_expr[findfirst(
+        isequal(:hgt_itp), EarthSciMLBase.var2symbol.(vars_in_expr))]
 
     δzδlev_expr = build_function(δzδlev_sub, [t, lon, lat, lev, hgt_itp])
     δzδlev_f = eval(δzδlev_expr)
 
     δzδlev_want = [598, 649, 1358, 1583, 2232, 4410]
-    δzδlev_vals = [δzδlev_f([tt, lonv, latv, levv, itp_hgt]) for levv in [1, 2, 5, 7.5, 12, 16]]
+    δzδlev_vals = [δzδlev_f([tt, lonv, latv, levv, itp_hgt])
+                   for levv in [1, 2, 5, 7.5, 12, 16]]
     @test δzδlev_vals ≈ δzδlev_want rtol=1e-3
-
 end

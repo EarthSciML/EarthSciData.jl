@@ -1,5 +1,11 @@
-function loadslice!(data::AbstractArray{T}, fs::FileSet, ds::Union{NCDataset,NCDatasets.MFDataset},
-    t::DateTime, varname::AbstractString, timedim::AbstractString) where {T<:Number}
+function loadslice!(
+        data::AbstractArray{T},
+        fs::FileSet,
+        ds::Union{NCDataset, NCDatasets.MFDataset},
+        t::DateTime,
+        varname::AbstractString,
+        timedim::AbstractString
+) where {T <: Number}
     var = ds[varname]
     dims = collect(NCDatasets.dimnames(var))
     @assert timedim ∈ dims "Variable $varname does not have a dimension named '$timedim'."

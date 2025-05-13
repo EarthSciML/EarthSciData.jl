@@ -37,7 +37,7 @@ function to_unit(u)
         "none" => (1, Quantity(1.0)),
         "?" => (1, Quantity(1.0)),
         "" => (1, Quantity(1.0)),
-        "-" => (1, Quantity(1.0)),
+        "-" => (1, Quantity(1.0))
     )
     if haskey(d, u)
         return d[u]

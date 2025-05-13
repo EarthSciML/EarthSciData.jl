@@ -14,38 +14,40 @@ using DynamicQuantities: dimension
 
 # Set up system
 domain = DomainInfo(DateTime(2022, 1, 1), DateTime(2022, 1, 3);
-    latrange=deg2rad(-85.0f0):deg2rad(2):deg2rad(85.0f0),
-    lonrange=deg2rad(-180.0f0):deg2rad(2.5):deg2rad(175.0f0),
-    levrange=1:11, dtype=Float32)
+    latrange = deg2rad(-85.0f0):deg2rad(2):deg2rad(85.0f0),
+    lonrange = deg2rad(-180.0f0):deg2rad(2.5):deg2rad(175.0f0),
+    levrange = 1:11, dtype = Float32)
 
 geosfp = GEOSFP("4x5", domain)
 ```
 
-Note that the [`GEOSFP`](@ref) function returns to things, an equation system and an object that can used to update the time in the underlying data loaders. 
+Note that the [`GEOSFP`](@ref) function returns to things, an equation system and an object that can used to update the time in the underlying data loaders.
 We can see above the different variables that are available in the GEOS-FP dataset.
 But also, here they are in table form:
 
 ```@example geosfp
 vars = unknowns(geosfp)
 DataFrame(
-        :Name => [string(Symbolics.tosymbol(v, escape=false)) for v ∈ vars],
-        :Units => [dimension(ModelingToolkit.get_unit(v)) for v ∈ vars],
-        :Description => [ModelingToolkit.getdescription(v) for v ∈ vars],
+    :Name => [string(Symbolics.tosymbol(v, escape = false)) for v in vars],
+    :Units => [dimension(ModelingToolkit.get_unit(v)) for v in vars],
+    :Description => [ModelingToolkit.getdescription(v) for v in vars]
 )
 ```
 
 The GEOS-FP equation system isn't an ordinary differential equation (ODE) system, so we can't run it by itself.
-To fix this, we create another equation system that is an ODE. 
+To fix this, we create another equation system that is an ODE.
 (We don't actually end up using this system for anything, it's just necessary to get the system to compile.)
 
 ```@example geosfp
-struct ExampleCoupler sys end
+struct ExampleCoupler
+    sys
+end
 function Example()
     @parameters lat=0.0 [unit=u"rad"]
     @parameters lon=0.0 [unit=u"rad"]
     @variables c(t) = 5.0 [unit=u"s"]
     ODESystem([D(c) ~ sin(lat * 6) + sin(lon * 6)], t;
-        name=:Docs₊Example, metadata=Dict(:coupletype => ExampleCoupler))
+        name = :Docs₊Example, metadata = Dict(:coupletype => ExampleCoupler))
 end
 function EarthSciMLBase.couple2(e::ExampleCoupler, g::EarthSciData.GEOSFPCoupler)
     e, g = e.sys, g.sys
@@ -65,6 +67,7 @@ pde_sys = convert(PDESystem, composed_sys)
 Now, finally, we can run the simulation and plot the GEOS-FP wind fields in the result:
 
 (The code below is commented out because it is very slow right now. A faster solution is coming soon!)
+
 ```julia
 # discretization = MOLFiniteDifference([lat => 10, lon => 10, lev => 10], t, approx_order=2)
 # @time pdeprob = discretize(pde_sys, discretization)

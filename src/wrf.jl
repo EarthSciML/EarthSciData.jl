@@ -3,18 +3,18 @@ export WRF
 
 struct WRFFileSet <: EarthSciData.FileSet
     mirror::AbstractString
-    domain
-    ds
+    domain::Any
+    ds::Any
     freq_info::DataFrequencyInfo
     function WRFFileSet(domain)
         WRFFileSet("https://data.rda.ucar.edu/d340000/", domain)
     end
     function WRFFileSet(mirror, domain)
         starttime, endtime = get_tspan_datetime(domain)
-        check_times = collect((starttime-Hour(1)):Hour(1):(endtime+Hour(1)))
+        check_times = collect((starttime - Hour(1)):Hour(1):(endtime + Hour(1)))
         filepaths = String[]
-        fs_temp = new(mirror, domain, nothing,
-            DataFrequencyInfo(starttime, Day(1), check_times))
+        fs_temp = new(
+            mirror, domain, nothing, DataFrequencyInfo(starttime, Day(1), check_times))
         filepaths = maybedownload.((fs_temp,), check_times)
 
         if isempty(filepaths)
@@ -22,7 +22,7 @@ struct WRFFileSet <: EarthSciData.FileSet
         end
 
         lock(nclock) do
-            ds = NCDataset(filepaths, aggdim="time")
+            ds = NCDataset(filepaths, aggdim = "time")
             sdt = ds.attrib["START_DATE"]
             sd, st = split(sdt, '_')
             dt = ds.attrib["DT"]
@@ -78,7 +78,8 @@ function loadmetadata(fs::WRFFileSet, varname)::MetaData
 
         # Find the z dimension; set to -1 if not found
         zdim = findfirst((x) -> occursin("bottom_top", x), dims)
-        zdim = isnothing(zdim) ? findfirst((x) -> occursin("emissions_zdim", x), dims) : zdim
+        zdim = isnothing(zdim) ? findfirst((x) -> occursin("emissions_zdim", x), dims) :
+               zdim
         zdim = isnothing(zdim) ? -1 : zdim
 
         @assert fs.ds.attrib["MAP_PROJ"] == 1 "Only Lambert Conformal Conic projection is currently supported for WRF data."
@@ -99,14 +100,14 @@ function loadmetadata(fs::WRFFileSet, varname)::MetaData
                 dx = fs.ds.attrib["DX"]
                 offset = 0.0 # This would be nonzero if cen_lon != stand_lon
                 start = -(nx - 1) / 2.0 * dx + offset
-                coord = range(start, step=dx, length=nx)
+                coord = range(start, step = dx, length = nx)
                 push!(coords, coord)
             elseif occursin("south_north", d)
                 ny = fs.ds.dim[d]
                 dy = fs.ds.attrib["DY"]
                 offset = 0.0 # This would be nonzero if cen_lat != moad_cen_lat
                 start = -(ny - 1) / 2.0 * dy + offset
-                coord = range(start, step=dy, length=ny)
+                coord = range(start, step = dy, length = ny)
                 push!(coords, coord)
             else
                 push!(coords, 1.0:fs.ds.dim[d])
@@ -117,28 +118,39 @@ function loadmetadata(fs::WRFFileSet, varname)::MetaData
         for i in 1:length(coords)
             staggered = staggering[i]
             if staggered && (length(coords[i]) == varsize[i]+1)
-                coords[i] = 0.5 .* (coords[i][1:end-1] .+ coords[i][2:end])
+                coords[i] = 0.5 .* (coords[i][1:(end - 1)] .+ coords[i][2:end])
             end
         end
 
-        return MetaData(coords, unit_quantity, description, dims, varsize, prj,
-            xdim, ydim, zdim, staggering)
+        return MetaData(
+            coords,
+            unit_quantity,
+            description,
+            dims,
+            varsize,
+            prj,
+            xdim,
+            ydim,
+            zdim,
+            staggering
+        )
     end
 end
 
 function varnames(fs::WRFFileSet)
     lock(nclock) do
-        exclude_vars = Set(keys(fs.ds.dim)) ∪ Set(["XLAT", "XLONG", "XLAT_U", "XLAT_V",
-            "XLONG_U", "XLONG_V", "Times"])
+        exclude_vars = Set(keys(fs.ds.dim)) ∪
+                       Set([
+            "XLAT", "XLONG", "XLAT_U", "XLAT_V", "XLONG_U", "XLONG_V", "Times"])
         return [name for name in keys(fs.ds) if name ∉ exclude_vars]
     end
 end
 
 struct WRFCoupler
-    sys
+    sys::Any
 end
 
-function WRF(domaininfo::DomainInfo; name=:WRF, stream=true)
+function WRF(domaininfo::DomainInfo; name = :WRF, stream = true)
     starttime, endtime = get_tspan_datetime(domaininfo)
     fs = WRFFileSet("https://data.rda.ucar.edu/d340000/", domaininfo)
 
@@ -159,14 +171,20 @@ function WRF(domaininfo::DomainInfo; name=:WRF, stream=true)
         :west_east => xdim,
         :west_east_stag => xdim,
         :south_north => ydim,
-        :south_north_stag => ydim,
+        :south_north_stag => ydim
     )
 
     z_params = Dict()
-    for varname ∈ varnames(fs)
+    for varname in varnames(fs)
         dt = EarthSciMLBase.dtype(domaininfo)
-        itp = DataSetInterpolator{dt}(fs, varname, starttime, endtime,
-            domaininfo; stream=stream)
+        itp = DataSetInterpolator{dt}(
+            fs,
+            varname,
+            starttime,
+            endtime,
+            domaininfo;
+            stream = stream
+        )
         dims = dimnames(itp)
         coords = Num[]
         for dim in dims
@@ -184,7 +202,7 @@ function WRF(domaininfo::DomainInfo; name=:WRF, stream=true)
             # Special handling for PH and PHB to calculate the total pressure
             # as they are needed for geopotential height calculation.
             z_params[varname] = param
-            z_params[varname*"_coords"] = coords
+            z_params[varname * "_coords"] = coords
         end
     end
 
@@ -198,8 +216,14 @@ function WRF(domaininfo::DomainInfo; name=:WRF, stream=true)
 
     # Horizontal coordinate transforms
     if :lat in keys(pvdict)
-        @variables δxδlon(t) [unit = u"m/rad", description = "X gradient with respect to longitude"]
-        @variables δyδlat(t) [unit = u"m/rad", description = "Y gradient with respect to latitude"]
+        @variables δxδlon(t) [
+            unit = u"m/rad",
+            description = "X gradient with respect to longitude"
+        ]
+        @variables δyδlat(t) [
+            unit = u"m/rad",
+            description = "Y gradient with respect to latitude"
+        ]
         @constants lat2meters = 111.32e3 * 180 / π [unit = u"m/rad"]
         @constants lon2m = 40075.0e3 / 2π [unit = u"m/rad"]
         lon_trans = δxδlon ~ lon2m * cos(pvdict[:lat])
@@ -218,7 +242,10 @@ function WRF(domaininfo::DomainInfo; name=:WRF, stream=true)
     push!(vars, z)
 
     # Height per level
-    @variables δzδlev(t) [unit = u"m", description = "Height derivative with respect to vertical level"]
+    @variables δzδlev(t) [
+        unit = u"m",
+        description = "Height derivative with respect to vertical level"
+    ]
     ph = z_params["PH"]
     phb = z_params["PHB"]
     phc = z_params["PH_coords"]
@@ -229,13 +256,14 @@ function WRF(domaininfo::DomainInfo; name=:WRF, stream=true)
     push!(eqs, lev_trans)
     push!(vars, δzδlev)
 
-    sys = ODESystem(eqs, t, vars,
+    sys = ODESystem(
+        eqs,
+        t,
+        vars,
         [pvdict[xdim], pvdict[ydim], pvdict[:lev], params...];
-        name=name,
-        metadata=Dict(
-            :coupletype => WRFCoupler,
-        ),
-        discrete_events=events
+        name = name,
+        metadata = Dict(:coupletype => WRFCoupler),
+        discrete_events = events
     )
     return sys
 end
@@ -246,10 +274,7 @@ function couple2(mw::EarthSciMLBase.MeanWindCoupler, w::WRFCoupler)
     push!(eqs, mw.v_lon ~ w.hourly₊U)
     length(unknowns(mw)) > 1 ? push!(eqs, mw.v_lat ~ w.hourly₊V) : nothing
     length(unknowns(mw)) > 2 ? push!(eqs, mw.v_lev ~ w.hourly₊W) : nothing
-    ConnectorSystem(
-        eqs,
-        mw, w,
-    )
+    ConnectorSystem(eqs, mw, w)
 end
 
 # Return grid staggering for the given variable,
@@ -257,11 +282,7 @@ end
 # It should always be a triple of booleans for the
 # x, y, and z dimensions, respectively, regardless
 # of the dimensions of the variable.
-function wrf_staggering(var)::NTuple{3,Bool}
+function wrf_staggering(var)::NTuple{3, Bool}
     stag = get(var.attrib, "stagger", "")
-    return (
-        occursin("X", stag),
-        occursin("Y", stag),
-        occursin("Z", stag)
-    )
+    return (occursin("X", stag), occursin("Y", stag), occursin("Z", stag))
 end
