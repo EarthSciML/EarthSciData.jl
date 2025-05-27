@@ -136,25 +136,19 @@ end
     W_sub = ModelingToolkit.subs_constants(W_eq.rhs)
     vars_in_expr = get_variables(W_sub)
 
-    omega_itp = vars_in_expr[findfirst(
-        isequal(:omega_itp),
-        EarthSciMLBase.var2symbol.(vars_in_expr)
-    )]
-    air_itp = vars_in_expr[findfirst(
-        isequal(:air_itp), EarthSciMLBase.var2symbol.(vars_in_expr))]
+    dflts = ModelingToolkit.get_defaults(ncep_sys)
+    omega_itp = collect(keys(dflts))[findfirst(isequal(:omega_itp),
+        EarthSciMLBase.var2symbol.(keys(dflts)))]
+    air_itp = collect(keys(dflts))[findfirst(isequal(:air_itp),
+        EarthSciMLBase.var2symbol.(keys(dflts)))]
+
+    itp_omega = dflts[omega_itp]
+    itp_air = dflts[air_itp]
+    EarthSciData.lazyload!(itp_omega.itp, tt)
+    EarthSciData.lazyload!(itp_air.itp, tt)
 
     W_expr = build_function(W_sub, [t, lon, lat, lev, omega_itp, air_itp])
     myf = eval(W_expr)
-
-    events = ModelingToolkit.get_discrete_events(ncep_sys)
-    event_omega = only(events[[only(e.affects.pars_syms) == :omega_itp for e in events]])
-    event_air = only(events[[only(e.affects.pars_syms) == :air_itp for e in events]])
-
-    Main.EarthSciData.lazyload!(event_omega.affects.ctx, tt)
-    Main.EarthSciData.lazyload!(event_air.affects.ctx, tt)
-
-    itp_omega = EarthSciData.ITPWrapper(event_omega.affects.ctx)
-    itp_air = EarthSciData.ITPWrapper(event_air.affects.ctx)
 
     W_val_want = [0.00525, 0.00255, -0.01597, -0.00248, 0.01633, 0.08086]
 
@@ -178,12 +172,11 @@ end
 end
 
 @testset "ncep δzδlev" begin
-    events = ModelingToolkit.get_discrete_events(ncep_sys)
-    e_hgt = only(events[[only(e.affects.pars_syms) == :hgt_itp for e in events]])
-
-    EarthSciData.lazyload!(e_hgt.affects.ctx, tt)
-
-    itp_hgt = EarthSciData.ITPWrapper(e_hgt.affects.ctx)
+    dflts = ModelingToolkit.get_defaults(ncep_sys)
+    hgt_itp = collect(keys(dflts))[findfirst(isequal(:hgt_itp),
+        EarthSciMLBase.var2symbol.(keys(dflts)))]
+    itp_hgt = dflts[hgt_itp]
+    EarthSciData.lazyload!(itp_hgt.itp, tt)
 
     eqs = equations(ncep_sys)
     δzδlev_var = eqs[findfirst(x -> EarthSciMLBase.var2symbol(x.lhs) == :δzδlev, eqs)].rhs

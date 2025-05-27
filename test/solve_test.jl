@@ -42,7 +42,7 @@ end
     sys2 = convert(ODESystem, csys)
 
     @test length(equations(sys2)) == 1
-    @test length(observed(sys2)) == 2
+    @test length(observed(sys2)) == 73
     de = ModelingToolkit.get_discrete_events(sys2)
     @test length(de) == 1
     @test unix2datetime.(de[1].condition) == [

@@ -40,7 +40,7 @@ function relpath(::WRFFileSet, time::DateTime)
     y = Dates.year(time)
     m = @sprintf("%02d", Dates.month(time))
     d = @sprintf("%02d", Dates.day(time))
-    hour = Dates.format(floor(time, Hour), "HH_MM_SS")
+    hour = Dates.format(floor(time, Hour), "HH:MM:SS")
     string("$y$m/", "wrfout_hourly_d01_", "$y-$m-$d", "_", hour, ".nc")
 end
 
@@ -73,8 +73,8 @@ function loadmetadata(fs::WRFFileSet, varname)::MetaData
 
         xdim = findfirst(x -> occursin("west_east", x), dims)
         ydim = findfirst(x -> occursin("south_north", x), dims)
-        @assert xdim > 0 "WRF x dimension not found"
-        @assert ydim > 0 "WRF y dimension not found"
+        @assert xdim>0 "WRF x dimension not found"
+        @assert ydim>0 "WRF y dimension not found"
 
         # Find the z dimension; set to -1 if not found
         zdim = findfirst((x) -> occursin("bottom_top", x), dims)
@@ -82,14 +82,14 @@ function loadmetadata(fs::WRFFileSet, varname)::MetaData
                zdim
         zdim = isnothing(zdim) ? -1 : zdim
 
-        @assert fs.ds.attrib["MAP_PROJ"] == 1 "Only Lambert Conformal Conic projection is currently supported for WRF data."
+        @assert fs.ds.attrib["MAP_PROJ"]==1 "Only Lambert Conformal Conic projection is currently supported for WRF data."
         truelat1 = fs.ds.attrib["TRUELAT1"]
         truelat2 = fs.ds.attrib["TRUELAT2"]
         moad_cen_lat = fs.ds.attrib["MOAD_CEN_LAT"]
         stand_lon = fs.ds.attrib["STAND_LON"]
         prj = "+proj=lcc +lat_1=$(truelat1) +lat_2=$(truelat2) +lat_0=$(moad_cen_lat) +lon_0=$(stand_lon) +x_0=0 +y_0=0 +a=6370000 +b=6370000 +to_meter=1"
-        @assert moad_cen_lat ≈ fs.ds.attrib["CEN_LAT"] "CEN_LAT must match MOAD_CEN_LAT"
-        @assert stand_lon ≈ fs.ds.attrib["CEN_LON"] "CEN_LON must match STAND_LON"
+        @assert moad_cen_lat≈fs.ds.attrib["CEN_LAT"] "CEN_LAT must match MOAD_CEN_LAT"
+        @assert stand_lon≈fs.ds.attrib["CEN_LON"] "CEN_LON must match STAND_LON"
 
         coords = []
         for d in dims
@@ -117,7 +117,7 @@ function loadmetadata(fs::WRFFileSet, varname)::MetaData
         staggering = wrf_staggering(var)
         for i in 1:length(coords)
             staggered = staggering[i]
-            if staggered && (length(coords[i]) == varsize[i]+1)
+            if staggered && (length(coords[i]) == varsize[i] + 1)
                 coords[i] = 0.5 .* (coords[i][1:(end - 1)] .+ coords[i][2:end])
             end
         end
@@ -159,7 +159,6 @@ function WRF(domaininfo::DomainInfo; name = :WRF, stream = true)
 
     eqs = Equation[]
     params = []
-    events = []
     vars = Num[]
 
     xdim = :x in keys(pvdict) ? :x : :lon
@@ -193,9 +192,8 @@ function WRF(domaininfo::DomainInfo; name = :WRF, stream = true)
             @assert translated_dim ∈ keys(pvdict) "Dimension $d (translated to $translated_dim) is not in the domaininfo coordinates ($(pvs))."
             push!(coords, pvdict[translated_dim])
         end
-        eq, event, param = create_interp_equation(itp, "", t, starttime, coords)
+        eq, param = create_interp_equation(itp, "", t, starttime, coords)
         push!(eqs, eq)
-        push!(events, event)
         push!(params, param)
         push!(vars, eq.lhs)
         if varname ∈ ["PH", "PHB"]
@@ -224,8 +222,8 @@ function WRF(domaininfo::DomainInfo; name = :WRF, stream = true)
             unit = u"m/rad",
             description = "Y gradient with respect to latitude"
         ]
-        @constants lat2meters = 111.32e3 * 180 / π [unit = u"m/rad"]
-        @constants lon2m = 40075.0e3 / 2π [unit = u"m/rad"]
+        @constants lat2meters=111.32e3 * 180 / π [unit = u"m/rad"]
+        @constants lon2m=40075.0e3 / 2π [unit = u"m/rad"]
         lon_trans = δxδlon ~ lon2m * cos(pvdict[:lat])
         lat_trans = δyδlat ~ lat2meters
         push!(eqs, lon_trans, lat_trans)
@@ -236,7 +234,7 @@ function WRF(domaininfo::DomainInfo; name = :WRF, stream = true)
     @variables z(t) [unit = u"m", description = "Geopotential height"]
     PH = eqs[findfirst(x -> EarthSciMLBase.var2symbol(x.lhs) == :PH, eqs)].rhs
     PHB = eqs[findfirst(x -> EarthSciMLBase.var2symbol(x.lhs) == :PHB, eqs)].rhs
-    @constants g = 9.80665 [unit = u"m/s^2", description = "Acceleration due to gravity"]
+    @constants g=9.80665 [unit = u"m/s^2", description = "Acceleration due to gravity"]
     z_expr = (PH + PHB) / g
     push!(eqs, z ~ z_expr)
     push!(vars, z)
@@ -256,14 +254,10 @@ function WRF(domaininfo::DomainInfo; name = :WRF, stream = true)
     push!(eqs, lev_trans)
     push!(vars, δzδlev)
 
-    sys = ODESystem(
-        eqs,
-        t,
-        vars,
-        [pvdict[xdim], pvdict[ydim], pvdict[:lev], params...];
+    sys = ODESystem(eqs, t, vars, [pvdict[xdim], pvdict[ydim], pvdict[:lev], params...];
         name = name,
-        metadata = Dict(:coupletype => WRFCoupler),
-        discrete_events = events
+        metadata = Dict(:coupletype => WRFCoupler,
+            :sys_discrete_event => create_updater_sys_event(name, params, starttime))
     )
     return sys
 end

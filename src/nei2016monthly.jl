@@ -39,7 +39,7 @@ $(SIGNATURES)
 File path on the server relative to the host root; also path on local disk relative to `ENV["EARTHSCIDATADIR"]`.
 """
 function relpath(fs::NEI2016MonthlyEmisFileSet, t::DateTime)
-    @assert Dates.year(t) == 2016 "Only 2016 emissions data is available with `NEI2016MonthlyEmis`."
+    @assert Dates.year(t)==2016 "Only 2016 emissions data is available with `NEI2016MonthlyEmis`."
     month = @sprintf("%.2d", Dates.month(t))
     return "emismod/2016/v1/gridded/monthly_netCDF/2016fh_16j_$(fs.sector)_12US1_month_$(month).ncf"
 end
@@ -86,7 +86,7 @@ function loadmetadata(fs::NEI2016MonthlyEmisFileSet, varname)::MetaData
         time_index = findfirst(isequal(timedim), dims)
         dims = deleteat!(dims, time_index)
         varsize = deleteat!(collect(size(var)), time_index)
-        @assert varsize[end] == 1 "Only 2D data is supported."
+        @assert varsize[end]==1 "Only 2D data is supported."
         varsize = varsize[1:(end - 1)] # Last dimension is 1.
 
         Δx = fs.ds.attrib["XCELL"]
@@ -115,8 +115,8 @@ function loadmetadata(fs::NEI2016MonthlyEmisFileSet, varname)::MetaData
 
         xdim = findfirst((x) -> x == "COL", dims)
         ydim = findfirst((x) -> x == "ROW", dims)
-        @assert xdim > 0 "NEI2016 `COL` dimension not found"
-        @assert ydim > 0 "NEI2016 `ROW` dimension not found"
+        @assert xdim>0 "NEI2016 `COL` dimension not found"
+        @assert ydim>0 "NEI2016 `ROW` dimension not found"
 
         return MetaData(
             coords,
@@ -183,41 +183,26 @@ function NEI2016MonthlyEmis(
     starttime, endtime = get_tspan_datetime(domaininfo)
     fs = NEI2016MonthlyEmisFileSet(sector, starttime, endtime)
     pvdict = Dict([Symbol(v) => v for v in EarthSciMLBase.pvars(domaininfo)]...)
-    @assert :x in keys(pvdict) || :lon in keys(pvdict) "x or lon must be specified in the domaininfo"
-    @assert :y in keys(pvdict) || :lat in keys(pvdict) "y or lat must be specified in the domaininfo"
+    @assert :x in keys(pvdict)||:lon in keys(pvdict) "x or lon must be specified in the domaininfo"
+    @assert :y in keys(pvdict)||:lat in keys(pvdict) "y or lat must be specified in the domaininfo"
     @assert :lev in keys(pvdict) "lev must be specified in the domaininfo"
     x = :x in keys(pvdict) ? pvdict[:x] : pvdict[:lon]
     y = :y in keys(pvdict) ? pvdict[:y] : pvdict[:lat]
     lev = pvdict[:lev]
-    @parameters(Δz = 60.0,
+    @parameters(Δz=60.0,
         [unit = u"m", description = "Height of the first vertical grid layer"],)
     eqs = Equation[]
-    events = []
     params = []
     vars = Num[]
     for varname in varnames(fs)
         dt = EarthSciMLBase.dtype(domaininfo)
-        itp = DataSetInterpolator{dt}(
-            fs,
-            varname,
-            starttime,
-            endtime,
-            domaininfo;
-            stream = stream
-        )
-        @constants zero_emis = 0 [unit = units(itp) / u"m"]
+        itp = DataSetInterpolator{dt}(fs, varname, starttime, endtime, domaininfo;
+            stream = stream)
+        @constants zero_emis=0 [unit = units(itp) / u"m"]
         zero_emis = ModelingToolkit.unwrap(zero_emis) # Unsure why this is necessary.
-        eq, event,
-        param = create_interp_equation(
-            itp,
-            "",
-            t,
-            starttime,
-            [x, y];
-            wrapper_f = (eq) -> ifelse(lev < 2, eq / Δz * scale, zero_emis)
-        )
+        eq, param = create_interp_equation(itp, "", t, starttime, [x, y];
+            wrapper_f = (eq) -> ifelse(lev < 2, eq / Δz * scale, zero_emis))
         push!(eqs, eq)
-        push!(events, event)
         push!(params, param)
         push!(vars, eq.lhs)
     end
@@ -227,8 +212,8 @@ function NEI2016MonthlyEmis(
         vars,
         [x, y, lev, Δz, params...];
         name = name,
-        metadata = Dict(:coupletype => NEI2016MonthlyEmisCoupler),
-        discrete_events = events
+        metadata = Dict(:coupletype => NEI2016MonthlyEmisCoupler,
+            :sys_discrete_event => create_updater_sys_event(name, params, starttime))
     )
     return sys
 end

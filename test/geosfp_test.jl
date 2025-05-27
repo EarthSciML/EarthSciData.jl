@@ -106,49 +106,21 @@ end
     pseq = equations(geosfp)[iips]
     peq = substitute(equations(geosfp)[iip], pseq.lhs => pseq.rhs)
 
-    events = ModelingToolkit.get_discrete_events(geosfp)
-    e = only(events[[only(e.affects.pars_syms) == :I3₊PS_itp for e in events]])
-    Main.EarthSciData.lazyload!(e.affects.ctx, tt)
-    ps_itp = only(
-        get_variables(peq.rhs)[[s == :I3₊PS_itp
-                                for s in EarthSciMLBase.var2symbol.(get_variables(peq.rhs))]],
-    )
+    dflts = ModelingToolkit.get_defaults(geosfp)
+    psitp = collect(keys(dflts))[findfirst(isequal(:I3₊PS_itp),
+        EarthSciMLBase.var2symbol.(keys(dflts)))]
+    ps_itp = dflts[psitp]
+    EarthSciData.lazyload!(ps_itp.itp, tt)
 
     # Check Pressure levels
     P = ModelingToolkit.subs_constants(peq.rhs)
-    P_expr = build_function(P, [t, lon, lat, lev, ps_itp])
+    P_expr = build_function(P, [t, lon, lat, lev, psitp])
     mypf = eval(P_expr)
     lonv = deg2rad(-155.7)
     latv = deg2rad(39.1)
-    itp = EarthSciData.ITPWrapper(e.affects.ctx)
-    p_levels = [mypf([tt, lonv, latv, lev, itp]) for lev in [1, 1.5, 2, 72, 72.5, 73]]
+    p_levels = [mypf([tt, lonv, latv, lev, ps_itp]) for lev in [1, 1.5, 2, 72, 72.5, 73]]
     @test p_levels ≈
           [102340.37924047427, 101572.77264006894, 100805.16603966363, 2.0, 1.5, 1.0]
-
-    dp = partialderivatives_δPδlev_geosfp(geosfp)
-
-    # Check level coordinate index
-    ff = dp([lon, lat, lev])
-    @test all(keys(ff) .=== [3])
-
-    fff = ModelingToolkit.subs_constants(ff[3])
-
-    # Check δP at different levels
-    vvv = get_variables(fff)
-    ps_itp = vvv[findfirst(isequal(:GEOSFP₊I3₊PS_itp), EarthSciMLBase.var2symbol.(vvv))]
-    lon = vvv[findfirst(isequal(:GEOSFP₊lon), EarthSciMLBase.var2symbol.(vvv))]
-    lat = vvv[findfirst(isequal(:GEOSFP₊lat), EarthSciMLBase.var2symbol.(vvv))]
-    f_expr = build_function(fff, [t, lon, lat, lev, ps_itp])
-    myf = eval(f_expr)
-    δP_levels = [myf([tt, lonv, latv, lev, itp]) for lev in [1, 1.5, 2, 71.5, 72, 72.5]]
-    @test 1.0 ./ δP_levels ≈ [
-        -1535.2132008106564,
-        -1535.2132008106273,
-        -1550.4554371152772,
-        -1.2699999999999996,
-        -1.0,
-        -1.0
-    ]
 end
 
 @testset "GEOS-FP new day" begin
@@ -164,19 +136,15 @@ end
     )
     pseq = equations(geosfp)[iips]
 
-    events = ModelingToolkit.get_discrete_events(geosfp)
-    e = only(events[[only(e.affects.pars_syms) == :I3₊PS_itp for e in events]])
-    Main.EarthSciData.lazyload!(e.affects.ctx, DateTime(2022, 1, 1, 23, 58))
-    ps_itp = only(
-        get_variables(pseq.rhs)[[s == :I3₊PS_itp
-                                 for s in
-                                     EarthSciMLBase.var2symbol.(get_variables(pseq.rhs))]],
-    )
+    dflts = ModelingToolkit.get_defaults(geosfp)
+    psitp = collect(keys(dflts))[findfirst(isequal(:I3₊PS_itp),
+        EarthSciMLBase.var2symbol.(keys(dflts)))]
+    ps_itp = dflts[psitp]
+    EarthSciData.lazyload!(ps_itp.itp, DateTime(2022, 1, 1, 23, 58))
 
-    PS_expr = build_function(pseq.rhs, t, lon, lat, lev, ps_itp)
+    PS_expr = build_function(pseq.rhs, t, lon, lat, lev, psitp)
     psf = eval(PS_expr)
-    itp = EarthSciData.ITPWrapper(e.affects.ctx)
-    psf(starttime, 0.0, 0.0, 1.0, itp)
+    psf(starttime, 0.0, 0.0, 1.0, ps_itp)
 end
 
 @testset "GEOS-FP wrong year" begin

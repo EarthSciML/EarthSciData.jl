@@ -419,7 +419,6 @@ function GEOSFP(
     pvdict = Dict([Symbol(v) => v for v in pvs]...)
     eqs = Equation[]
     params = []
-    events = []
     vars = Num[]
     for (filename, fs) in filesets
         for varname in varnames(fs)
@@ -439,9 +438,8 @@ function GEOSFP(
                 @assert d ∈ keys(pvdict) "GEOSFP coordinate $d not found in domaininfo coordinates ($(pvs))."
                 push!(coords, pvdict[d])
             end
-            eq, event, param = create_interp_equation(itp, filename, t, starttime, coords)
+            eq, param = create_interp_equation(itp, filename, t, starttime, coords)
             push!(eqs, eq)
-            push!(events, event)
             push!(params, param)
             push!(vars, eq.lhs)
         end
@@ -484,8 +482,8 @@ function GEOSFP(
         vars,
         [pvdict[:lon], pvdict[:lat], lev, params...];
         name = name,
-        metadata = Dict(:coupletype => GEOSFPCoupler),
-        discrete_events = events
+        metadata = Dict(:coupletype => GEOSFPCoupler,
+            :sys_discrete_event => create_updater_sys_event(name, params, starttime)),
     )
     return sys
 end

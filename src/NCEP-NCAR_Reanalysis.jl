@@ -20,7 +20,6 @@ struct NCEPNCARReanalysisFileSet <: EarthSciData.FileSet
         )
 
         for v in vars, y in years
-
             time = DateTime(y, 1, 1)
             rel = relpath(fs_temp, time, v)
             fullpath = startswith(mirror, "file://") ?
@@ -96,12 +95,8 @@ end
 
 DataFrequencyInfo(fs::NCEPNCARReanalysisFileSet)::DataFrequencyInfo = fs.freq_info
 
-function loadslice!(
-        data::AbstractArray,
-        fs::NCEPNCARReanalysisFileSet,
-        t::DateTime,
-        varname::String
-)
+function loadslice!(data::AbstractArray, fs::NCEPNCARReanalysisFileSet, t::DateTime,
+        varname::String)
     ds = fs.ds[Symbol(varname)]
     vraw = ds[var_name(varname)]
     dims = NCDatasets.dimnames(vraw)
@@ -110,7 +105,7 @@ function loadslice!(
     if "time" in dims && !occursin("_sfc", varname)
         time_vec = DateTime.(ds["time"][:])
         tidx = findfirst(==(t), time_vec)
-        @assert tidx !== nothing "Time $t not found in $varname"
+        @assert tidx!==nothing "Time $t not found in $varname"
         t_index = tidx
     end
 
@@ -148,8 +143,8 @@ function EarthSciData.loadmetadata(fs::NCEPNCARReanalysisFileSet, varname)::Meta
         zdim = findfirst(x -> occursin("level", x), dims)
         zdim = isnothing(zdim) ? -1 : zdim
 
-        @assert xdim > 0 "Longitude (x) dimension not found."
-        @assert ydim > 0 "Latitude (y) dimension not found."
+        @assert xdim>0 "Longitude (x) dimension not found."
+        @assert ydim>0 "Latitude (y) dimension not found."
 
         prj = "+proj=longlat +datum=WGS84 +no_defs"
 
@@ -212,7 +207,6 @@ function NCEPNCARReanalysis(
 
     eqs = Equation[]
     params = []
-    events = []
     vars = Num[]
 
     xdim = :x in keys(pvdict) ? :x : :lon
@@ -238,9 +232,8 @@ function NCEPNCARReanalysis(
             @assert translated_dim ∈ keys(pvdict) "Dimension $d (translated to $translated_dim) is not in the domaininfo coordinates ($(pvs))."
             push!(coords, pvdict[translated_dim])
         end
-        eq, event, param = create_interp_equation(itp, "", t, starttime, coords)
+        eq, param = create_interp_equation(itp, "", t, starttime, coords)
         push!(eqs, eq)
-        push!(events, event)
         push!(params, param)
         push!(vars, eq.lhs)
 
@@ -259,8 +252,8 @@ function NCEPNCARReanalysis(
             unit = u"m/rad",
             description = "Y gradient with respect to latitude"
         ]
-        @constants lat2meters = 111.32e3 * 180 / π [unit = u"m/rad"]
-        @constants lon2m = 40075.0e3 / 2π [unit = u"m/rad"]
+        @constants lat2meters=111.32e3 * 180 / π [unit = u"m/rad"]
+        @constants lon2m=40075.0e3 / 2π [unit = u"m/rad"]
         lon_trans = δxδlon ~ lon2m * cos(pvdict[:lat])
         lat_trans = δyδlat ~ lat2meters
         push!(eqs, lon_trans, lat_trans)
@@ -269,15 +262,15 @@ function NCEPNCARReanalysis(
 
     if :lev in keys(pvdict)
         @variables p(t) [unit = u"Pa", description = "Pressure at level"]
-        @constants hPa2Pa = 100.0 [unit = u"Pa", description = "Conversion from hPa to Pa"]
+        @constants hPa2Pa=100.0 [unit = u"Pa", description = "Conversion from hPa to Pa"]
 
         p_expr = p ~ hPa2Pa * build_pressure_expr(pvdict[:lev])
         push!(eqs, p_expr)
         push!(vars, p)
     end
 
-    @constants Rd = 287.05 [unit = u"J/(kg*K)"]
-    @constants g = 9.80665 [unit = u"m/s^2"]
+    @constants Rd=287.05 [unit = u"J/(kg*K)"]
+    @constants g=9.80665 [unit = u"m/s^2"]
     @variables wwnd(t) [unit = u"m/s", description = "Vertical wind velocity"]
     T = eqs[findfirst(x -> EarthSciMLBase.var2symbol(x.lhs) == :air, eqs)].rhs
     omega = eqs[findfirst(x -> EarthSciMLBase.var2symbol(x.lhs) == :omega, eqs)].rhs
@@ -307,8 +300,8 @@ function NCEPNCARReanalysis(
         vars,
         [pvdict[xdim], pvdict[ydim], pvdict[:lev], params...];
         name = name,
-        metadata = Dict(:coupletype => NCEPNCARReanalysisCoupler),
-        discrete_events = events
+        metadata = Dict(:coupletype => NCEPNCARReanalysisCoupler,
+            :sys_discrete_event => create_updater_sys_event(name, params, starttime))
     )
     return sys
 end

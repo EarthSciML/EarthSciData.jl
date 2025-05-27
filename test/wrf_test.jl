@@ -116,6 +116,15 @@ end
     end
 end
 
+function get_itp(varsym::Symbol, sys, t)
+    dflts = ModelingToolkit.get_defaults(sys)
+    itp_var = collect(keys(dflts))[findfirst(isequal(varsym),
+        EarthSciMLBase.var2symbol.(keys(dflts)))]
+    itp = dflts[itp_var]
+    EarthSciData.lazyload!(itp.itp, t)
+    return itp_var, itp
+end
+
 @testset "wrf total pressures at exact-hour timestamps" begin
     lonv = deg2rad(-118.2707)
     latv = deg2rad(34.0059)
@@ -134,23 +143,10 @@ end
 
     ptotal_sub = ModelingToolkit.subs_constants(ptotal_eq.rhs)
 
-    vars_in_expr = get_variables(ptotal_sub)
-    getv(v) = vars_in_expr[findfirst(isequal(v), EarthSciMLBase.var2symbol.(vars_in_expr))]
-    P_itp = getv(:P_itp)
-    PB_itp = getv(:PB_itp)
-
+    P_itp, itp_p = get_itp(:P_itp, wrf_sys, tt)
+    PB_itp, itp_pb = get_itp(:PB_itp, wrf_sys, tt)
     P_expr = build_function(ptotal_sub, [t, lon, lat, lev, P_itp, PB_itp])
     myf = eval(P_expr)
-
-    events = ModelingToolkit.get_discrete_events(wrf_sys)
-    event_p = only(events[[only(e.affects.pars_syms) == :P_itp for e in events]])
-    event_pb = only(events[[only(e.affects.pars_syms) == :PB_itp for e in events]])
-
-    EarthSciData.lazyload!(event_p.affects.ctx, tt)
-    EarthSciData.lazyload!(event_pb.affects.ctx, tt)
-
-    itp_p = EarthSciData.ITPWrapper(event_p.affects.ctx)
-    itp_pb = EarthSciData.ITPWrapper(event_pb.affects.ctx)
 
     p_want = [
         100331.86015842063,
@@ -200,23 +196,11 @@ end
 
     ptotal_sub = ModelingToolkit.subs_constants(ptotal_eq.rhs)
 
-    vars_in_expr = get_variables(ptotal_sub)
-    getv(v) = vars_in_expr[findfirst(isequal(v), EarthSciMLBase.var2symbol.(vars_in_expr))]
-    P_itp = getv(:P_itp)
-    PB_itp = getv(:PB_itp)
+    P_itp, itp_p = get_itp(:P_itp, wrf_sys, tt)
+    PB_itp, itp_pb = get_itp(:PB_itp, wrf_sys, tt)
 
     P_expr = build_function(ptotal_sub, [t, x, y, lev, P_itp, PB_itp])
     myf = eval(P_expr)
-
-    events = ModelingToolkit.get_discrete_events(wrf_sys)
-    event_p = only(events[[only(e.affects.pars_syms) == :P_itp for e in events]])
-    event_pb = only(events[[only(e.affects.pars_syms) == :PB_itp for e in events]])
-
-    EarthSciData.lazyload!(event_p.affects.ctx, tt)
-    EarthSciData.lazyload!(event_pb.affects.ctx, tt)
-
-    itp_p = EarthSciData.ITPWrapper(event_p.affects.ctx)
-    itp_pb = EarthSciData.ITPWrapper(event_pb.affects.ctx)
 
     #p_want = [100331.86015842063, 100235.71904432855, 100139.57793023644, 67846.0833619396,
     #    30679.47156109965, 28729.87012240142]
@@ -251,24 +235,11 @@ end
 
     ptotal_sub = ModelingToolkit.subs_constants(ptotal_eq.rhs)
 
-    vars_in_expr = get_variables(ptotal_sub)
-    P_itp = vars_in_expr[findfirst(
-        isequal(:P_itp), EarthSciMLBase.var2symbol.(vars_in_expr))]
-    PB_itp = vars_in_expr[findfirst(
-        isequal(:PB_itp), EarthSciMLBase.var2symbol.(vars_in_expr))]
+    P_itp, itp_p = get_itp(:P_itp, wrf_sys, tt)
+    PB_itp, itp_pb = get_itp(:PB_itp, wrf_sys, tt)
 
     P_expr = build_function(ptotal_sub, [t, lon, lat, lev, P_itp, PB_itp])
     myf = eval(P_expr)
-
-    events = ModelingToolkit.get_discrete_events(wrf_sys)
-    event_p = only(events[[only(e.affects.pars_syms) == :P_itp for e in events]])
-    event_pb = only(events[[only(e.affects.pars_syms) == :PB_itp for e in events]])
-
-    Main.EarthSciData.lazyload!(event_p.affects.ctx, tt)
-    EarthSciData.lazyload!(event_pb.affects.ctx, tt)
-
-    itp_p = EarthSciData.ITPWrapper(event_p.affects.ctx)
-    itp_pb = EarthSciData.ITPWrapper(event_pb.affects.ctx)
 
     p_want = [
         100295.9284090799,
@@ -293,25 +264,12 @@ end
 
     wrf_sys = WRF(domain)
 
-    events = ModelingToolkit.get_discrete_events(wrf_sys)
-    e_ph = only(events[[only(e.affects.pars_syms) == :PH_itp for e in events]])
-    e_phb = only(events[[only(e.affects.pars_syms) == :PHB_itp for e in events]])
-
-    Main.EarthSciData.lazyload!(e_ph.affects.ctx, tt)
-    Main.EarthSciData.lazyload!(e_phb.affects.ctx, tt)
-
-    itp_ph = EarthSciData.ITPWrapper(e_ph.affects.ctx)
-    itp_phb = EarthSciData.ITPWrapper(e_phb.affects.ctx)
+    PH_itp, itp_ph = get_itp(:PH_itp, wrf_sys, tt)
+    PHB_itp, itp_phb = get_itp(:PHB_itp, wrf_sys, tt)
 
     eqs = equations(wrf_sys)
     δzδlev_var = eqs[findfirst(x -> EarthSciMLBase.var2symbol(x.lhs) == :δzδlev, eqs)].rhs
     δzδlev_sub = ModelingToolkit.subs_constants(δzδlev_var)
-
-    vars_in_expr = get_variables(δzδlev_sub)
-    PH_itp = vars_in_expr[findfirst(
-        isequal(:PH_itp), EarthSciMLBase.var2symbol.(vars_in_expr))]
-    PHB_itp = vars_in_expr[findfirst(
-        isequal(:PHB_itp), EarthSciMLBase.var2symbol.(vars_in_expr))]
 
     δzδlev_expr = build_function(δzδlev_sub, [t, lon, lat, lev, PH_itp, PHB_itp])
     δzδlev_f = eval(δzδlev_expr)

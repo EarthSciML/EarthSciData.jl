@@ -57,11 +57,8 @@ function maybedownload(fs::FileSet, t::DateTime)
     u = url(fs, t)
     try
         prog = Progress(100; desc = "Downloading $(basename(u)):", dt = 0.1)
-        Downloads.download(
-            u,
-            p,
-            progress = (
-                total::Integer, now::Integer) -> begin
+        Downloads.download(u, p,
+            progress = (total::Integer, now::Integer) -> begin
                 prog.n = total
                 ProgressMeter.update!(prog, now)
             end
@@ -250,13 +247,8 @@ mutable struct DataSetInterpolator{To, N, N2, FT, ITPT, DomT}
     end
 end
 
-function replace_in_tuple(
-        t::NTuple{N, T1},
-        index1::Int,
-        v1::T2,
-        index2::Int,
-        v2::T2
-) where {T1, T2, N}
+function replace_in_tuple(t::NTuple{N, T1}, index1::Int, v1::T2,
+        index2::Int, v2::T2) where {T1, T2, N}
     ntuple(i -> i == index1 ? T1(v1) : i == index2 ? T1(v2) : t[i], N)
 end
 function tuple_from_vals(index1::Int, v1::T, index2::Int, v2::T) where {T}
@@ -265,14 +257,8 @@ function tuple_from_vals(index1::Int, v1::T, index2::Int, v2::T) where {T}
         2
     )
 end
-function tuple_from_vals(
-        index1::Int,
-        v1::T,
-        index2::Int,
-        v2::T,
-        index3::Int,
-        v3::T
-) where {T}
+function tuple_from_vals(index1::Int, v1::T, index2::Int, v2::T,
+        index3::Int, v3::T) where {T}
     ntuple(
         i -> i == index1 ? v1 :
              i == index2 ? v2 : i == index3 ? v3 : throw(ArgumentError("missing index")),
@@ -477,13 +463,8 @@ function update!(itp::DataSetInterpolator, t::DateTime)
     update_interpolator!(itp)
 end
 
-function interpolate_from!(
-        dsi::DataSetInterpolator,
-        dst::AbstractArray{T, N},
-        src::AbstractArray{T, N},
-        model_grid,
-        extrapolate_type = Flat()
-) where {T, N}
+function interpolate_from!(dsi::DataSetInterpolator, dst::AbstractArray{T, N},
+        src::AbstractArray{T, N}, model_grid, extrapolate_type = Flat()) where {T, N}
     data_grid = Tuple(knots2range.(dsi.metadata.coords))
     dsi.metadata.xdim, dsi.metadata.ydim
     itp = interpolate!(src, BSpline(Linear()))
@@ -492,22 +473,10 @@ function interpolate_from!(
         for (i, x) in enumerate(model_grid[1])
             for (j, y) in enumerate(model_grid[2])
                 for (k, z) in enumerate(model_grid[3])
-                    idx = tuple_from_vals(
-                        dsi.metadata.xdim,
-                        i,
-                        dsi.metadata.ydim,
-                        j,
-                        dsi.metadata.zdim,
-                        k
-                    )
-                    locs = tuple_from_vals(
-                        dsi.metadata.xdim,
-                        x,
-                        dsi.metadata.ydim,
-                        y,
-                        dsi.metadata.zdim,
-                        z
-                    )
+                    idx = tuple_from_vals(dsi.metadata.xdim, i,
+                        dsi.metadata.ydim, j, dsi.metadata.zdim, k)
+                    locs = tuple_from_vals(dsi.metadata.xdim, x,
+                        dsi.metadata.ydim, y, dsi.metadata.zdim, z)
                     locs = dsi.coord_trans(locs)
                     dst[idx...] = itp(locs...)
                 end
@@ -650,14 +619,8 @@ Create an equation that interpolates the given dataset at the given time and loc
 `wrapper_f` can specify a function to wrap the interpolated value, for example `eq -> eq / 2`
 to divide the interpolated value by 2.
 """
-function create_interp_equation(
-        itp::DataSetInterpolator,
-        filename,
-        t,
-        starttime,
-        coords;
-        wrapper_f = v -> v
-)
+function create_interp_equation(itp::DataSetInterpolator, filename, t, starttime, coords;
+        wrapper_f = v -> v)
     n = length(filename) > 0 ? Symbol("$(filename)₊$(itp.varname)") :
         Symbol("$(itp.varname)")
     n_p = Symbol(n, "_itp")
@@ -665,7 +628,7 @@ function create_interp_equation(
     itp = ITPWrapper(itp)
     t_itp = typeof(itp)
     p_itp = only(
-        @parameters ($n_p::t_itp)(..) = itp [
+        @parameters ($n_p::t_itp)(..)=itp [
         unit = units(itp.itp),
         description = "Interpolated $(n)"
     ]
@@ -687,13 +650,47 @@ function create_interp_equation(
 
     eq = lhs ~ rhs
 
-    event = get_tstops(itp.itp, starttime) => (update_affect!, [], [p_itp], [], itp.itp)
-
-    return eq, event, p_itp
+    return eq, p_itp
 end
 
-function update_affect!(integ, u, p, ctx)
-    integ.p[only(p)].itp = lazyload!(integ.p[only(p)].itp, integ.t)
+# Utility function to get the variables that are needed to solve a
+# system.
+function needed_vars(sys)
+    exprs = [eq.rhs for eq in equations(sys)]
+    needed_eqs = vcat(equations(sys),
+        observed(sys)[ModelingToolkit.observed_equations_used_by(sys, exprs)])
+    needed_vars = unique(vcat(get_variables.(needed_eqs)...))
+    EarthSciMLBase.var2symbol.(needed_vars)
+end
+
+# Create a "system event" (https://base.earthsci.dev/dev/system_events/)
+# to update the interpolators associated with the given parameters.
+function create_updater_sys_event(name, params, starttime)
+    pnames = Symbol.((name,), (:₊,), EarthSciMLBase.var2symbol.(params))
+    function sys_event(sys::ModelingToolkit.AbstractSystem)
+        needed = needed_vars(sys)
+        params_to_update = []
+        for p in parameters(sys)
+            psym = EarthSciMLBase.var2symbol(p)
+            if (psym in pnames) && (psym in needed)
+                push!(params_to_update, p)
+            end
+        end
+        dflts = ModelingToolkit.get_defaults(sys)
+        all_tstops = []
+        for p_itp in params_to_update
+            itp = dflts[p_itp].itp
+            push!(all_tstops, get_tstops(itp, starttime)...)
+        end
+        all_tstops = unique(all_tstops)
+        function update_itps!(integ, u, p, ctx)
+            for p_itp in p
+                itp = integ.ps[p_itp].itp
+                lazyload!(itp, integ.t)
+            end
+        end
+        all_tstops => (update_itps!, [], params_to_update, [], nothing)
+    end
 end
 
 Latexify.@latexrecipe function f(itp::EarthSciData.DataSetInterpolator)
