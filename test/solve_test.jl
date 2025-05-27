@@ -21,8 +21,8 @@ domain = DomainInfo(
     grid_spacing = [deg2rad(15.0), deg2rad(15.0), 1]
 )
 
-@variables ACET(t) = 0.0 [unit = u"kg*m^-3"]
-@constants c = 1000 [unit = u"s"]
+@variables ACET(t)=0.0 [unit = u"kg*m^-3"]
+@constants c=1000 [unit = u"s"]
 
 struct SysCoupler
     sys::Any
@@ -76,7 +76,6 @@ prob = ODEProblem(csys, st)
 sol = solve(prob, Euler(), dt = dt)
 
 @test sum(sol.u[end]) ≈ 2.7791006168742467e-5
-
 
 st = SolverIMEX()
 

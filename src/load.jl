@@ -58,7 +58,8 @@ function maybedownload(fs::FileSet, t::DateTime)
     try
         prog = Progress(100; desc = "Downloading $(basename(u)):", dt = 0.1)
         Downloads.download(u, p,
-            progress = (total::Integer, now::Integer) -> begin
+            progress = (
+                total::Integer, now::Integer) -> begin
                 prog.n = total
                 ProgressMeter.update!(prog, now)
             end

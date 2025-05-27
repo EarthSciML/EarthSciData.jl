@@ -20,6 +20,7 @@ struct NCEPNCARReanalysisFileSet <: EarthSciData.FileSet
         )
 
         for v in vars, y in years
+
             time = DateTime(y, 1, 1)
             rel = relpath(fs_temp, time, v)
             fullpath = startswith(mirror, "file://") ?

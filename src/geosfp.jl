@@ -145,15 +145,15 @@ function loadmetadata(fs::GEOSFPFileSet, varname)::MetaData
 
         _, units = to_unit(var.attrib["units"])
         description = var.attrib["long_name"]
-        @assert var.attrib["scale_factor"] == 1.0 "Unexpected scale factor."
+        @assert var.attrib["scale_factor"]==1.0 "Unexpected scale factor."
         coords = [fs.ds[d][:] for d in dims]
 
         xdim = findfirst((x) -> x == "lon", dims)
         ydim = findfirst((x) -> x == "lat", dims)
         zdim = findfirst((x) -> x == "lev", dims)
         zdim = isnothing(zdim) ? -1 : zdim
-        @assert xdim > 0 "GEOSFP `lon` dimension not found"
-        @assert ydim > 0 "GEOSFP `lat` dimension not found"
+        @assert xdim>0 "GEOSFP `lon` dimension not found"
+        @assert ydim>0 "GEOSFP `lat` dimension not found"
         # Convert from degrees to radians (so we are using SI units)
         coords[xdim] .= deg2rad.(coords[xdim])
         coords[ydim] .= deg2rad.(coords[ydim])
@@ -446,7 +446,7 @@ function GEOSFP(
     end
 
     # Implement hybrid grid pressure: https://wiki.seas.harvard.edu/geos-chem/index.php/GEOS-Chem_vertical_grids
-    @constants P_unit = 1.0 [unit = u"Pa", description = "Unit pressure"]
+    @constants P_unit=1.0 [unit = u"Pa", description = "Unit pressure"]
     @variables P(t) [unit = u"Pa", description = "Pressure"]
     i3ps = vars[findfirst(isequal(:I3₊PS), EarthSciMLBase.var2symbol.(vars))]
     @assert :lev in keys(pvdict) "GEOSFP coordinate :lev not found in domaininfo coordinates ($(pvs))."
@@ -468,8 +468,8 @@ function GEOSFP(
         unit = u"Pa",
         description = "Pressure gradient with respect to hybrid grid level"
     ]
-    @constants lat2meters = 111.32e3 * 180 / π [unit = u"m/rad"]
-    @constants lon2m = 40075.0e3 / 2π [unit = u"m/rad"]
+    @constants lat2meters=111.32e3 * 180 / π [unit = u"m/rad"]
+    @constants lon2m=40075.0e3 / 2π [unit = u"m/rad"]
     lon_trans = δxδlon ~ lon2m * cos(pvdict[:lat])
     lat_trans = δyδlat ~ lat2meters
     lev_trans = δPδlev ~ expand_derivatives(Differential(lev)(pressure_eq.rhs))
@@ -483,7 +483,7 @@ function GEOSFP(
         [pvdict[:lon], pvdict[:lat], lev, params...];
         name = name,
         metadata = Dict(:coupletype => GEOSFPCoupler,
-            :sys_discrete_event => create_updater_sys_event(name, params, starttime)),
+            :sys_discrete_event => create_updater_sys_event(name, params, starttime))
     )
     return sys
 end
@@ -514,7 +514,7 @@ function partialderivatives_δPδlev_geosfp(geosfp; default_lev = 1.0)
     # Get interpolator for surface pressure.
     ps_eq = ModelingToolkit.namespace_equation(equations(geosfp)[ii], geosfp)
     ps = ps_eq.rhs
-    @constants P_unit = 1.0 [unit = u"Pa", description = "Unit pressure"]
+    @constants P_unit=1.0 [unit = u"Pa", description = "Unit pressure"]
     # Function to calculate pressure at a given level in the hybrid grid.
     # This is on a staggered grid so level=1 is the grid bottom.
     P(levx) = (P_unit * Ap(levx) + Bp(levx) * ps)
