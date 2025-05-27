@@ -377,8 +377,8 @@ function async_loader(itp::DataSetInterpolator)
             end
         end
         put!(itp.loadresult, 0) # Let the requestor know that we've finished.
-        # Anticipate what the next request is going to be for and load that data.
         take!(itp.copyfinish)
+        # Anticipate what the next request is going to be for and load that data.
         try
             tt = nexttimepoint(itp, tt)
             loadslice!(itp.load_cache, itp.fs, tt, itp.varname)
@@ -418,6 +418,12 @@ end
 
 function update!(itp::DataSetInterpolator, t::DateTime)
     @assert itp.initialized "Interpolator has not been initialized"
+    if isready(itp.loadresult)
+        # If a previous simulation ended in an error, there might be an extra
+        # result in the channel, so we dispose of it here if that is case.
+        take!(itp.loadresult)
+        put!(itp.copyfinish, 0)
+    end
     times = interp_cache_times!(itp, t) # Figure out which times we need.
 
     # Figure out the overlap between the times we have and the times we need.

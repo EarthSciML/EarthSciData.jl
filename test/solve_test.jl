@@ -76,3 +76,14 @@ prob = ODEProblem(csys, st)
 sol = solve(prob, Euler(), dt = dt)
 
 @test sum(sol.u[end]) ≈ 2.7791006168742467e-5
+
+
+st = SolverIMEX()
+
+prob = ODEProblem(csys, st)
+
+sol = solve(prob, KenCarp3())
+
+@test sum(sol.u[end]) ≈ 2.414101174478711e-5
+
+@test_nowarn solve(prob, KenCarp3())
