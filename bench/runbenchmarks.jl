@@ -1,5 +1,6 @@
 using BenchmarkTools
 using EarthSciData
+using EarthSciMLBase
 using Dates
 
 domain1 = DomainInfo(
