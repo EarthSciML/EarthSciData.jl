@@ -38,8 +38,8 @@ end
 
 function relpath(::WRFFileSet, time::DateTime)
     y = Dates.year(time)
-    m = @sprintf("%02d", Dates.month(time))
-    d = @sprintf("%02d", Dates.day(time))
+    m = lpad(month(time), 2, '0')
+    d = lpad(day(time), 2, '0')
     hour = Dates.format(floor(time, Hour), "HH:MM:SS")
     string("$y$m/", "wrfout_hourly_d01_", "$y-$m-$d", "_", hour, ".nc")
 end

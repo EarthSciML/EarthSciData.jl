@@ -96,8 +96,8 @@ File path on the server relative to the host root; also path on local disk relat
 """
 function relpath(fs::GEOSFPFileSet, t::DateTime)
     yr = year(t)
-    month = @sprintf("%.2d", Dates.month(t))
-    day = @sprintf("%.2d", Dates.day(t))
+    month = lpad(Dates.month(t), 2, '0')
+    day = lpad(Dates.day(t), 2, '0')
     domain = replace(fs.domain, '.' => "")
     domain = replace(domain, '_' => ".")
     return join(

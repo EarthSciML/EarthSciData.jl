@@ -2,8 +2,8 @@ using EarthSciData
 using Test
 using EarthSciMLBase, ModelingToolkit, DomainSets
 using ModelingToolkit: t, D
-using NCDatasets, DynamicQuantities, DifferentialEquations, Dates
-using SciMLOperators
+using NCDatasets, DynamicQuantities, Dates
+using OrdinaryDiffEqLowOrderRK, OrdinaryDiffEqTsit5
 
 @parameters lev = 1.0
 @parameters y = 2.0 [unit = u"kg"]

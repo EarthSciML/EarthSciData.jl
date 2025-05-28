@@ -4,7 +4,7 @@ using Test
 using EarthSciMLBase, ModelingToolkit
 using ModelingToolkit: t, D
 using DomainSets, Dates
-using DifferentialEquations
+using OrdinaryDiffEqSDIRK, OrdinaryDiffEqLowOrderRK, OrdinaryDiffEqTsit5
 using DynamicQuantities
 
 @parameters lat=deg2rad(40.0) lon=deg2rad(-97.0) lev=0.0
@@ -53,7 +53,7 @@ end
         DateTime("2016-05-16T12:00:00")
     ]
     prob = ODEProblem(sys2, [], get_tspan(domain), [])
-    sol = solve(prob)
+    sol = solve(prob, Tsit5())
     @test only(sol.u[end]) ≈ 5.322912896619149e-6
 end
 

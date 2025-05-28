@@ -40,7 +40,7 @@ File path on the server relative to the host root; also path on local disk relat
 """
 function relpath(fs::NEI2016MonthlyEmisFileSet, t::DateTime)
     @assert Dates.year(t)==2016 "Only 2016 emissions data is available with `NEI2016MonthlyEmis`."
-    month = @sprintf("%.2d", Dates.month(t))
+    month = lpad(Dates.month(t), 2, '0')
     return "emismod/2016/v1/gridded/monthly_netCDF/2016fh_16j_$(fs.sector)_12US1_month_$(month).ncf"
 end
 

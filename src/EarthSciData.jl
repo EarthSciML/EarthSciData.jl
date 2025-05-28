@@ -1,5 +1,5 @@
 module EarthSciData
-using Dates, Downloads, Printf
+using Dates, Downloads
 using DocStringExtensions
 using SciMLBase: DiscreteCallback
 using Interpolations, DataInterpolations
