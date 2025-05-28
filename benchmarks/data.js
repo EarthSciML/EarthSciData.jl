@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1748400823832,
+  "lastUpdate": 1748401136297,
   "repoUrl": "https://github.com/EarthSciML/EarthSciData.jl",
   "entries": {
     "Julia benchmark result": [
@@ -2304,6 +2304,41 @@ window.BENCHMARK_DATA = {
             "value": 171828220938,
             "unit": "ns",
             "extra": "gctime=30994361055\nmemory=197446376696\nallocs=1229239649\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "compathelper_noreply@julialang.org",
+            "name": "CompatHelper Julia"
+          },
+          "committer": {
+            "email": "ctessum@gmail.com",
+            "name": "Christopher Tessum",
+            "username": "ctessum"
+          },
+          "distinct": true,
+          "id": "2d543a9800ca44d1b2efa3813855b858de9f680c",
+          "message": "CompatHelper: add new compat entry for EarthSciData at version 0.12 for package docs, (keep existing compat)",
+          "timestamp": "2025-05-28T10:27:58+08:00",
+          "tree_id": "7e3a5f17c0272401cca721d568d54319013b09bb",
+          "url": "https://github.com/EarthSciML/EarthSciData.jl/commit/2d543a9800ca44d1b2efa3813855b858de9f680c"
+        },
+        "date": 1748401134962,
+        "tool": "julia",
+        "benches": [
+          {
+            "name": "NEI Simulator/Serial",
+            "value": 159115608177,
+            "unit": "ns",
+            "extra": "gctime=25477891747\nmemory=199034920184\nallocs=1134683489\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
+          },
+          {
+            "name": "NEI Simulator/Threads",
+            "value": 158429592547,
+            "unit": "ns",
+            "extra": "gctime=25340310188\nmemory=199034920184\nallocs=1134683489\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
           }
         ]
       }
