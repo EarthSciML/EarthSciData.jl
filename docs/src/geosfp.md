@@ -6,7 +6,7 @@ First, let's initialize some packages and set up the [GEOS-FP](@ref GEOSFP) equa
 
 ```@example geosfp
 using EarthSciData, EarthSciMLBase
-using ModelingToolkit, MethodOfLines, DifferentialEquations
+using ModelingToolkit, DifferentialEquations
 using ModelingToolkit: t, D
 using Dates, Plots, DataFrames
 using DynamicQuantities
