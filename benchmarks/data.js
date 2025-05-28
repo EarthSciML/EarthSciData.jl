@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1748403690786,
+  "lastUpdate": 1748405248549,
   "repoUrl": "https://github.com/EarthSciML/EarthSciData.jl",
   "entries": {
     "Julia benchmark result": [
@@ -2411,6 +2411,42 @@ window.BENCHMARK_DATA = {
             "value": 171537878138,
             "unit": "ns",
             "extra": "gctime=27585134696\nmemory=202262437112\nallocs=1218996065\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "ctessum@gmail.com",
+            "name": "Christopher Tessum",
+            "username": "ctessum"
+          },
+          "committer": {
+            "email": "ctessum@gmail.com",
+            "name": "Christopher Tessum",
+            "username": "ctessum"
+          },
+          "distinct": true,
+          "id": "d12090dd2574955097b0ed5393e9c2ce52b53050",
+          "message": "Add _typos.toml",
+          "timestamp": "2025-05-28T11:33:38+08:00",
+          "tree_id": "54dae5508ac4b4d0da0b537d150d0a8311fe778f",
+          "url": "https://github.com/EarthSciML/EarthSciData.jl/commit/d12090dd2574955097b0ed5393e9c2ce52b53050"
+        },
+        "date": 1748405247753,
+        "tool": "julia",
+        "benches": [
+          {
+            "name": "NEI Simulator/Serial",
+            "value": 179558287604,
+            "unit": "ns",
+            "extra": "gctime=30213203159\nmemory=200371313912\nallocs=1229239649\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
+          },
+          {
+            "name": "NEI Simulator/Threads",
+            "value": 179267644056,
+            "unit": "ns",
+            "extra": "gctime=30332449379\nmemory=200371313912\nallocs=1229239649\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
           }
         ]
       }
