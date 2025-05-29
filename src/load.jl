@@ -59,7 +59,7 @@ function maybedownload(fs::FileSet, t::DateTime)
         prog = Progress(100; desc = "Downloading $(basename(u)):", dt = 0.1)
         Downloads.download(u, p,
             progress = (
-                total::Integer, now::Integer) -> begin
+            total::Integer, now::Integer) -> begin
                 prog.n = total
                 ProgressMeter.update!(prog, now)
             end
@@ -695,6 +695,9 @@ function create_updater_sys_event(name, params, starttime)
                 itp = integ.ps[p_itp].itp
                 lazyload!(itp, integ.t)
             end
+        end
+        if length(params_to_update) == 0
+            return nothing
         end
         all_tstops => (update_itps!, [], params_to_update, [], nothing)
     end
