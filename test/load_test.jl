@@ -18,8 +18,7 @@ domain = DomainInfo(
     te;
     lonrange = deg2rad(-175.0):deg2rad(2.5):deg2rad(175.0),
     latrange = deg2rad(-85.0):deg2rad(2):deg2rad(85.0),
-    levrange = 1:10,
-    dtype = Float64
+    levrange = 1:10
 )
 
 @test EarthSciData.url(fs, t) ==

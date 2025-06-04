@@ -12,8 +12,7 @@ domain = DomainInfo(
     DateTime(2023, 8, 15, 3, 0, 0);
     latrange = deg2rad(25.0f0):deg2rad(0.1):deg2rad(50.0f0),
     lonrange = deg2rad(-125.0f0):deg2rad(0.1):deg2rad(-65.0f0),
-    levrange = 1:32,
-    dtype = Float64
+    levrange = 1:32
 )
 
 # Test that the coordinates that we calculate match the coordinates in the file.
@@ -169,7 +168,6 @@ end
         yrange = -1.374e6:12000:1.374e6,
         levrange = 1:32,
         spatial_ref = "+proj=lcc +lat_1=30.0 +lat_2=60.0 +lat_0=38.999996 +lon_0=-97.0 +x_0=0 +y_0=0 +a=6370000 +b=6370000 +to_meter=1",
-        dtype = Float64
     )
 
     lonv = deg2rad(-118.2707)

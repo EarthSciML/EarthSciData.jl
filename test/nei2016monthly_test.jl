@@ -12,8 +12,7 @@ domain = DomainInfo(
     DateTime(2016, 5, 2);
     latrange = deg2rad(-85.0f0):deg2rad(2):deg2rad(85.0f0),
     lonrange = deg2rad(-180.0f0):deg2rad(2.5):deg2rad(175.0f0),
-    levrange = 1:10,
-    dtype = Float64
+    levrange = 1:10
 )
 lon, lat, lev = EarthSciMLBase.pvars(domain)
 
@@ -41,7 +40,6 @@ end
         latrange = deg2rad(-85.0f0):deg2rad(2):deg2rad(85.0f0),
         lonrange = deg2rad(-180.0f0):deg2rad(2.5):deg2rad(175.0f0),
         levrange = 1:10,
-        dtype = Float64,
         spatial_ref = "+proj=axisswap +order=2,1 +step +proj=longlat +datum=WGS84 +no_defs"
     )
     itp = EarthSciData.DataSetInterpolator{Float32}(fileset, "NOX", ts, te, domain)

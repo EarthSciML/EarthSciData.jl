@@ -12,8 +12,7 @@ domain = DomainInfo(
     DateTime(2019, 1, 3, 0, 0, 0);
     latrange = range(deg2rad(-90.0), deg2rad(90.0), step = deg2rad(2.5)),
     lonrange = range(deg2rad(0.0), deg2rad(360.0), step = deg2rad(2.5)),
-    levrange = 1:17,
-    dtype = Float64
+    levrange = 1:17
 )
 
 lonv = deg2rad(262.5)
