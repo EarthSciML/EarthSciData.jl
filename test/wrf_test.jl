@@ -88,9 +88,9 @@ end
         "WRF₊V(t, lon, lat, lev)",
         "MeanWind₊v_lev(t, lon, lat, lev)",
         "WRF₊W(t, lon, lat, lev)",
-        "WRF₊U_itp(t, lon, lat, lev)",
-        "WRF₊V_itp(t, lon, lat, lev)",
-        "WRF₊W_itp(t, lon, lat, lev)",
+        "WRF₊U_itp(t + t_ref, lon, lat, lev)",
+        "WRF₊V_itp(t + t_ref, lon, lat, lev)",
+        "WRF₊W_itp(t + t_ref, lon, lat, lev)",
         "WRF₊T(t, lon, lat, lev)",
         "WRF₊P(t, lon, lat, lev)",
         "WRF₊PB(t, lon, lat, lev)",
@@ -133,7 +133,7 @@ end
 
     wrf_sys = WRF(domain)
 
-    @parameters lon [unit = u"rad"] lat [unit = u"rad"] lev [unit = u"1"]
+    @parameters lon [unit = u"rad"] lat [unit = u"rad"] lev [unit = u"1"] t_ref [unit=u"s"]
 
     iipt = findfirst(
         eq -> string(Symbolics.tosymbol(eq.lhs)) == "P_total(t)",
@@ -145,7 +145,7 @@ end
 
     P_itp, itp_p = get_itp(:P_itp, wrf_sys, tt)
     PB_itp, itp_pb = get_itp(:PB_itp, wrf_sys, tt)
-    P_expr = build_function(ptotal_sub, [t, lon, lat, lev, P_itp, PB_itp])
+    P_expr = build_function(ptotal_sub, [t, t_ref, lon, lat, lev, P_itp, PB_itp])
     myf = eval(P_expr)
 
     p_want = [
@@ -156,7 +156,7 @@ end
         30679.47156109965,
         28729.87012240142
     ]
-    P_total = [myf([tt, lonv, latv, levv, itp_p, itp_pb])
+    P_total = [myf([datetime2unix(tt), 0.0, lonv, latv, levv, itp_p, itp_pb])
                for levv in [1, 1.5, 2, 21.5, 30, 31.5]]
     @test P_total ≈ p_want
 end
@@ -187,6 +187,7 @@ end
     wrf_sys = WRF(domain)
 
     x, y, lev = EarthSciMLBase.pvars(domain)
+    @parameters t_ref [unit=u"s"]
 
     iipt = findfirst(
         eq -> string(Symbolics.tosymbol(eq.lhs)) == "P_total(t)",
@@ -199,7 +200,7 @@ end
     P_itp, itp_p = get_itp(:P_itp, wrf_sys, tt)
     PB_itp, itp_pb = get_itp(:PB_itp, wrf_sys, tt)
 
-    P_expr = build_function(ptotal_sub, [t, x, y, lev, P_itp, PB_itp])
+    P_expr = build_function(ptotal_sub, [t, t_ref, x, y, lev, P_itp, PB_itp])
     myf = eval(P_expr)
 
     #p_want = [100331.86015842063, 100235.71904432855, 100139.57793023644, 67846.0833619396,
@@ -212,7 +213,7 @@ end
         30617.55578737014,
         28672.612298322314
     ] # TODO(CT): Why is this different from the one above?
-    P_total = [myf([tt, xv, yv, levv, itp_p, itp_pb])
+    P_total = [myf([datetime2unix(tt), 0.0, xv, yv, levv, itp_p, itp_pb])
                for levv in [1, 1.5, 2, 21.5, 30, 31.5]]
     @test P_total ≈ p_want
 end
@@ -238,7 +239,9 @@ end
     P_itp, itp_p = get_itp(:P_itp, wrf_sys, tt)
     PB_itp, itp_pb = get_itp(:PB_itp, wrf_sys, tt)
 
-    P_expr = build_function(ptotal_sub, [t, lon, lat, lev, P_itp, PB_itp])
+    @parameters t_ref [unit=u"s"]
+
+    P_expr = build_function(ptotal_sub, [t, t_ref, lon, lat, lev, P_itp, PB_itp])
     myf = eval(P_expr)
 
     p_want = [
@@ -249,7 +252,7 @@ end
         30668.59654150301,
         28719.783883029562
     ]
-    P_total = [myf([tt, lonv, latv, levv, itp_p, itp_pb])
+    P_total = [myf([datetime2unix(tt), 0.0, lonv, latv, levv, itp_p, itp_pb])
                for levv in [1, 1.5, 2, 21.5, 30, 31.5]]
     @test P_total ≈ p_want
 end
@@ -260,7 +263,7 @@ end
     levv = 1.0
     tt = DateTime(2023, 8, 15, 0, 0, 0)
 
-    @parameters lat, [unit = u"rad"], lon, [unit = u"rad"], lev
+    @parameters lat, [unit = u"rad"], lon, [unit = u"rad"], lev, t_ref, [unit=u"s"]
 
     wrf_sys = WRF(domain)
 
@@ -271,7 +274,7 @@ end
     δzδlev_var = eqs[findfirst(x -> EarthSciMLBase.var2symbol(x.lhs) == :δzδlev, eqs)].rhs
     δzδlev_sub = ModelingToolkit.subs_constants(δzδlev_var)
 
-    δzδlev_expr = build_function(δzδlev_sub, [t, lon, lat, lev, PH_itp, PHB_itp])
+    δzδlev_expr = build_function(δzδlev_sub, [t, t_ref, lon, lat, lev, PH_itp, PHB_itp])
     δzδlev_f = eval(δzδlev_expr)
 
     δzδlev_want = [
@@ -282,7 +285,7 @@ end
         352.24392973192874,
         279.69888985290606
     ]
-    δzδlev = [δzδlev_f([tt, lonv, latv, levv, itp_ph, itp_phb])
+    δzδlev = [δzδlev_f([datetime2unix(tt), 0.0, lonv, latv, levv, itp_ph, itp_phb])
               for
               levv in [1, 1.5, 2, 21.5, 30, 31.5]]
     @test δzδlev ≈ δzδlev_want

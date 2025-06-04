@@ -74,11 +74,10 @@ end
     eq = Differential(t)(emis.ACET) ~ equations(emis)[1].rhs * 1e10 / uc
     sys = extend(ODESystem([eq], t, [], []; name = :test_sys), emis)
     sys = structural_simplify(sys)
-    tt = Dates.datetime2unix(sample_time)
     prob = ODEProblem(
         sys,
         zeros(1),
-        (tt, tt + 60.0),
+        (0.0, 60.0),
         [lat => deg2rad(40.0), lon => deg2rad(-97.0), lev => 1.0]
     )
     sol = solve(prob, Tsit5())

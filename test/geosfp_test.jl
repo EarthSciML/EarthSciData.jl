@@ -62,11 +62,11 @@ domain = DomainInfo(
         "MeanWind₊v_lev(t, lon, lat, lev)",
         "GEOSFP₊A3dyn₊OMEGA(t, lon, lat, lev)",
         "GEOSFP₊A3dyn₊U(t, lon, lat, lev)",
-        "GEOSFP₊A3dyn₊U_itp(t, lon, lat, lev)",
+        "GEOSFP₊A3dyn₊U_itp(t + t_ref, lon, lat, lev)",
         "GEOSFP₊A3dyn₊OMEGA(t, lon, lat, lev)",
-        "GEOSFP₊A3dyn₊OMEGA_itp(t, lon, lat, lev)",
+        "GEOSFP₊A3dyn₊OMEGA_itp(t + t_ref, lon, lat, lev)",
         "GEOSFP₊A3dyn₊V(t, lon, lat, lev)",
-        "GEOSFP₊A3dyn₊V_itp(t, lon, lat, lev)",
+        "GEOSFP₊A3dyn₊V_itp(t + t_ref, lon, lat, lev)",
         "Differential(t)(ExampleSys₊c(t, lon, lat, lev))",
         "Differential(lon)(ExampleSys₊c(t, lon, lat, lev)",
         "MeanWind₊v_lon(t, lon, lat, lev)",
@@ -90,8 +90,9 @@ domain = DomainInfo(
 end
 
 @testset "GEOS-FP pressure levels" begin
-    tt = DateTime(2022, 1, 2)
+    tt = datetime2unix(DateTime(2022, 1, 2))
     @parameters lat, [unit = u"rad"], lon, [unit = u"rad"], lev
+    @parameters t_ref=0 [unit=u"s"]
     geosfp = GEOSFP("4x5", domain)
 
     # Rearrange pressure equation so it can be evaluated for P.
@@ -114,17 +115,19 @@ end
 
     # Check Pressure levels
     P = ModelingToolkit.subs_constants(peq.rhs)
-    P_expr = build_function(P, [t, lon, lat, lev, psitp])
+    P_expr = build_function(P, [t, t_ref, lon, lat, lev, psitp])
     mypf = eval(P_expr)
     lonv = deg2rad(-155.7)
     latv = deg2rad(39.1)
-    p_levels = [mypf([tt, lonv, latv, lev, ps_itp]) for lev in [1, 1.5, 2, 72, 72.5, 73]]
+    p_levels = [mypf([tt, 0.0, lonv, latv, lev, ps_itp])
+                for lev in [1, 1.5, 2, 72, 72.5, 73]]
     @test p_levels ≈
           [102340.37924047427, 101572.77264006894, 100805.16603966363, 2.0, 1.5, 1.0]
 end
 
 @testset "GEOS-FP new day" begin
     @parameters(lon=0.0, [unit=u"rad"], lat=0.0, [unit=u"rad"], lev=1.0,)
+    @parameters t_ref=0 [unit=u"s"]
     starttime = datetime2unix(DateTime(2022, 1, 1, 23, 58))
     endtime = datetime2unix(DateTime(2022, 1, 2, 0, 3))
 
@@ -142,13 +145,14 @@ end
     ps_itp = dflts[psitp]
     EarthSciData.lazyload!(ps_itp.itp, DateTime(2022, 1, 1, 23, 58))
 
-    PS_expr = build_function(pseq.rhs, t, lon, lat, lev, psitp)
+    PS_expr = build_function(pseq.rhs, t, t_ref, lon, lat, lev, psitp)
     psf = eval(PS_expr)
-    psf(starttime, 0.0, 0.0, 1.0, ps_itp)
+    psf(starttime, 0.0, 0.0, 0.0, 1.0, ps_itp)
 end
 
 @testset "GEOS-FP wrong year" begin
     @parameters(lon=0.0, [unit=u"rad"], lat=0.0, [unit=u"rad"], lev=1.0,)
+    @parameters t_ref=0 [unit=u"s"]
     starttime = datetime2unix(DateTime(2022, 5, 1))
 
     geosfp = GEOSFP("4x5", domain)
@@ -158,7 +162,7 @@ end
         [Symbolics.tosymbol(eq.lhs, escape = false) for eq in equations(geosfp)]
     )
     pseq = equations(geosfp)[iips]
-    PS_expr = build_function(pseq.rhs, t, lon, lat, lev)
+    PS_expr = build_function(pseq.rhs, t, t_ref, lon, lat, lev)
     psf = eval(PS_expr)
-    @test_throws Base.Exception psf(starttime, 0.0, 0.0, 1.0)
+    @test_throws Base.Exception psf(starttime, 0.0, 0.0, 0.0, 1.0)
 end

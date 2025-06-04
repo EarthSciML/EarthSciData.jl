@@ -415,10 +415,12 @@ function GEOSFP(
         "I3" => GEOSFPFileSet(domain, "I3", starttime, endtime)
     )
 
+    @parameters t_ref=get_tref(domaininfo) [unit = u"s", description = "Reference time"]
+    t_ref = GlobalScope(t_ref)
     pvs = EarthSciMLBase.pvars(domaininfo)
     pvdict = Dict([Symbol(v) => v for v in pvs]...)
     eqs = Equation[]
-    params = []
+    params = Any[t_ref]
     vars = Num[]
     for (filename, fs) in filesets
         for varname in varnames(fs)
@@ -438,7 +440,7 @@ function GEOSFP(
                 @assert d ∈ keys(pvdict) "GEOSFP coordinate $d not found in domaininfo coordinates ($(pvs))."
                 push!(coords, pvdict[d])
             end
-            eq, param = create_interp_equation(itp, filename, t, starttime, coords)
+            eq, param = create_interp_equation(itp, filename, t, t_ref, coords)
             push!(eqs, eq)
             push!(params, param)
             push!(vars, eq.lhs)

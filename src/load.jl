@@ -626,7 +626,7 @@ Create an equation that interpolates the given dataset at the given time and loc
 `wrapper_f` can specify a function to wrap the interpolated value, for example `eq -> eq / 2`
 to divide the interpolated value by 2.
 """
-function create_interp_equation(itp::DataSetInterpolator, filename, t, starttime, coords;
+function create_interp_equation(itp::DataSetInterpolator, filename, t, t_ref, coords;
         wrapper_f = v -> v)
     n = length(filename) > 0 ? Symbol("$(filename)₊$(itp.varname)") :
         Symbol("$(itp.varname)")
@@ -642,7 +642,7 @@ function create_interp_equation(itp::DataSetInterpolator, filename, t, starttime
     )
 
     # Create right hand side of equation.
-    rhs = wrapper_f(p_itp(t, coords...))
+    rhs = wrapper_f(p_itp(t_ref + t, coords...))
 
     # Create left hand side of equation.
     desc = description(itp.itp)

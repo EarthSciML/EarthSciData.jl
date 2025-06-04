@@ -206,8 +206,10 @@ function NCEPNCARReanalysis(
     pvs = EarthSciMLBase.pvars(domaininfo)
     pvdict = Dict([Symbol(v) => v for v in pvs]...)
 
+    @parameters t_ref=get_tref(domaininfo) [unit = u"s", description = "Reference time"]
+    t_ref = GlobalScope(t_ref)
     eqs = Equation[]
-    params = []
+    params = Any[t_ref]
     vars = Num[]
 
     xdim = :x in keys(pvdict) ? :x : :lon
@@ -233,7 +235,7 @@ function NCEPNCARReanalysis(
             @assert translated_dim ∈ keys(pvdict) "Dimension $d (translated to $translated_dim) is not in the domaininfo coordinates ($(pvs))."
             push!(coords, pvdict[translated_dim])
         end
-        eq, param = create_interp_equation(itp, "", t, starttime, coords)
+        eq, param = create_interp_equation(itp, "", t, t_ref, coords)
         push!(eqs, eq)
         push!(params, param)
         push!(vars, eq.lhs)

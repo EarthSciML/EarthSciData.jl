@@ -101,11 +101,11 @@ end
         "NCEPNCARReanalysis₊air(t, lon, lat, lev)",
         "NCEPNCARReanalysis₊omega(t, lon, lat, lev)",
         "NCEPNCARReanalysis₊hgt(t, lon, lat, lev)",
-        "NCEPNCARReanalysis₊uwnd_itp(t, lon, lat, lev)",
-        "NCEPNCARReanalysis₊vwnd_itp(t, lon, lat, lev)",
-        "NCEPNCARReanalysis₊air_itp(t, lon, lat, lev)",
-        "NCEPNCARReanalysis₊omega_itp(t, lon, lat, lev)",
-        "NCEPNCARReanalysis₊hgt_itp(t, lon, lat, lev)",
+        "NCEPNCARReanalysis₊uwnd_itp(t + t_ref, lon, lat, lev)",
+        "NCEPNCARReanalysis₊vwnd_itp(t + t_ref, lon, lat, lev)",
+        "NCEPNCARReanalysis₊air_itp(t + t_ref, lon, lat, lev)",
+        "NCEPNCARReanalysis₊omega_itp(t + t_ref, lon, lat, lev)",
+        "NCEPNCARReanalysis₊hgt_itp(t + t_ref, lon, lat, lev)",
         "lon2m",
         "lat2meters",
         "Differential(lat)(ExampleSys₊c(t, lon, lat, lev))",
@@ -141,18 +141,20 @@ end
         EarthSciMLBase.var2symbol.(keys(dflts)))]
     air_itp = collect(keys(dflts))[findfirst(isequal(:air_itp),
         EarthSciMLBase.var2symbol.(keys(dflts)))]
+    t_ref = collect(keys(dflts))[findfirst(isequal(:t_ref),
+        EarthSciMLBase.var2symbol.(keys(dflts)))]
 
     itp_omega = dflts[omega_itp]
     itp_air = dflts[air_itp]
     EarthSciData.lazyload!(itp_omega.itp, tt)
     EarthSciData.lazyload!(itp_air.itp, tt)
 
-    W_expr = build_function(W_sub, [t, lon, lat, lev, omega_itp, air_itp])
+    W_expr = build_function(W_sub, [t, t_ref, lon, lat, lev, omega_itp, air_itp])
     myf = eval(W_expr)
 
     W_val_want = [0.00525, 0.00255, -0.01597, -0.00248, 0.01633, 0.08086]
 
-    W_val = [myf([tt, lonv, latv, levv, itp_omega, itp_air])
+    W_val = [myf([datetime2unix(tt), 0.0, lonv, latv, levv, itp_omega, itp_air])
              for levv in [1, 2, 5, 7.5, 12, 16]]
 
     @test W_val ≈ W_val_want rtol=1e-3
@@ -163,11 +165,16 @@ end
     p_var = eqs[findfirst(x -> EarthSciMLBase.var2symbol(x.lhs) == :p, eqs)].rhs
     p_sub = ModelingToolkit.subs_constants(p_var)
 
-    p_expr = build_function(p_sub, [t, lon, lat, lev])
+    dflts = ModelingToolkit.get_defaults(ncep_sys)
+    t_ref = collect(keys(dflts))[findfirst(isequal(:t_ref),
+        EarthSciMLBase.var2symbol.(keys(dflts)))]
+
+    p_expr = build_function(p_sub, [t, t_ref, lon, lat, lev])
     p_f = eval(p_expr)
 
     p_want = [100000, 92500, 60000, 35000, 10000, 2000]
-    p_vals = [p_f([tt, lonv, latv, levv]) for levv in [1, 2, 5, 7.5, 12, 16]]
+    p_vals = [p_f([datetime2unix(tt), 0.0, lonv, latv, levv])
+              for levv in [1, 2, 5, 7.5, 12, 16]]
     @test p_vals ≈ p_want rtol=1e-2
 end
 
@@ -185,12 +192,14 @@ end
     vars_in_expr = get_variables(δzδlev_sub)
     hgt_itp = vars_in_expr[findfirst(
         isequal(:hgt_itp), EarthSciMLBase.var2symbol.(vars_in_expr))]
+    t_ref = collect(keys(dflts))[findfirst(isequal(:t_ref),
+        EarthSciMLBase.var2symbol.(keys(dflts)))]
 
-    δzδlev_expr = build_function(δzδlev_sub, [t, lon, lat, lev, hgt_itp])
+    δzδlev_expr = build_function(δzδlev_sub, [t, t_ref, lon, lat, lev, hgt_itp])
     δzδlev_f = eval(δzδlev_expr)
 
     δzδlev_want = [598, 649, 1358, 1583, 2232, 4410]
-    δzδlev_vals = [δzδlev_f([tt, lonv, latv, levv, itp_hgt])
+    δzδlev_vals = [δzδlev_f([datetime2unix(tt), 0.0, lonv, latv, levv, itp_hgt])
                    for levv in [1, 2, 5, 7.5, 12, 16]]
     @test δzδlev_vals ≈ δzδlev_want rtol=1e-3
 end

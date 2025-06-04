@@ -191,8 +191,10 @@ function NEI2016MonthlyEmis(
     lev = pvdict[:lev]
     @parameters(Δz=60.0,
         [unit = u"m", description = "Height of the first vertical grid layer"],)
+    @parameters t_ref=get_tref(domaininfo) [unit = u"s", description = "Reference time"]
+    t_ref = GlobalScope(t_ref)
     eqs = Equation[]
-    params = []
+    params = Any[t_ref]
     vars = Num[]
     for varname in varnames(fs)
         dt = EarthSciMLBase.dtype(domaininfo)
@@ -201,7 +203,7 @@ function NEI2016MonthlyEmis(
         @constants zero_emis=0 [unit = units(itp) / u"m"]
         zero_emis = ModelingToolkit.unwrap(zero_emis) # Unsure why this is necessary.
         eq,
-        param = create_interp_equation(itp, "", t, starttime, [x, y];
+        param = create_interp_equation(itp, "", t, t_ref, [x, y];
             wrapper_f = (eq) -> ifelse(lev < 2, eq / Δz * scale, zero_emis))
         push!(eqs, eq)
         push!(params, param)
