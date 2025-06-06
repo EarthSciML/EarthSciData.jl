@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1748515751156,
+  "lastUpdate": 1749202058276,
   "repoUrl": "https://github.com/EarthSciML/EarthSciData.jl",
   "entries": {
     "Julia benchmark result": [
@@ -2663,6 +2663,42 @@ window.BENCHMARK_DATA = {
             "value": 61394527499,
             "unit": "ns",
             "extra": "gctime=4591590771\nmemory=49737047288\nallocs=1626375521\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "ctessum@gmail.com",
+            "name": "Christopher Tessum",
+            "username": "ctessum"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "b20610cfa93b440a144dc01d739aa64bed404643",
+          "message": "Update version numbers",
+          "timestamp": "2025-06-06T17:07:46+08:00",
+          "tree_id": "ee83a8b0a23dc4066c4612d5e27c739de158f8be",
+          "url": "https://github.com/EarthSciML/EarthSciData.jl/commit/b20610cfa93b440a144dc01d739aa64bed404643"
+        },
+        "date": 1749202057543,
+        "tool": "julia",
+        "benches": [
+          {
+            "name": "NEI Simulator/Serial",
+            "value": 75046018977,
+            "unit": "ns",
+            "extra": "gctime=6736512136\nmemory=49963982072\nallocs=1637407073\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
+          },
+          {
+            "name": "NEI Simulator/Threads",
+            "value": 75107034202,
+            "unit": "ns",
+            "extra": "gctime=6773289950\nmemory=49963982072\nallocs=1637407073\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
           }
         ]
       }
