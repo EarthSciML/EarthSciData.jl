@@ -676,14 +676,14 @@ function create_updater_sys_event(name, params, starttime)
     pnames = Symbol.((name,), (:₊,), EarthSciMLBase.var2symbol.(params))
     function sys_event(sys::ModelingToolkit.AbstractSystem)
         needed = needed_vars(sys)
+        dflts = ModelingToolkit.get_defaults(sys)
         params_to_update = []
         for p in parameters(sys)
             psym = EarthSciMLBase.var2symbol(p)
-            if (psym in pnames) && (psym in needed)
+            if (psym in pnames) && (psym in needed) && (dflts[p] isa ITPWrapper)
                 push!(params_to_update, p)
             end
         end
-        dflts = ModelingToolkit.get_defaults(sys)
         all_tstops = []
         for p_itp in params_to_update
             itp = dflts[p_itp].itp

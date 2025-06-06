@@ -416,7 +416,6 @@ function GEOSFP(
     )
 
     @parameters t_ref=get_tref(domaininfo) [unit = u"s", description = "Reference time"]
-    t_ref = GlobalScope(t_ref)
     pvs = EarthSciMLBase.pvars(domaininfo)
     pvdict = Dict([Symbol(v) => v for v in pvs]...)
     eqs = Equation[]

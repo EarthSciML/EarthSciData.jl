@@ -192,7 +192,6 @@ function NEI2016MonthlyEmis(
     @parameters(Δz=60.0,
         [unit = u"m", description = "Height of the first vertical grid layer"],)
     @parameters t_ref=get_tref(domaininfo) [unit = u"s", description = "Reference time"]
-    t_ref = GlobalScope(t_ref)
     eqs = Equation[]
     params = Any[t_ref]
     vars = Num[]

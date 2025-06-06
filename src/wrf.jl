@@ -158,7 +158,6 @@ function WRF(domaininfo::DomainInfo; name = :WRF, stream = true)
     pvdict = Dict([Symbol(v) => v for v in pvs]...)
 
     @parameters t_ref=get_tref(domaininfo) [unit = u"s", description = "Reference time"]
-    t_ref = GlobalScope(t_ref)
     eqs = Equation[]
     params = Any[t_ref]
     vars = Num[]

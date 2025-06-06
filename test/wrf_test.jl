@@ -87,9 +87,9 @@ end
         "WRF₊V(t, lon, lat, lev)",
         "MeanWind₊v_lev(t, lon, lat, lev)",
         "WRF₊W(t, lon, lat, lev)",
-        "WRF₊U_itp(t + t_ref, lon, lat, lev)",
-        "WRF₊V_itp(t + t_ref, lon, lat, lev)",
-        "WRF₊W_itp(t + t_ref, lon, lat, lev)",
+        "WRF₊U_itp(WRF₊t_ref + t, lon, lat, lev)",
+        "WRF₊V_itp(WRF₊t_ref + t, lon, lat, lev)",
+        "WRF₊W_itp(WRF₊t_ref + t, lon, lat, lev)",
         "WRF₊T(t, lon, lat, lev)",
         "WRF₊P(t, lon, lat, lev)",
         "WRF₊PB(t, lon, lat, lev)",
@@ -167,7 +167,7 @@ end
         xrange = -2.334e6:12000:2.334e6,
         yrange = -1.374e6:12000:1.374e6,
         levrange = 1:32,
-        spatial_ref = "+proj=lcc +lat_1=30.0 +lat_2=60.0 +lat_0=38.999996 +lon_0=-97.0 +x_0=0 +y_0=0 +a=6370000 +b=6370000 +to_meter=1",
+        spatial_ref = "+proj=lcc +lat_1=30.0 +lat_2=60.0 +lat_0=38.999996 +lon_0=-97.0 +x_0=0 +y_0=0 +a=6370000 +b=6370000 +to_meter=1"
     )
 
     lonv = deg2rad(-118.2707)
