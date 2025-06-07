@@ -196,7 +196,7 @@ function NEI2016MonthlyEmis(
     params = Any[t_ref]
     vars = Num[]
     for varname in varnames(fs)
-        dt = EarthSciMLBase.dtype(domaininfo)
+        dt = EarthSciMLBase.eltype(domaininfo)
         itp = DataSetInterpolator{dt}(fs, varname, starttime, endtime, domaininfo;
             stream = stream)
         @constants zero_emis=0 [unit = units(itp) / u"m"]

@@ -355,7 +355,10 @@ function interp_cache_times!(itp::DataSetInterpolator, t::DateTime)
     times
 end
 
-# The time points when integration should be stopped to update the interpolator.
+"""
+The time points when integration should be stopped to update the interpolator
+(as Unix timestamps).
+"""
 function get_tstops(itp::DataSetInterpolator, starttime::DateTime)
     dfi = DataFrequencyInfo(itp.fs)
     datetime2unix.(sort([starttime, dfi.centerpoints...]))
@@ -672,8 +675,9 @@ end
 
 # Create a "system event" (https://base.earthsci.dev/dev/system_events/)
 # to update the interpolators associated with the given parameters.
-function create_updater_sys_event(name, params, starttime)
+function create_updater_sys_event(name, params, starttime::DateTime)
     pnames = Symbol.((name,), (:₊,), EarthSciMLBase.var2symbol.(params))
+    t_ref = datetime2unix(starttime)
     function sys_event(sys::ModelingToolkit.AbstractSystem)
         needed = needed_vars(sys)
         dflts = ModelingToolkit.get_defaults(sys)
@@ -689,11 +693,11 @@ function create_updater_sys_event(name, params, starttime)
             itp = dflts[p_itp].itp
             push!(all_tstops, get_tstops(itp, starttime)...)
         end
-        all_tstops = unique(all_tstops)
+        all_tstops = unique(all_tstops) .- t_ref
         function update_itps!(integ, u, p, ctx)
             for p_itp in p
                 itp = integ.ps[p_itp].itp
-                lazyload!(itp, integ.t)
+                lazyload!(itp, integ.t + t_ref)
             end
         end
         if length(params_to_update) == 0

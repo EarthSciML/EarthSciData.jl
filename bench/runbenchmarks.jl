@@ -25,17 +25,11 @@ end
 
 @named sys = ODESystem([D(ACET) ~ 0], t, metadata = Dict(:coupletype => SysCoupler))
 
-starttime = datetime2unix(DateTime(2016, 5, 1))
-endtime = datetime2unix(DateTime(2016, 5, 2))
 domain = DomainInfo(
-    constIC(16.0, t ∈ Interval(starttime, endtime)),
-    constBC(
-        16.0,
-        lon ∈ Interval(deg2rad(-115), deg2rad(-68.75)),
-        lat ∈ Interval(deg2rad(25), deg2rad(53.7)),
-        lev ∈ Interval(1, 2)
-    );
-    grid_spacing = [deg2rad(1.25), deg2rad(1.2), 1]
+    DateTime(2016, 5, 1), DateTime(2016, 5, 2),
+    lonrange = deg2rad(-115):deg2rad(1.25):deg2rad(-68.75),
+    latrange = deg2rad(25):deg2rad(1.2):deg2rad(53.7),
+    levrange = 1:1:2
 )
 
 emis = NEI2016MonthlyEmis("mrggrid_withbeis_withrwc", domain)
