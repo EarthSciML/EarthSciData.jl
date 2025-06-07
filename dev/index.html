@@ -3,10 +3,10 @@
 Pkg.add(&quot;EarthSciMLData&quot;)</code></pre><h2 id="Feature-Summary"><a class="docs-heading-anchor" href="#Feature-Summary">Feature Summary</a><a id="Feature-Summary-1"></a><a class="docs-heading-anchor-permalink" href="#Feature-Summary" title="Permalink"></a></h2><p>This package contains data loaders for use with the <a href="https://earthsci.dev/">EarthSciML</a> ecosystem.</p><h2 id="Feature-List"><a class="docs-heading-anchor" href="#Feature-List">Feature List</a><a id="Feature-List-1"></a><a class="docs-heading-anchor-permalink" href="#Feature-List" title="Permalink"></a></h2><ul><li><p>Loader for <a href="https://gmao.gsfc.nasa.gov/GMAO_products/NRT_products.php">GEOS-FP</a> data.</p></li><li><p>Loader for <a href="https://gaftp.epa.gov/Air/">2016 NEI</a> emissions data.</p></li><li><p>Data outputters:</p><ul><li><a href="api/#EarthSciData.NetCDFOutputter"><code>NetCDFOutputter</code></a></li></ul></li></ul><h2 id="Contributing"><a class="docs-heading-anchor" href="#Contributing">Contributing</a><a id="Contributing-1"></a><a class="docs-heading-anchor-permalink" href="#Contributing" title="Permalink"></a></h2><ul><li>Please refer to the <a href="https://github.com/SciML/ColPrac/blob/master/README.md">SciML ColPrac: Contributor&#39;s Guide on Collaborative Practices for Community Packages</a> for guidance on PRs, issues, and other matters relating to contributing.</li></ul><h2 id="Reproducibility"><a class="docs-heading-anchor" href="#Reproducibility">Reproducibility</a><a id="Reproducibility-1"></a><a class="docs-heading-anchor-permalink" href="#Reproducibility" title="Permalink"></a></h2><details><summary>The documentation of this EarthSciML package was built using these direct dependencies,</summary><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Status `~/work/EarthSciData.jl/EarthSciData.jl/docs/Project.toml`
   [a93c6f00] DataFrames v1.7.0
   [0c46a032] DifferentialEquations v7.16.1
-  [e30172f5] Documenter v1.11.4
+  [e30172f5] Documenter v1.12.0
   [5b8099bc] DomainSets v0.7.15
   [06fc5a27] DynamicQuantities v1.8.0
-  [a293c155] EarthSciData v0.13.0 `~/work/EarthSciData.jl/EarthSciData.jl`
+  [a293c155] EarthSciData v0.13.1 `~/work/EarthSciData.jl/EarthSciData.jl`
   [e53f1632] EarthSciMLBase v0.23.0
 ⌅ [961ee093] ModelingToolkit v9.79.1
   [91a5bcdd] Plots v1.40.13
@@ -95,12 +95,12 @@ Environment:
   [8d63f2c5] DispatchDoctor v0.4.19
   [b4f34e82] Distances v0.10.12
   [31c24e10] Distributions v0.25.120
-  [ffbed154] DocStringExtensions v0.9.4
-  [e30172f5] Documenter v1.11.4
+  [ffbed154] DocStringExtensions v0.9.5
+  [e30172f5] Documenter v1.12.0
   [5b8099bc] DomainSets v0.7.15
   [7c1d4256] DynamicPolynomials v0.6.2
   [06fc5a27] DynamicQuantities v1.8.0
-  [a293c155] EarthSciData v0.13.0 `~/work/EarthSciData.jl/EarthSciData.jl`
+  [a293c155] EarthSciData v0.13.1 `~/work/EarthSciData.jl/EarthSciData.jl`
   [e53f1632] EarthSciMLBase v0.23.0
   [4e289a0a] EnumX v1.0.5
   [f151be2c] EnzymeCore v0.8.11
@@ -155,7 +155,7 @@ Environment:
   [ae98c720] Jieko v0.2.1
   [98e50ef6] JuliaFormatter v2.1.2
 ⌅ [70703baa] JuliaSyntax v0.4.10
-  [ccbc3e58] JumpProcesses v9.15.0
+  [ccbc3e58] JumpProcesses v9.16.0
   [ba0b0d4f] Krylov v0.10.1
   [8ac3fa9e] LRUCache v1.6.2
   [b964fa9f] LaTeXStrings v1.4.0
@@ -201,10 +201,10 @@ Environment:
   [bac558e1] OrderedCollections v1.8.1
   [1dea7af3] OrdinaryDiffEq v6.98.0
   [89bda076] OrdinaryDiffEqAdamsBashforthMoulton v1.2.0
-  [6ad6398a] OrdinaryDiffEqBDF v1.5.1
+  [6ad6398a] OrdinaryDiffEqBDF v1.6.0
   [bbf590c4] OrdinaryDiffEqCore v1.26.0
   [50262376] OrdinaryDiffEqDefault v1.4.0
-  [4302a76b] OrdinaryDiffEqDifferentiation v1.9.1
+  [4302a76b] OrdinaryDiffEqDifferentiation v1.10.0
   [9286f039] OrdinaryDiffEqExplicitRK v1.1.0
   [e0540318] OrdinaryDiffEqExponentialRK v1.4.0
   [becaefa8] OrdinaryDiffEqExtrapolation v1.5.0
@@ -222,7 +222,7 @@ Environment:
   [5b33eab2] OrdinaryDiffEqPRK v1.1.0
   [04162be5] OrdinaryDiffEqQPRK v1.1.0
   [af6ede74] OrdinaryDiffEqRKN v1.1.0
-  [43230ef6] OrdinaryDiffEqRosenbrock v1.10.1
+  [43230ef6] OrdinaryDiffEqRosenbrock v1.11.0
   [2d112036] OrdinaryDiffEqSDIRK v1.3.0
   [669c94d9] OrdinaryDiffEqSSPRK v1.3.0
   [e3e12d00] OrdinaryDiffEqStabilizedIRK v1.3.0
@@ -472,5 +472,5 @@ Environment:
   [8e850ede] nghttp2_jll v1.59.0+0
   [3f19e933] p7zip_jll v17.4.0+2
 Info Packages marked with ⌅ have new versions available but compatibility constraints restrict them from upgrading. To see why use `status --outdated -m`</code></pre></details>You can also download the 
-<a href="<p>https://github.com/EarthSciML/EarthSciData.jl/tree/gh-pages/v0.13.0/assets/Manifest.toml</p>">manifest</a> file and the
-<a href="<p>https://github.com/EarthSciML/EarthSciData.jl/tree/gh-pages/v0.13.0/assets/Project.toml</p>">project</a> file.</article><nav class="docs-footer"><a class="docs-footer-nextpage" href="geosfp/">GEOS-FP »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.11.4 on <span class="colophon-date" title="Friday 6 June 2025 10:58">Friday 6 June 2025</span>. Using Julia version 1.11.5.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+<a href="<p>https://github.com/EarthSciML/EarthSciData.jl/tree/gh-pages/v0.13.1/assets/Manifest.toml</p>">manifest</a> file and the
+<a href="<p>https://github.com/EarthSciML/EarthSciData.jl/tree/gh-pages/v0.13.1/assets/Project.toml</p>">project</a> file.</article><nav class="docs-footer"><a class="docs-footer-nextpage" href="geosfp/">GEOS-FP »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.12.0 on <span class="colophon-date" title="Saturday 7 June 2025 12:45">Saturday 7 June 2025</span>. Using Julia version 1.11.5.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
