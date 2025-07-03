@@ -48,7 +48,7 @@ mutable struct NetCDFOutputter
             [],
             nothing,
             dtype,
-            0.0,
+            0.0
         )
     end
 end
