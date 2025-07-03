@@ -205,7 +205,7 @@ mutable struct DataSetInterpolator{To, N, N2, FT, ITPT, DomT}
         itp2 = create_interpolator!(
             interp_cache,
             data,
-            repeat([0:0.1:0.1], length(metadata.varsize)),
+            repeat([To(0):To(0.1):To(0.1)], length(metadata.varsize)),
             times
         )
         ITPT = typeof(itp2)
@@ -282,20 +282,20 @@ The `reltol` parameter specifies the relative tolerance for the grid spacing,
 which is necessary to account for different numbers of days in each month
 and things like that.
 """
-function knots2range(knots, reltol = 0.05)
+function knots2range(knots; reltol = 0.05, dtype=eltype(knots))
     dx = diff(knots)
     dx_mean = sum(dx) / length(dx)
     @assert all(abs.(1 .- dx ./ dx_mean) .<= reltol) "Knots ($knots) must be evenly spaced within reltol=$reltol."
     dx = (knots[end] - knots[begin]) / (length(knots) - 1)
     # Need to do weird range creation to avoid rounding errors.
-    return knots[begin]:dx:(knots[begin] + dx * (length(knots) - 1))
+    return range(dtype(knots[begin]), step=dtype(dx), length=length(knots))
 end
 
 """
 Create a new interpolator, overwriting `interp_cache`.
 """
 function create_interpolator!(interp_cache, data, coords, times)
-    grid = tuple(coords..., knots2range(datetime2unix.(times)))
+    grid = tuple(coords..., knots2range(datetime2unix.(times); dtype=eltype(data)))
     copyto!(interp_cache, data)
     itp = interpolate!(interp_cache, BSpline(Linear()))
     itp = scale(itp, grid)

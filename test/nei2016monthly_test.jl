@@ -68,7 +68,7 @@ end
 end
 
 @testset "run" begin
-    @constants uc = 1.0 [unit = u"s" description = "unit conversion"]
+    @constants uc=1.0 [unit = u"s" description = "unit conversion"]
     eq = Differential(t)(emis.ACET) ~ equations(emis)[1].rhs * 1e10 / uc
     sys = extend(ODESystem([eq], t, [], []; name = :test_sys), emis)
     sys = structural_simplify(sys)
@@ -82,13 +82,37 @@ end
     @test 2 > sol.u[end][end] > 1
 end
 
+@testset "float32" begin
+    domain = DomainInfo(
+        DateTime(2016, 5, 1),
+        DateTime(2016, 5, 2);
+        latrange = deg2rad(-85.0f0):deg2rad(2):deg2rad(85.0f0),
+        lonrange = deg2rad(-180.0f0):deg2rad(2.5):deg2rad(175.0f0),
+        levrange = 1:10,
+        u_proto = zeros(Float32, 1, 1, 1, 1)
+    )
+    emis = NEI2016MonthlyEmis("mrggrid_withbeis_withrwc", domain)
+    @constants uc=1.0 [unit = u"s" description = "unit conversion"]
+    eq = Differential(t)(emis.ACET) ~ equations(emis)[1].rhs * 1e10 / uc
+    sys = extend(ODESystem([eq], t, [], []; name = :test_sys), emis)
+    sys = structural_simplify(sys)
+    prob = ODEProblem{false}(
+        sys,
+        [0.0f0],
+        get_tspan(domain),
+        []
+    )
+    o = prob.f(prob.u0, prob.p, prob.tspan[1])
+    @test_broken eltype(o) == Float32
+end
+
 if !Sys.iswindows() # Allocation tests don't seem to work on windows.
     @testset "allocations" begin
         @check_allocs checkf(
-            itp, t, loc1, loc2) = EarthSciData.interp_unsafe(itp, t, loc1, loc2)
+        itp, t, loc1, loc2) = EarthSciData.interp_unsafe(itp, t, loc1, loc2)
 
         sample_time = DateTime(2016, 5, 1)
-        itp = EarthSciData.DataSetInterpolator{Float32}(fileset, "NOX", ts, te, domain)
+        itp = EarthSciData.DataSetInterpolator{eltype(domain)}(fileset, "NOX", ts, te, domain)
         interp!(itp, sample_time, deg2rad(-97.0f0), deg2rad(40.0f0))
         # If there is an error, it should occur in the proj library.
         # https://github.com/JuliaGeo/Proj.jl/issues/104
@@ -100,7 +124,7 @@ if !Sys.iswindows() # Allocation tests don't seem to work on windows.
             contains(string(s), "libproj.proj_trans")
         end
 
-        itp2 = EarthSciData.DataSetInterpolator{Float64}(fileset, "NOX", ts, te, domain)
+        itp2 = EarthSciData.DataSetInterpolator{eltype(domain)}(fileset, "NOX", ts, te, domain)
         interp!(itp2, sample_time, deg2rad(-97.0), deg2rad(40.0))
         try # If there is an error, it should occur in the proj library.
             checkf(itp2, sample_time, deg2rad(-97.0), deg2rad(40.0))
@@ -124,7 +148,7 @@ end
 
 @testset "wrong year" begin
     sample_time = DateTime(2016, 5, 1)
-    itp = EarthSciData.DataSetInterpolator{Float32}(fileset, "NOX", ts, te, domain)
+    itp = EarthSciData.DataSetInterpolator{eltype(domain)}(fileset, "NOX", ts, te, domain)
     sample_time = DateTime(2017, 5, 1)
     @test_throws ArgumentError EarthSciData.lazyload!(itp, sample_time)
 end
