@@ -19,14 +19,11 @@ eqs = [D(u) ~ p + 1e-20*lev*p*x*y/c # Need to make sure all coordinates are incl
 sys = ODESystem(eqs, t; name = :sys)
 
 domain = DomainInfo(
-    constIC(0.0, t ∈ Interval(0.0, 2.0)),
-    constBC(
-        16.0,
-        x ∈ Interval(-1.0, 1.0),
-        y ∈ Interval(-2.0, 2.0),
-        lev ∈ Interval(1.0, 3.0)
-    ),
-    grid_spacing = [0.1, 0.1, 1]
+    DateTime(2000, 1, 1, 0, 0, 0),
+    DateTime(2000, 1, 1, 0, 0, 2);
+    xrange = -1:0.1:1,
+    yrange = -2:0.1:2,
+    levrange = 1:3
 )
 
 file = tempname() * ".nc"
@@ -55,16 +52,16 @@ ds = NCDataset(file, "r")
 @test size(ds["sys₊u"]) == (21, 41, 3, 3)
 
 @test ds["time"][:] == [
-    DateTime("1970-01-01T00:00:00"),
-    DateTime("1970-01-01T00:00:01"),
-    DateTime("1970-01-01T00:00:02")
+    DateTime("2000-01-01T00:00:00"),
+    DateTime("2000-01-01T00:00:01"),
+    DateTime("2000-01-01T00:00:02")
 ]
 @test ds["x"][:] ≈ -1.0:0.1:1.0
 @test ds["y"][:] ≈ -2.0:0.1:2.0
 @test ds["lev"] ≈ 1:3
 
-@test ds["x"].attrib["description"] == "x coordinate"
-@test ds["x"].attrib["units"] == "kg"
+@test ds["x"].attrib["description"] == "East-West Distance"
+@test ds["x"].attrib["units"] == "m"
 
 @test ds["sys₊u"].attrib["description"] == "u value"
 @test ds["sys₊u"].attrib["units"] == "kg"

@@ -28,6 +28,8 @@ mutable struct NetCDFOutputter
     grid::Any
     "Data type of the output"
     dtype::Any
+    "Reference time for the simulation, used to convert to Unix time"
+    tref::Any
 
     function NetCDFOutputter(
             filepath::AbstractString,
@@ -45,7 +47,8 @@ mutable struct NetCDFOutputter
             extra_vars,
             [],
             nothing,
-            dtype
+            dtype,
+            0.0,
         )
     end
 end
@@ -102,6 +105,7 @@ function EarthSciMLBase.init_callback(
         nc.vars = ncvars
         nc.tvar = nctvar
         nc.grid = grid
+        nc.tref = get_tref(dom)
     end
     nc.h = 1
     start, finish = get_tspan(dom)
@@ -156,7 +160,7 @@ function affect!(nc::NetCDFOutputter, integrator)
                 v[:, :, :, nc.h] = tmp
             end
         end
-        nc.tvar[nc.h] = integrator.t
+        nc.tvar[nc.h] = integrator.t + nc.tref
     end
     nc.h += 1
     return false
