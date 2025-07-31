@@ -681,29 +681,33 @@ function create_updater_sys_event(name, params, starttime::DateTime)
     function sys_event(sys::ModelingToolkit.AbstractSystem)
         needed = needed_vars(sys)
         dflts = ModelingToolkit.get_defaults(sys)
+        psyms = []
         params_to_update = []
         for p in parameters(sys)
             psym = EarthSciMLBase.var2symbol(p)
             if (psym in pnames) && (psym in needed) && (dflts[p] isa ITPWrapper)
+                push!(psyms, psym)
                 push!(params_to_update, p)
             end
         end
+        params_to_update = NamedTuple{Tuple(psyms)}(params_to_update)
         all_tstops = []
         for p_itp in params_to_update
             itp = dflts[p_itp].itp
             push!(all_tstops, get_tstops(itp, starttime)...)
         end
         all_tstops = unique(all_tstops) .- t_ref
-        function update_itps!(integ, u, p, ctx)
-            for p_itp in p
-                itp = integ.ps[p_itp].itp
-                lazyload!(itp, integ.t + t_ref)
+        function update_itps!(modified, observed, ctx, integ)
+            function loadf(p_itp)
+                p_itp.itp = lazyload!(p_itp.itp, integ.t + t_ref)
+                return p_itp
             end
+            NamedTuple((k => loadf(v) for (k, v) in pairs(modified)))
         end
         if length(params_to_update) == 0
             return nothing
         end
-        all_tstops => (update_itps!, [], params_to_update, [], nothing)
+        all_tstops => (update_itps!, params_to_update, NamedTuple())
     end
 end
 
