@@ -1,7 +1,7 @@
 name = "EarthSciData"
 uuid = "a293c155-435f-439d-9c11-a083b6b47337"
 authors = ["EarthSciML Authors"]
-version = "0.13.2"
+version = "0.14.0"
 
 [deps]
 DataInterpolations = "82cc6244-b520-54b8-b5a6-8a565e85f1d0"
@@ -29,11 +29,11 @@ DocStringExtensions = "0.9.3"
 DomainSets = "0.7.15"
 Downloads = "1"
 DynamicQuantities = "1"
-EarthSciMLBase = "0.23"
+EarthSciMLBase = "0.24"
 Interpolations = "0.16"
 LaTeXStrings = "1.3"
 Latexify = "0.16.7"
-ModelingToolkit = "=9.79.1"
+ModelingToolkit = "10.10"
 NCDatasets = "0.14"
 OrdinaryDiffEqLowOrderRK = "1.2"
 OrdinaryDiffEqSDIRK = "1.3"
@@ -42,7 +42,9 @@ ProgressMeter = "1"
 Proj = "1.8"
 SciMLBase = "2.90"
 Scratch = "1"
+SymbolicIndexingInterface = "0.3.41"
 Symbolics = "6.37.1"
+TestItemRunner = "1.1.0"
 julia = "1.10"
 
 [extras]
@@ -54,8 +56,9 @@ OrdinaryDiffEqLowOrderRK = "1344f307-1e59-4825-a18e-ace9aa3fa4c6"
 OrdinaryDiffEqSDIRK = "2d112036-d095-4a1e-ab9a-08536f3ecdbf"
 OrdinaryDiffEqTsit5 = "b1df2697-797e-41e3-8120-5422d3b24e4a"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
-SafeTestsets = "1bc83da4-3b8d-516f-aca4-4fe02f6d838f"
+SymbolicIndexingInterface = "2efcf032-c050-4f8e-a9bb-153293bab1f5"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+TestItemRunner = "f8b46487-2199-4994-9208-9a1283c18c0a"
 
 [targets]
-test = ["Test", "SafeTestsets", "DomainSets", "LaTeXStrings", "OrdinaryDiffEqLowOrderRK", "OrdinaryDiffEqSDIRK", "OrdinaryDiffEqTsit5", "Random", "AllocCheck"]
+test = ["Test", "TestItemRunner", "DomainSets", "LaTeXStrings", "OrdinaryDiffEqLowOrderRK", "OrdinaryDiffEqSDIRK", "OrdinaryDiffEqTsit5", "Random", "AllocCheck", "SymbolicIndexingInterface"]

@@ -229,6 +229,7 @@ function WRF(domaininfo::DomainInfo; name = :WRF, stream = true)
         lat_trans = δyδlat ~ lat2meters
         push!(eqs, lon_trans, lat_trans)
         push!(vars, δxδlon, δyδlat)
+        push!(params, lon2m, lat2meters)
     end
 
     # Layer height
@@ -239,6 +240,7 @@ function WRF(domaininfo::DomainInfo; name = :WRF, stream = true)
     z_expr = (PH + PHB) / g
     push!(eqs, z ~ z_expr)
     push!(vars, z)
+    push!(params, g)
 
     # Height per level
     @variables δzδlev(t) [
@@ -249,16 +251,16 @@ function WRF(domaininfo::DomainInfo; name = :WRF, stream = true)
     phb = z_params["PHB"]
     phc = z_params["PH_coords"]
     phbc = z_params["PHB_coords"]
-    Δph = ph(t, phc[1], phc[2], phc[3] + 1) - ph(t, phc...)
-    Δphb = phb(t, phbc[1], phbc[2], phbc[3] + 1) - phb(t, phbc...)
+    Δph = ph(t + t_ref, phc[1], phc[2], phc[3] + 1) - ph(t + t_ref, phc...)
+    Δphb = phb(t + t_ref, phbc[1], phbc[2], phbc[3] + 1) - phb(t + t_ref, phbc...)
     lev_trans = δzδlev ~ (Δph + Δphb) / g
     push!(eqs, lev_trans)
     push!(vars, δzδlev)
 
     sys = ODESystem(eqs, t, vars, [pvdict[xdim], pvdict[ydim], pvdict[:lev], params...];
         name = name,
-        metadata = Dict(:coupletype => WRFCoupler,
-            :sys_discrete_event => create_updater_sys_event(name, params, starttime))
+        metadata = Dict(CoupleType => WRFCoupler,
+            SysDiscreteEvent => create_updater_sys_event(name, params, starttime))
     )
     return sys
 end
