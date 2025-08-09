@@ -474,7 +474,7 @@ function update!(itp::DataSetInterpolator, t::DateTime)
 end
 
 function interpolate_from!(dsi::DataSetInterpolator, dst::AbstractArray{T, N},
-        src::AbstractArray{T, N}, model_grid, extrapolate_type = Flat()) where {T, N}
+        src::AbstractArray{T, N}, model_grid, extrapolate_type = 0.0) where {T, N}
     data_grid = Tuple(knots2range.(dsi.metadata.coords))
     dsi.metadata.xdim, dsi.metadata.ydim
     itp = interpolate!(src, BSpline(Linear()))
