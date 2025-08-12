@@ -1,14 +1,3 @@
-using EarthSciData
-using EarthSciMLBase
-using Dates
-using ModelingToolkit
-using Random
-using Latexify, LaTeXStrings
-using AllocCheck
-using DynamicQuantities
-using Interpolations
-using Test
-
 @testsnippet LoadSetup begin
     using EarthSciMLBase
     using Dates
