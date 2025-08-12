@@ -164,20 +164,13 @@ mutable struct DataSetInterpolator{To, N, N2, FT, ITPT, DomT}
     times::Vector{DateTime}
     currenttime::DateTime
     coord_trans::FT
-    loadrequest::Channel{DateTime}
-    loadresult::Channel
-    copyfinish::Channel{Int}
+    loadtask::Task
     lock::ReentrantLock
     initialized::Bool
 
-    function DataSetInterpolator{To}(
-            fs::FileSet,
-            varname::AbstractString,
-            starttime::DateTime,
-            endtime::DateTime,
-            domain::DomainInfo;
-            stream = true
-    ) where {To <: Real}
+    function DataSetInterpolator{To}(fs::FileSet, varname::AbstractString,
+            starttime::DateTime, endtime::DateTime, domain::DomainInfo;
+            stream = true) where {To <: Real}
         metadata = loadmetadata(fs, varname)
 
         # Check how many time indices we will need.
@@ -222,6 +215,7 @@ mutable struct DataSetInterpolator{To, N, N2, FT, ITPT, DomT}
         end
         FT = typeof(coord_trans)
 
+        td = Threads.@spawn (()-> DateTime(0, 1, 10))() # Placeholder for async loading task.
         itp = new{To, N, N2, FT, ITPT, typeof(domain)}(
             fs,
             varname,
@@ -234,9 +228,7 @@ mutable struct DataSetInterpolator{To, N, N2, FT, ITPT, DomT}
             times,
             DateTime(1, 1, 1),
             coord_trans,
-            Channel{DateTime}(0),
-            Channel(1),
-            Channel{Int}(0),
+            td,
             ReentrantLock(),
             false
         )
@@ -360,35 +352,6 @@ function get_tstops(itp::DataSetInterpolator, starttime::DateTime)
     datetime2unix.(sort([starttime, dfi.centerpoints...]))
 end
 
-"""
-Asynchronously load data, anticipating which time will be requested next.
-"""
-function async_loader(itp::DataSetInterpolator)
-    tt = DateTime(0, 1, 10)
-    for t in itp.loadrequest
-        if t != tt
-            try
-                loadslice!(itp.load_cache, itp.fs, t, itp.varname)
-                tt = t
-            catch err
-                @error err
-                put!(itp.loadresult, err)
-                rethrow(err)
-            end
-        end
-        put!(itp.loadresult, 0) # Let the requestor know that we've finished.
-        take!(itp.copyfinish)
-        # Anticipate what the next request is going to be for and load that data.
-        try
-            tt = nexttimepoint(itp, tt)
-            loadslice!(itp.load_cache, itp.fs, tt, itp.varname)
-        catch err
-            @error err
-            rethrow(err)
-        end
-    end
-end
-
 # Get the model grid for this interpolator.
 function _model_grid(itp::DataSetInterpolator)
     grid = EarthSciMLBase.grid(itp.domain, itp.metadata.staggering)
@@ -412,18 +375,16 @@ function initialize!(itp::DataSetInterpolator, t::DateTime)
     itp.load_cache = zeros(eltype(itp.load_cache), itp.metadata.varsize...)
     grid_size = length.(_model_grid(itp))
     itp.data = zeros(eltype(itp.data), grid_size..., size(itp.data, length(size(itp.data)))) # Add a dimension for time.
-    Threads.@spawn async_loader(itp)
     itp.initialized = true
+end
+
+function load_data_for_time!(itp::DataSetInterpolator, t::DateTime)
+    loadslice!(itp.load_cache, itp.fs, t, itp.varname)
+    return t
 end
 
 function update!(itp::DataSetInterpolator, t::DateTime)
     @assert itp.initialized "Interpolator has not been initialized"
-    if isready(itp.loadresult)
-        # If a previous simulation ended in an error, there might be an extra
-        # result in the channel, so we dispose of it here if that is case.
-        take!(itp.loadresult)
-        put!(itp.copyfinish, 0)
-    end
     times = interp_cache_times!(itp, t) # Figure out which times we need.
 
     # Figure out the overlap between the times we have and the times we need.
@@ -455,13 +416,12 @@ function update!(itp::DataSetInterpolator, t::DateTime)
     # Load the additional times we need
     for idx in idxs_not_in_times
         d = selectdim(itp.data, N, idx)
-        put!(itp.loadrequest, times[idx]) # Request next data
-        r = take!(itp.loadresult) # Wait for results
-        if r != 0
-            throw(r)
+        if fetch(itp.loadtask) != times[idx] # Check if correct time is already loaded.
+            load_data_for_time!(itp, times[idx]) # Load data if not already loaded.
         end
         interpolate_from!(itp, d, itp.load_cache, model_grid) # Copy results to correct location
-        put!(itp.copyfinish, 0) # Let the loader know we've finished copying
+        # Start loading the next time point asynchronously.
+        itp.loadtask = Threads.@spawn load_data_for_time!(itp, nexttimepoint(itp, times[idx]))
     end
     itp.times = times
     itp.currenttime = t
@@ -679,7 +639,7 @@ function create_updater_sys_event(name, params, starttime::DateTime)
         dflts = ModelingToolkit.get_defaults(sys)
         psyms = []
         params_to_update = []
-        for p in parameters(sys)
+        for p in parameters(sys) # Figure out which parameters need to be updated.
             psym = EarthSciMLBase.var2symbol(p)
             if (psym in pnames) && (psym in needed) && (dflts[p] isa ITPWrapper)
                 push!(psyms, psym)
@@ -696,6 +656,9 @@ function create_updater_sys_event(name, params, starttime::DateTime)
         function update_itps!(modified, observed, ctx, integ)
             function loadf(p_itp)
                 p_itp.itp = lazyload!(p_itp.itp, integ.t + t_ref)
+                if integ.t == all_tstops[end] # Shut down async loader at last timem stop.
+                    close(p_itp.itp.loadrequest)
+                end
                 return p_itp
             end
             NamedTuple((k => loadf(v) for (k, v) in pairs(modified)))
