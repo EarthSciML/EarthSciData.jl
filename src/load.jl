@@ -1,11 +1,7 @@
 export interp!
 
-download_cache = ("EARTHSCIDATADIR" ∈ keys(ENV)) ? ENV["EARTHSCIDATADIR"] :
+download_cache() = ("EARTHSCIDATADIR" ∈ keys(ENV)) ? ENV["EARTHSCIDATADIR"] :
                  @get_scratch!("earthsci_data")
-function __init__()
-    global download_cache = ("EARTHSCIDATADIR" ∈ keys(ENV)) ? ENV["EARTHSCIDATADIR"] :
-                            @get_scratch!("earthsci_data")
-end
 
 """
 An interface for types describing a dataset, potentially comprised of multiple files.
@@ -37,7 +33,7 @@ Return the local path for the file for the given `DateTime`.
 function localpath(fs::FileSet, t::DateTime)
     file = relpath(fs, t)
     file = replace(file, ':' => '_')
-    joinpath(download_cache, replace(fs.mirror, "://" => "_"), file)
+    joinpath(download_cache(), replace(fs.mirror, "://" => "_"), file)
 end
 
 """
