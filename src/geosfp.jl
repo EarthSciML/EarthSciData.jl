@@ -512,6 +512,13 @@ function GEOSFP(
     push!(eqs, lon_trans, lat_trans, lev_trans)
     push!(vars, δxδlon, δyδlat, δPδlev)
 
+    @variables P_unit_sym(t) [unit = u"Pa"]
+    @variables Rd_sym(t)     [unit = u"J/(kg*K)"]
+    @variables g_sym(t)      [unit = u"m/s^2"]
+
+    push!(eqs, P_unit_sym ~ P_unit, Rd_sym ~ Rd, g_sym ~ g)
+    push!(vars, P_unit_sym, Rd_sym, g_sym)
+
     sys = ODESystem(
         eqs,
         t,
