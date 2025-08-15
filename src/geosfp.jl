@@ -473,10 +473,10 @@ function GEOSFP(
     QV2M = getvar(:A1₊QV2M)
     PS   = i3ps
 
-    @variables Tv(t) [unit = u"K", description = "Virtual T"]
-    @variables Tv_sfc(t) [unit = u"K", description = "Virtual T at 2 m"]
-    @variables Tv̄(t)    [unit = u"K", description = "Layer-mean virtual T"]
-    @variables Z_agl(t)  [unit = u"m", description = "Geopotential height AGL"]
+    @variables Tv(t)     [unit = u"K", description = "Virtual temperature"]
+    @variables Tv_sfc(t) [unit = u"K", description = "Virtual temperature at 2 m (near-surface)"]
+    @variables Tv̄(t)     [unit = u"K", description = "Layer-mean virtual temperature"]
+    @variables Z_agl(t)  [unit = u"m", description = "Geopotential height above ground level"]
 
     eq_Tv = Tv ~ T  * (1 + 0.61 * QV)
     eq_Tv_sfc = Tv_sfc ~ T2M  * (1 + 0.61 * QV2M)
@@ -512,12 +512,12 @@ function GEOSFP(
     push!(eqs, lon_trans, lat_trans, lev_trans)
     push!(vars, δxδlon, δyδlat, δPδlev)
 
-    @variables P_unit_sym(t) [unit = u"Pa"]
-    @variables Rd_sym(t)     [unit = u"J/(kg*K)"]
-    @variables g_sym(t)      [unit = u"m/s^2"]
+    @variables P_unit_v(t) [unit = u"Pa",       description = "Unit pressure"]
+    @variables Rd_v(t)     [unit = u"J/(kg*K)", description = "Dry-air gas constant"]
+    @variables g_v(t)      [unit = u"m/s^2",    description = "Gravitational acceleration"]
 
-    push!(eqs, P_unit_sym ~ P_unit, Rd_sym ~ Rd, g_sym ~ g)
-    push!(vars, P_unit_sym, Rd_sym, g_sym)
+    push!(eqs, P_unit_v ~ P_unit, Rd_v ~ Rd, g_v ~ g)
+    push!(vars, P_unit_v, Rd_v, g_v)
 
     sys = ODESystem(
         eqs,
