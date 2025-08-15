@@ -84,11 +84,11 @@ end
 end
 
 @testitem "DummyFileSet" begin
-    using EarthSciMLBase:DomainInfo
-    using Dates:datetime2unix,DateTime,Second,Hour
-    using Interpolations:scale,interpolate,BSpline,Linear
-    using Random:randperm
-    using DynamicQuantities:@u_str
+    using EarthSciMLBase: DomainInfo
+    using Dates: datetime2unix, DateTime, Second, Hour
+    using Interpolations: scale, interpolate, BSpline, Linear
+    using Random: randperm
+    using DynamicQuantities: @u_str
 
     domain = DomainInfo(
         DateTime(2022, 5, 1),
@@ -231,7 +231,7 @@ if !Sys.iswindows() # Allocation tests don't seem to work on windows.
 
         @test begin
             @check_allocs checkf(itp, t, loc1, loc2,
-            loc3) = EarthSciData.interp_unsafe(itp, t, loc1, loc2, loc3)
+                loc3) = EarthSciData.interp_unsafe(itp, t, loc1, loc2, loc3)
 
             try
                 checkf(itp, tt, 1.0, 0.0, 1.0)

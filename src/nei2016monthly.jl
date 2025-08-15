@@ -202,8 +202,8 @@ function NEI2016MonthlyEmis(
         ze_name = Symbol(:zero_, varname)
         zero_emis = only(@constants $(ze_name)=0 [unit = units(itp) / u"m"])
         zero_emis = ModelingToolkit.unwrap(zero_emis) # Unsure why this is necessary.
-        eq, param = create_interp_equation(itp, "", t, t_ref, [x, y];
-            wrapper_f = (eq) -> ifelse(lev < 2, eq / Δz * scale, zero_emis))
+        wrapper_f = (eq) -> ifelse(lev < 2, eq / Δz * scale, zero_emis)
+        eq, param = create_interp_equation(itp, "", t, t_ref, [x, y]; wrapper_f = wrapper_f)
         push!(eqs, eq)
         push!(params, param, zero_emis)
         push!(vars, eq.lhs)

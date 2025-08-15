@@ -1,7 +1,9 @@
 export interp!
 
-download_cache() = ("EARTHSCIDATADIR" ∈ keys(ENV)) ? ENV["EARTHSCIDATADIR"] :
-                 @get_scratch!("earthsci_data")
+function download_cache()
+    ("EARTHSCIDATADIR" ∈ keys(ENV)) ? ENV["EARTHSCIDATADIR"] :
+    @get_scratch!("earthsci_data")
+end
 
 """
 An interface for types describing a dataset, potentially comprised of multiple files.
@@ -215,7 +217,7 @@ mutable struct DataSetInterpolator{To, N, N2, FT, ITPT, DomT}
         end
         FT = typeof(coord_trans)
 
-        td = Threads.@spawn (()-> DateTime(0, 1, 10))() # Placeholder for async loading task.
+        td = Threads.@spawn (() -> DateTime(0, 1, 10))() # Placeholder for async loading task.
         itp = new{To, N, N2, FT, ITPT, typeof(domain)}(
             fs,
             varname,
