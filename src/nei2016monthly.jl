@@ -1,5 +1,50 @@
 export NEI2016MonthlyEmis
 
+# Diurnal scale factors for 24 hours (0-23) for UTC-0
+const DIURNAL_FACTORS = [0.45, 0.45, 0.6, 0.6, 0.6, 0.6, 1.45, 1.45, 1.45, 1.45, 1.4, 1.4, 1.4, 1.4, 1.45, 1.45, 1.45, 1.45, 0.65, 0.65, 0.65, 0.65, 0.45, 0.45]
+const DIURNAL_FACTORS_NOx = [1.2610824, 1.3393387, 1.3418489, 1.4296081, 1.7191144, 1.7507603, 1.3706605, 1.065197, 0.83945173, 0.75243336, 0.7179656, 0.55832773, 0.37098354, 0.28982916, 0.27095, 0.26433897, 0.30015817, 0.40872693, 0.90136874, 1.6141223, 1.6525217, 1.3552701, 1.2307608, 1.195181]
+
+"""
+$(SIGNATURES)
+
+Diurnal interpolation function that returns the scale factor for a given time.
+Returns different emission scaling factors based on the hour of day.
+"""
+function diurnal_itp(t, lon)
+    ut = Dates.unix2datetime(t)
+    
+    # Convert radians to degrees for timezone calculation
+    lon_deg = rad2deg(lon)
+    dt = floor(lon_deg / 15) # in hours (timezone offset)
+    t_local = t + dt * 3600 # in seconds
+    ut_local = Dates.unix2datetime(t_local)
+    hour_of_day = Dates.hour(ut_local) + 1  # +1 for 1-based indexing
+    
+    return DIURNAL_FACTORS[hour_of_day]
+end
+
+function diurnal_itp_NOx(t, lon)
+    ut = Dates.unix2datetime(t)
+    
+    # Convert radians to degrees for timezone calculation
+    lon_deg = rad2deg(lon)
+    dt = floor(lon_deg / 15) # in hours (timezone offset)
+    t_local = t + dt * 3600 # in seconds
+    ut_local = Dates.unix2datetime(t_local)
+    hour_of_day = Dates.hour(ut_local) + 1  # +1 for 1-based indexing
+    
+    return DIURNAL_FACTORS_NOx[hour_of_day]
+end
+
+# Register the symbolic function
+@register_symbolic diurnal_itp(t, lon)
+@register_symbolic diurnal_itp_NOx(t, lon)
+
+# Dummy function for unit validation. ModelingToolkit will call this function
+# with a DynamicQuantities.Quantity to get information about the type and units of the output.
+diurnal_itp(t::DynamicQuantities.Quantity, lon) = 1.0
+diurnal_itp_NOx(t::DynamicQuantities.Quantity, lon) = 1.0
+
 """
 $(SIGNATURES)
 
@@ -191,7 +236,7 @@ function NEI2016MonthlyEmis(
     lev = pvdict[:lev]
     @parameters(Δz=60.0,
         [unit = u"m", description = "Height of the first vertical grid layer"],)
-    @parameters t_ref=get_tref(domaininfo) [unit = u"s", description = "Reference time"]
+    @parameters t_ref = get_tref(domaininfo) [unit = u"s", description = "Reference time"]
     eqs = Equation[]
     params = Any[t_ref]
     vars = Num[]
@@ -201,9 +246,18 @@ function NEI2016MonthlyEmis(
             stream = stream)
         @constants zero_emis=0 [unit = units(itp) / u"m"]
         zero_emis = ModelingToolkit.unwrap(zero_emis) # Unsure why this is necessary.
+        # Apply diurnal scaling only to certain chemical species
+        if varname in ["CO", "FORM", "ISOP"]
+            wrapper_f = (eq) -> ifelse(lev < 2, eq / Δz * scale * diurnal_itp(t + t_ref, x), zero_emis)
+        elseif varname in ["NO2", "NO"]
+            wrapper_f = (eq) -> ifelse(lev < 2, eq / Δz * scale * diurnal_itp_NOx(t + t_ref, x), zero_emis)
+        else
+            wrapper_f = (eq) -> ifelse(lev < 2, eq / Δz * scale, zero_emis)
+        end
+        
         eq,
         param = create_interp_equation(itp, "", t, t_ref, [x, y];
-            wrapper_f = (eq) -> ifelse(lev < 2, eq / Δz * scale, zero_emis))
+            wrapper_f = wrapper_f)
         push!(eqs, eq)
         push!(params, param)
         push!(vars, eq.lhs)

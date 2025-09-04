@@ -82,6 +82,42 @@ end
     @test 2 > sol.u[end][end] > 1
 end
 
+@testset "diurnal_itp function" begin
+    # Test domain starts at 2016-05-01 00:00:00 UTC
+    t_ref_numeric = datetime2unix(DateTime(2016, 5, 1))  # Domain starts at 2016-05-01 00:00:00
+    
+    # Test 1: UTC (0° longitude)
+    lon_utc = deg2rad(0.0)  # UTC timezone
+    
+    # 6 AM UTC
+    six_am_utc = t_ref_numeric + 6 * 3600.0  # 7th factor
+    @test EarthSciData.diurnal_itp(six_am_utc, lon_utc) == EarthSciData.DIURNAL_FACTORS[7]
+    
+    # 6 PM UTC
+    six_pm_utc = t_ref_numeric + 18 * 3600.0  # 19th factor
+    @test EarthSciData.diurnal_itp(six_pm_utc, lon_utc) == EarthSciData.DIURNAL_FACTORS[19]
+    
+    # Test 2: Chicago (UTC-6, longitude ~ -87.6°)
+    lon_chicago = deg2rad(-87.6)  # Chicago longitude
+    
+    # 6 AM Chicago = 12 PM UTC (6 hours later)
+    six_am_chicago = t_ref_numeric + 12 * 3600.0  # 6 AM Chicago = 12 PM UTC, 7th factor
+    @test EarthSciData.diurnal_itp(six_am_chicago, lon_chicago) == EarthSciData.DIURNAL_FACTORS[7]
+    
+    # 6 PM Chicago = 12 AM UTC next day (6 hours later)
+    six_pm_chicago = t_ref_numeric + 24 * 3600.0  # 6 PM Chicago = 12 AM UTC next day, 19th factor
+    @test EarthSciData.diurnal_itp(six_pm_chicago, lon_chicago) == EarthSciData.DIURNAL_FACTORS[19]
+    
+    # Test that the function wraps around 24 hours correctly
+    # 24 hours = 86400 seconds
+    next_midnight_utc = t_ref_numeric + 24 * 3600.0  # 24 hours since start
+    @test EarthSciData.diurnal_itp(next_midnight_utc, lon_utc) == EarthSciData.DIURNAL_FACTORS[1]
+    
+    # Test fractional hours
+    half_past_one_utc = t_ref_numeric + 1.5 * 3600.0  # 1.5 hours since start
+    @test EarthSciData.diurnal_itp(half_past_one_utc, lon_utc) == EarthSciData.DIURNAL_FACTORS[2]  # Should floor to hour 1
+end
+
 if !Sys.iswindows() # Allocation tests don't seem to work on windows.
     @testset "allocations" begin
         @check_allocs checkf(
