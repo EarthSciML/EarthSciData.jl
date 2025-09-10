@@ -249,11 +249,11 @@ function NEI2016MonthlyEmis(
         zero_emis = ModelingToolkit.unwrap(zero_emis) # Unsure why this is necessary.
         # Apply diurnal scaling only to certain chemical species
         if varname in ["CO", "FORM", "ISOP"]
-            wrapper_f = (eq) -> ifelse(lev < 2, eq / Δz * scale * diurnal_itp(t + t_ref, x), zero_emis)
+            wrapper_f = (eq) -> ifelse(lev < 3, eq / Δz * scale * diurnal_itp(t + t_ref, x) / 2, zero_emis)
         elseif varname in ["NO2", "NO"]
-            wrapper_f = (eq) -> ifelse(lev < 2, eq / Δz * scale * diurnal_itp_NOx(t + t_ref, x), zero_emis)
+            wrapper_f = (eq) -> ifelse(lev < 3, eq / Δz * scale * diurnal_itp_NOx(t + t_ref, x) / 2, zero_emis)
         else
-            wrapper_f = (eq) -> ifelse(lev < 2, eq / Δz * scale, zero_emis)
+            wrapper_f = (eq) -> ifelse(lev < 3, eq / Δz * scale /2, zero_emis)
         end
 
         eq,

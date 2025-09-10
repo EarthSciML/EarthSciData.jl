@@ -87,7 +87,7 @@ end
         (0.0, 60.0)
     )
     sol = solve(prob, Tsit5())
-    @test 2 > sol.u[end][end] > 1
+    @test 1 > sol.u[end][end] > 0.5
 end
 
 @testset "diurnal_itp function" begin
