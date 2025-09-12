@@ -512,13 +512,6 @@ function GEOSFP(
     push!(eqs, lon_trans, lat_trans, lev_trans)
     push!(vars, δxδlon, δyδlat, δPδlev)
 
-    @variables P_unit_v(t) [unit = u"Pa",       description = "Unit pressure"]
-    @variables Rd_v(t)     [unit = u"J/(kg*K)", description = "Dry-air gas constant"]
-    @variables g_v(t)      [unit = u"m/s^2",    description = "Gravitational acceleration"]
-
-    push!(eqs, P_unit_v ~ P_unit, Rd_v ~ Rd, g_v ~ g)
-    push!(vars, P_unit_v, Rd_v, g_v)
-
     sys = ODESystem(
         eqs,
         t,
