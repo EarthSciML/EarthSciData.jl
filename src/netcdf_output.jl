@@ -142,17 +142,9 @@ function affect!(nc::NetCDFOutputter, integrator)
                 for (i, c1) in enumerate(nc.grid[1])
                     for (j, c2) in enumerate(nc.grid[2])
                         for (k, c3) in enumerate(nc.grid[3])
-                            tmp[i,
-                                j,
-                                k] = only(
-                                f(
-                                view(u, :, i, j, k),
-                                integrator.p,
-                                integrator.t,
-                                c1,
-                                c2,
-                                c3
-                            ),
+                            tmp[i, j, k] = only(
+                                f(view(u, :, i, j, k), integrator.p, integrator.t,
+                                c1, c2, c3),
                             )
                         end
                     end

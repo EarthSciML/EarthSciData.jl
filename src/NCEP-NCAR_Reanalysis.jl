@@ -289,21 +289,22 @@ function NCEPNCARReanalysis(
         hgt = z_params["hgt"]
         hgtc = z_params["hgt_coords"]
 
-        Δhgt = hgt(t, hgtc[1], hgtc[2], hgtc[3] + 1) - hgt(t, hgtc...)
+        Δhgt = hgt(t + t_ref, hgtc[1], hgtc[2], hgtc[3] + 1) - hgt(t + t_ref, hgtc...)
 
         lev_trans = δzδlev ~ Δhgt
         push!(eqs, lev_trans)
         push!(vars, δzδlev)
     end
 
-    sys = ODESystem(
+    sys = System(
         eqs,
         t,
         vars,
-        [pvdict[xdim], pvdict[ydim], pvdict[:lev], params...];
+        [pvdict[xdim], pvdict[ydim], pvdict[:lev], lat2meters, lon2m, hPa2Pa, Rd, g,
+            params...];
         name = name,
-        metadata = Dict(:coupletype => NCEPNCARReanalysisCoupler,
-            :sys_discrete_event => create_updater_sys_event(name, params, starttime))
+        metadata = Dict(CoupleType => NCEPNCARReanalysisCoupler,
+            SysDiscreteEvent => create_updater_sys_event(name, params, starttime))
     )
     return sys
 end
