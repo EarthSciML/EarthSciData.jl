@@ -1,52 +1,48 @@
-using EarthSciData
-using EarthSciMLBase
-using Dates
-using ModelingToolkit
-using Random
-using Latexify, LaTeXStrings
-using AllocCheck
-using DynamicQuantities
-using Interpolations
-using Test
+@testsnippet LoadSetup begin
+    using EarthSciMLBase
+    using Dates
 
-t = DateTime(2022, 5, 1)
-te = DateTime(2022, 5, 3)
-fs = EarthSciData.GEOSFPFileSet("4x5", "A3dyn", t, te)
+    t = DateTime(2022, 5, 1)
+    te = DateTime(2022, 5, 3)
+    fs = EarthSciData.GEOSFPFileSet("4x5", "A3dyn", t, te)
 
-domain = DomainInfo(
-    t,
-    te;
-    lonrange = deg2rad(-175.0):deg2rad(2.5):deg2rad(175.0),
-    latrange = deg2rad(-85.0):deg2rad(2):deg2rad(85.0),
-    levrange = 1:10
-)
+    domain = DomainInfo(
+        t,
+        te;
+        lonrange = deg2rad(-175.0):deg2rad(2.5):deg2rad(175.0),
+        latrange = deg2rad(-85.0):deg2rad(2):deg2rad(85.0),
+        levrange = 1:10
+    )
+    itp = EarthSciData.DataSetInterpolator{Float32}(fs, "U", t, te, domain)
+end
 
-@test EarthSciData.url(fs, t) ==
-      "https://geos-chem.s3-us-west-2.amazonaws.com/GEOS_4x5/GEOS_FP/2022/05/GEOSFP.20220501.A3dyn.4x5.nc"
+@testitem "Load Basics" setup=[LoadSetup] begin
+    using Latexify: latexify
+    @test EarthSciData.url(fs, t) ==
+          "https://geos-chem.s3-us-west-2.amazonaws.com/GEOS_4x5/GEOS_FP/2022/05/GEOSFP.20220501.A3dyn.4x5.nc"
 
-@test endswith(
-    EarthSciData.localpath(fs, t),
-    join(["GEOS_4x5", "GEOS_FP", "2022", "05", "GEOSFP.20220501.A3dyn.4x5.nc"], "/")
-)
+    @test endswith(
+        EarthSciData.localpath(fs, t),
+        join(["GEOS_4x5", "GEOS_FP", "2022", "05", "GEOSFP.20220501.A3dyn.4x5.nc"], "/")
+    )
 
-ti = EarthSciData.DataFrequencyInfo(fs)
-epp = EarthSciData.endpoints(ti)
+    ti = EarthSciData.DataFrequencyInfo(fs)
+    epp = EarthSciData.endpoints(ti)
 
-@test epp[begin] == (DateTime("2022-04-30T00:00:00"), DateTime("2022-04-30T03:00:00"))
-@test epp[end] == (DateTime("2022-05-03T21:00:00"), DateTime("2022-05-04T00:00:00"))
+    @test epp[begin] == (DateTime("2022-04-30T00:00:00"), DateTime("2022-04-30T03:00:00"))
+    @test epp[end] == (DateTime("2022-05-03T21:00:00"), DateTime("2022-05-04T00:00:00"))
 
-metadata = EarthSciData.loadmetadata(fs, "U")
-@test metadata.varsize == [72, 46, 72]
-@test metadata.dimnames == ["lon", "lat", "lev"]
+    metadata = EarthSciData.loadmetadata(fs, "U")
+    @test metadata.varsize == [72, 46, 72]
+    @test metadata.dimnames == ["lon", "lat", "lev"]
 
-itp = EarthSciData.DataSetInterpolator{Float32}(fs, "U", t, te, domain)
+    @test String(latexify(itp)) == "\$GEOSFPFileSet.U\$"
 
-@test String(latexify(itp)) == "\$GEOSFPFileSet.U\$"
+    @test EarthSciData.dimnames(itp) == ["lon", "lat", "lev"]
+    @test issetequal(EarthSciData.varnames(fs), ["U", "OMEGA", "RH", "DTRAIN", "V"])
+end
 
-@test EarthSciData.dimnames(itp) == ["lon", "lat", "lev"]
-@test issetequal(EarthSciData.varnames(fs), ["U", "OMEGA", "RH", "DTRAIN", "V"])
-
-@testset "grid" begin
+@testitem "grid" setup=[LoadSetup] begin
     grd = EarthSciData._model_grid(itp)
     length.(grd) == (142, 86, 10)
     grd[1] ≈ deg2rad(-175.0 - 1.25):deg2rad(2.5):deg2rad(175.0 + 1.25)
@@ -54,14 +50,15 @@ itp = EarthSciData.DataSetInterpolator{Float32}(fs, "U", t, te, domain)
     grd[3] ≈ 1:1.0:10
 end
 
-@testset "interpolation" begin
+@testitem "interpolation" setup=[LoadSetup] begin
+    using Random: randperm
     uvals = []
     times = DateTime(2022, 5, 1):Hour(1):DateTime(2022, 5, 3)
     for t in times
         push!(uvals, interp!(itp, t, deg2rad(1.0f0), deg2rad(0.0f0), 1.0f0))
     end
     for i in 4:3:(length(uvals) - 1)
-        @test uvals[i] ≈ (uvals[i - 1] + uvals[i + 1]) / 2 atol = 1e-2
+        @test uvals[i]≈(uvals[i - 1] + uvals[i + 1]) / 2 atol=1e-2
     end
     want_uvals = [
         -0.07933916f0,
@@ -86,7 +83,21 @@ end
     @test uvals2 ≈ uvals[idx]
 end
 
-@testset "DummyFileSet" begin
+@testitem "DummyFileSet" begin
+    using EarthSciMLBase: DomainInfo
+    using Dates: datetime2unix, DateTime, Second, Hour
+    using Interpolations: scale, interpolate, BSpline, Linear
+    using Random: randperm
+    using DynamicQuantities: @u_str
+
+    domain = DomainInfo(
+        DateTime(2022, 5, 1),
+        DateTime(2022, 5, 3);
+        lonrange = deg2rad(-175.0):deg2rad(2.5):deg2rad(175.0),
+        latrange = deg2rad(-85.0):deg2rad(2):deg2rad(85.0),
+        levrange = 1:10
+    )
+
     struct DummyFileSet <: EarthSciData.FileSet
         start::DateTime
         finish::DateTime
@@ -96,7 +107,7 @@ end
             fs::DummyFileSet,
     )::EarthSciData.DataFrequencyInfo
         frequency = Second(3 * 3600)
-        centerpoints = collect((fs.start + frequency / 2):frequency:fs.finish)
+        centerpoints = collect((fs.start + frequency / 2):frequency:(fs.finish))
         EarthSciData.DataFrequencyInfo(fs.start, frequency, centerpoints)
     end
 
@@ -237,7 +248,7 @@ if !Sys.iswindows() # Allocation tests don't seem to work on windows.
     end
 end
 
-@testset "tuple_from_vals" begin
+@testitem "tuple_from_vals" begin
     @test EarthSciData.tuple_from_vals(1, 1, 2, 2, 3, 3) == (1, 2, 3)
     @test EarthSciData.tuple_from_vals(2, 2, 1, 1, 3, 3) == (1, 2, 3)
     @test EarthSciData.tuple_from_vals(3, 3, 2, 2, 1, 1) == (1, 2, 3)

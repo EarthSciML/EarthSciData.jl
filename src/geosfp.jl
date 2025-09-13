@@ -512,14 +512,14 @@ function GEOSFP(
     push!(eqs, lon_trans, lat_trans, lev_trans)
     push!(vars, δxδlon, δyδlat, δPδlev)
 
-    sys = ODESystem(
+    sys = System(
         eqs,
         t,
         vars,
-        [pvdict[:lon], pvdict[:lat], lev, params...];
+        [pvdict[:lon], pvdict[:lat], lev, P_unit, lat2meters, lon2m, params...];
         name = name,
-        metadata = Dict(:coupletype => GEOSFPCoupler,
-            :sys_discrete_event => create_updater_sys_event(name, params, starttime))
+        metadata = Dict(CoupleType => GEOSFPCoupler,
+            SysDiscreteEvent => create_updater_sys_event(name, params, starttime))
     )
     return sys
 end

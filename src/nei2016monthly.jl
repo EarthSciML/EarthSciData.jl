@@ -199,23 +199,23 @@ function NEI2016MonthlyEmis(
         dt = EarthSciMLBase.eltype(domaininfo)
         itp = DataSetInterpolator{dt}(fs, varname, starttime, endtime, domaininfo;
             stream = stream)
-        @constants zero_emis=0 [unit = units(itp) / u"m"]
+        ze_name = Symbol(:zero_, varname)
+        zero_emis = only(@constants $(ze_name)=0 [unit = units(itp) / u"m"])
         zero_emis = ModelingToolkit.unwrap(zero_emis) # Unsure why this is necessary.
-        eq,
-        param = create_interp_equation(itp, "", t, t_ref, [x, y];
-            wrapper_f = (eq) -> ifelse(lev < 2, eq / Δz * scale, zero_emis))
+        wrapper_f = (eq) -> ifelse(lev < 2, eq / Δz * scale, zero_emis)
+        eq, param = create_interp_equation(itp, "", t, t_ref, [x, y]; wrapper_f = wrapper_f)
         push!(eqs, eq)
-        push!(params, param)
+        push!(params, param, zero_emis)
         push!(vars, eq.lhs)
     end
-    sys = ODESystem(
+    sys = System(
         eqs,
         t,
         vars,
         [x, y, lev, Δz, params...];
         name = name,
-        metadata = Dict(:coupletype => NEI2016MonthlyEmisCoupler,
-            :sys_discrete_event => create_updater_sys_event(name, params, starttime))
+        metadata = Dict(CoupleType => NEI2016MonthlyEmisCoupler,
+            SysDiscreteEvent => create_updater_sys_event(name, params, starttime))
     )
     return sys
 end
