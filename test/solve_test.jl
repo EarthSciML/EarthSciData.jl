@@ -73,3 +73,11 @@ end
     @test sum(sol.u[end]) ≈ 2.414101174478711e-5
     @test_nowarn solve(prob, KenCarp3())
 end
+
+emis = NEI2016MonthlyEmis_regrid("mrggrid_withbeis_withrwc", domain)
+
+csys = couple(sys, emis, domain)
+
+dt = 100.0
+st = SolverStrangSerial(Tsit5(), dt)
+prob = ODEProblem(csys, st)

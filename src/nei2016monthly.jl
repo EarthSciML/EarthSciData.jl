@@ -1,4 +1,4 @@
-export NEI2016MonthlyEmis
+export NEI2016MonthlyEmis, NEI2016MonthlyEmis_regrid
 
 # Diurnal scale factors for 24 hours (0-23) for UTC-0
 const DIURNAL_FACTORS = [0.45, 0.45, 0.6, 0.6, 0.6, 0.6, 1.45, 1.45, 1.45, 1.45, 1.4, 1.4, 1.4, 1.4, 1.45, 1.45, 1.45, 1.45, 0.65, 0.65, 0.65, 0.65, 0.45, 0.45]
@@ -94,7 +94,8 @@ DataFrequencyInfo(fs::NEI2016MonthlyEmisFileSet) = fs.freq_info
 """
 $(SIGNATURES)
 
-Load the data in place for the given variable name at the given time.
+Load the NEI data for the given variable name at the given time.
+This loads data in kg/s/m^2 units on the NEI source grid for regridding.
 """
 function loadslice!(
         data::AbstractArray,
@@ -106,13 +107,17 @@ function loadslice!(
         data = reshape(data, size(data)..., 1)
         var = loadslice!(data, fs, fs.ds, t, varname, "TSTEP")
 
-        Δx = fs.ds.attrib["XCELL"]
-        Δy = fs.ds.attrib["YCELL"]
+        # Step 1: Apply unit conversion from the file (typically tons/day to kg/s)
         scale, _ = to_unit(var.attrib["units"])
         if scale != 1
-            data .*= scale
+            data .*= scale  # Now data is in kg/s per grid cell
         end
-        data ./= (Δx * Δy)
+        
+        # Step 2: Convert from kg/s per grid cell to kg/s/m² for conservative regridding
+        # This is the flux density that can be conservatively regridded
+        Δx = fs.ds.attrib["XCELL"]  # Cell width in meters
+        Δy = fs.ds.attrib["YCELL"]  # Cell height in meters
+        data ./= (Δx * Δy)  # Now data is in kg/s/m²
     end
     nothing
 end
@@ -249,11 +254,97 @@ function NEI2016MonthlyEmis(
         zero_emis = ModelingToolkit.unwrap(zero_emis) # Unsure why this is necessary.
         # Apply diurnal scaling only to certain chemical species
         if varname in ["CO", "FORM", "ISOP"]
-            wrapper_f = (eq) -> ifelse(lev < 3, eq / Δz * scale * diurnal_itp(t + t_ref, x) / 2, zero_emis)
+            wrapper_f = (eq) -> ifelse(lev < 2, eq / Δz * scale * diurnal_itp(t + t_ref, x), zero_emis)
         elseif varname in ["NO2", "NO"]
-            wrapper_f = (eq) -> ifelse(lev < 3, eq / Δz * scale * diurnal_itp_NOx(t + t_ref, x) / 2, zero_emis)
+            wrapper_f = (eq) -> ifelse(lev < 2, eq / Δz * scale * diurnal_itp_NOx(t + t_ref, x), zero_emis)
         else
-            wrapper_f = (eq) -> ifelse(lev < 3, eq / Δz * scale /2, zero_emis)
+            wrapper_f = (eq) -> ifelse(lev < 2, eq / Δz * scale, zero_emis)
+        end
+        
+        eq,
+        param = create_interp_equation(itp, "", t, t_ref, [x, y];
+            wrapper_f = wrapper_f)
+        push!(eqs, eq)
+        push!(params, param)
+        push!(vars, eq.lhs)
+    end
+    sys = ODESystem(
+        eqs,
+        t,
+        vars,
+        [x, y, lev, Δz, params...];
+        name = name,
+        metadata = Dict(:coupletype => NEI2016MonthlyEmisCoupler,
+            :sys_discrete_event => create_updater_sys_event(name, params, starttime))
+    )
+    return sys
+end
+
+"""
+$(SIGNATURES)
+
+A data loader for CMAQ-formatted monthly US National Emissions Inventory data for year 2016,
+using conservative mass regridding instead of interpolation.
+
+This function is identical to `NEI2016MonthlyEmis` but uses conservative regridding to ensure 
+mass conservation when transferring emissions from the NEI grid to the simulation grid.
+
+`spatial_ref` should be the spatial reference system that
+the simulation will be using. `x` and `y`, and should be the coordinate variables and grid
+spacing values for the simulation that is going to be run, corresponding to the given x and y
+values of the given `spatial_ref`,
+and the `lev` represents the variable for the vertical grid level.
+x and y must be in the same units as `spatial_ref`.
+
+`dtype` represents the desired data type of the interpolated values. The native data type
+for this dataset is Float32.
+
+`scale` is a scaling factor to apply to the emissions data. The default value is 1.0.
+
+`stream` specifies whether the data should be streamed in as needed or loaded all at once.
+
+NOTE: This uses conservative regridding which exactly conserves the total emissions mass
+when transferring from the NEI grid to the simulation grid, unlike interpolation which
+may not conserve mass exactly.
+"""
+function NEI2016MonthlyEmis_regrid(
+        sector::AbstractString,
+        domaininfo::DomainInfo;
+        scale = 1.0,
+        name = :NEI2016MonthlyEmis_regrid,
+        stream = true
+)
+    starttime, endtime = get_tspan_datetime(domaininfo)
+    fs = NEI2016MonthlyEmisFileSet(sector, starttime, endtime)
+    pvdict = Dict([Symbol(v) => v for v in EarthSciMLBase.pvars(domaininfo)]...)
+    @assert :x in keys(pvdict)||:lon in keys(pvdict) "x or lon must be specified in the domaininfo"
+    @assert :y in keys(pvdict)||:lat in keys(pvdict) "y or lat must be specified in the domaininfo"
+    @assert :lev in keys(pvdict) "lev must be specified in the domaininfo"
+    x = :x in keys(pvdict) ? pvdict[:x] : pvdict[:lon]
+    y = :y in keys(pvdict) ? pvdict[:y] : pvdict[:lat]
+    lev = pvdict[:lev]
+    @parameters(Δz=60.0,
+        [unit = u"m", description = "Height of the first vertical grid layer"],)
+    @parameters t_ref = get_tref(domaininfo) [unit = u"s", description = "Reference time"]
+    eqs = Equation[]
+    params = Any[t_ref]
+    vars = Num[]
+    for varname in varnames(fs)
+        dt = EarthSciMLBase.eltype(domaininfo)
+        # Use RegridDataSetInterpolator for conservative regridding
+        weights_path = joinpath(@__DIR__, "regrid_weights.jld2")
+        itp = RegridDataSetInterpolator{dt}(fs, varname, starttime, endtime, domaininfo, weights_path;
+            stream = stream)
+        @constants zero_emis=0 [unit = units(itp) / u"m"]
+        zero_emis = ModelingToolkit.unwrap(zero_emis) # Unsure why this is necessary.
+        
+        # Apply diurnal scaling only to certain chemical species
+        if varname in ["CO", "FORM", "ISOP"]
+            wrapper_f = (eq) -> ifelse(lev < 2, eq / Δz * scale * diurnal_itp(t + t_ref, x), zero_emis)
+        elseif varname in ["NO2", "NO"]
+            wrapper_f = (eq) -> ifelse(lev < 2, eq / Δz * scale * diurnal_itp_NOx(t + t_ref, x), zero_emis)
+        else
+            wrapper_f = (eq) -> ifelse(lev < 2, eq / Δz * scale, zero_emis)
         end
 
         eq,
