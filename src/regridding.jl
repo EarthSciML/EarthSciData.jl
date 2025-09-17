@@ -99,15 +99,7 @@ regrid! - Replaces interp! function but uses regridding
 """
 function regrid!(rds::RegridDataSetInterpolator{T, N, N2}, t::DateTime, locs::Vararg{T})::T where {T, N, N2}
     # Load data if needed
-    if rds.currenttime != t
-        lock(rds.lock) do
-            if rds.currenttime != t
-                current_data = selectdim(rds.data, N, 1)
-                loadslice!(current_data, rds.fs, t, rds.varname)
-                rds.currenttime = t
-            end
-        end
-    end
+    regrid_lazyload!(rds, t)
     
     # Extract longitude and latitude coordinates
     # For NEI data (2D), we expect locs to be (lon, lat) or (lon, lat, lev)
@@ -134,42 +126,48 @@ function regrid!(rds::RegridDataSetInterpolator{T, N, N2}, t::DateTime, locs::Va
     end
 end
 
-# Interface functions - same as DataSetInterpolator
+# Interface functions - unique names for regridding
 ModelingToolkit.get_unit(rds::RegridDataSetInterpolator) = rds.metadata.units
-units(rds::RegridDataSetInterpolator) = rds.metadata.units
-description(rds::RegridDataSetInterpolator) = rds.metadata.description
+regrid_units(rds::RegridDataSetInterpolator) = rds.metadata.units
+regrid_description(rds::RegridDataSetInterpolator) = rds.metadata.description
 
-# Add interp_unsafe to match DataSetInterpolator interface (called by ITPWrapper)
+# Add regrid_unsafe to match DataSetInterpolator interface (called by ITPWrapper)
 # Handle variable number of coordinates - use first two for 2D regridding
-function interp_unsafe(rds::RegridDataSetInterpolator{T, N, N2}, t::DateTime, locs::Vararg{T})::T where {T, N, N2}
+function regrid_unsafe(rds::RegridDataSetInterpolator{T, N, N2}, t::DateTime, locs::Vararg{T, N2})::T where {T, N, N2}
     # For 2D NEI data, we only need the first two coordinates (lon, lat)
     # Additional coordinates (like vertical level) are ignored
-    if length(locs) >= 2
+    if N2 >= 2
         regrid!(rds, t, locs[1], locs[2])
-    elseif length(locs) == 1
+    elseif N2 == 1
         error("RegridDataSetInterpolator requires at least 2 spatial coordinates (lon, lat)")
     else
         error("RegridDataSetInterpolator requires spatial coordinates")
     end
 end
 
-# Add interp_unsafe with Real time argument (like DataSetInterpolator has)
-function interp_unsafe(rds::RegridDataSetInterpolator{T, N, N2}, t::Real, locs::Vararg{T})::T where {T, N, N2}
-    interp_unsafe(rds, Dates.unix2datetime(t), locs...)
+# Add regrid_unsafe with Real time argument (like DataSetInterpolator has)
+function regrid_unsafe(rds::RegridDataSetInterpolator{T, N, N2}, t::Real, locs::Vararg{T, N2})::T where {T, N, N2}
+    regrid_unsafe(rds, Dates.unix2datetime(t), locs...)
 end
 
-# Register symbolic functions for regrid! only (interp_unsafe is already registered in load.jl)
+# Add ITPWrapper method for RegridDataSetInterpolator
+(itp::EarthSciData.ITPWrapper{<:RegridDataSetInterpolator})(t, locs::Vararg{T, N}) where {T, N} = regrid_unsafe(itp.itp, t, locs...)
+
+# Register symbolic functions for regrid! and regrid_unsafe
 @register_symbolic regrid!(rds::RegridDataSetInterpolator, t, loc1, loc2, loc3)
 @register_symbolic regrid!(rds::RegridDataSetInterpolator, t, loc1, loc2) false
 @register_symbolic regrid!(rds::RegridDataSetInterpolator, t, loc1) false
+@register_symbolic regrid_unsafe(rds::RegridDataSetInterpolator, t, loc1, loc2, loc3)
+@register_symbolic regrid_unsafe(rds::RegridDataSetInterpolator, t, loc1, loc2) false
+@register_symbolic regrid_unsafe(rds::RegridDataSetInterpolator, t, loc1) false
 
-# Additional interface methods needed for RegridDataSetInterpolator to work with system events
-function get_tstops(rds::RegridDataSetInterpolator, starttime::DateTime)
+# Additional interface methods with unique names for RegridDataSetInterpolator
+function regrid_get_tstops(rds::RegridDataSetInterpolator, starttime::DateTime)
     dfi = DataFrequencyInfo(rds.fs)
     datetime2unix.(sort([starttime, dfi.centerpoints...]))
 end
 
-function lazyload!(rds::RegridDataSetInterpolator, t::DateTime)
+function regrid_lazyload!(rds::RegridDataSetInterpolator, t::DateTime)
     # For regridding, we just need to ensure data is loaded for the current time
     # No complex caching like DataSetInterpolator since we only store current timestep
     lock(rds.lock) do
@@ -182,16 +180,24 @@ function lazyload!(rds::RegridDataSetInterpolator, t::DateTime)
     rds
 end
 
-function lazyload!(rds::RegridDataSetInterpolator, t::AbstractFloat)
-    lazyload!(rds, Dates.unix2datetime(t))
+function regrid_lazyload!(rds::RegridDataSetInterpolator, t::AbstractFloat)
+    regrid_lazyload!(rds, Dates.unix2datetime(t))
 end
 
-# Dummy function for unit validation (only for regrid! - interp_unsafe already defined in load.jl)
-regrid!(rds::Union{DynamicQuantities.AbstractQuantity, Real}, t, locs...) = rds
+# Interface compatibility - RegridDataSetInterpolator must implement the same interface as DataSetInterpolator
+get_tstops(rds::RegridDataSetInterpolator, starttime::DateTime) = regrid_get_tstops(rds, starttime)
+lazyload!(rds::RegridDataSetInterpolator, t::DateTime) = regrid_lazyload!(rds, t)
+lazyload!(rds::RegridDataSetInterpolator, t::AbstractFloat) = regrid_lazyload!(rds, t)
+units(rds::RegridDataSetInterpolator) = regrid_units(rds)
+description(rds::RegridDataSetInterpolator) = regrid_description(rds)
 
-# Extend create_interp_equation to work with RegridDataSetInterpolator
+# Dummy functions for unit validation
+regrid!(rds::Union{DynamicQuantities.AbstractQuantity, Real}, t, locs...) = rds
+regrid_unsafe(rds::Union{DynamicQuantities.AbstractQuantity, Real}, t, locs...) = rds
+
+# Create regrid equation for RegridDataSetInterpolator
 # This allows RegridDataSetInterpolator to be used in the same way as DataSetInterpolator
-function create_interp_equation(rds::RegridDataSetInterpolator, filename, t, t_ref, coords; wrapper_f = v -> v)
+function create_regrid_equation(rds::RegridDataSetInterpolator, filename, t, t_ref, coords; wrapper_f = v -> v)
     n = length(filename) > 0 ? Symbol("$(filename)₊$(rds.varname)") :
         Symbol("$(rds.varname)")
     n_p = Symbol(n, "_itp")
@@ -200,7 +206,7 @@ function create_interp_equation(rds::RegridDataSetInterpolator, filename, t, t_r
     t_itp = typeof(itp)
     p_itp = only(
         @parameters ($n_p::t_itp)(..)=itp [
-        unit = units(rds),
+        unit = regrid_units(rds),
         description = "Interpolated $(n)"
     ]
     )
@@ -209,7 +215,7 @@ function create_interp_equation(rds::RegridDataSetInterpolator, filename, t, t_r
     rhs = wrapper_f(p_itp(t_ref + t, coords...))
 
     # Create left hand side of equation.
-    desc = description(rds)
+    desc = regrid_description(rds)
     uu = ModelingToolkit.get_unit(rhs)
     lhs = only(
         @variables $n(t) [

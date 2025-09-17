@@ -335,7 +335,7 @@ function NEI2016MonthlyEmis_regrid(
         weights_path = joinpath(@__DIR__, "regrid_weights.jld2")
         itp = RegridDataSetInterpolator{dt}(fs, varname, starttime, endtime, domaininfo, weights_path;
             stream = stream)
-        @constants zero_emis=0 [unit = units(itp) / u"m"]
+        @constants zero_emis=0 [unit = regrid_units(itp) / u"m"]
         zero_emis = ModelingToolkit.unwrap(zero_emis) # Unsure why this is necessary.
         
         # Apply diurnal scaling only to certain chemical species
@@ -348,7 +348,7 @@ function NEI2016MonthlyEmis_regrid(
         end
 
         eq,
-        param = create_interp_equation(itp, "", t, t_ref, [x, y];
+        param = create_regrid_equation(itp, "", t, t_ref, [x, y];
             wrapper_f = wrapper_f)
         push!(eqs, eq)
         push!(params, param, zero_emis)
