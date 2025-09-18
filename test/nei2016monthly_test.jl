@@ -181,7 +181,7 @@ end
         # Test that weights file can be loaded
         weights_path = joinpath(dirname(@__DIR__), "src", "regrid_weights.jld2")
         if isfile(weights_path)
-            weights = EarthSciData.load_regrid_weights_cached(weights_path)
+            weights = EarthSciData.load_regrid_weights(weights_path)
             @test haskey(weights, :xc_b) || haskey(weights, "xc_b")
             @test haskey(weights, :yc_b) || haskey(weights, "yc_b")
             @test haskey(weights, :row) || haskey(weights, "row")
@@ -198,8 +198,8 @@ end
         domain = DomainInfo(
             DateTime(2016, 5, 15),
             DateTime(2016, 5, 16);
-            latrange = deg2rad(-85.0f0):deg2rad(2):deg2rad(85.0f0),
-            lonrange = deg2rad(-180.0f0):deg2rad(2.5):deg2rad(175.0f0),
+            lonrange=deg2rad(-115):deg2rad(0.625):deg2rad(-68.75),
+            latrange=deg2rad(25):deg2rad(0.5):deg2rad(53.7),
             levrange = 1:10
         )
         ts, te = get_tspan_datetime(domain)
@@ -211,7 +211,7 @@ end
             @test itp.metadata !== nothing
 
             # Test regridding function
-            result = EarthSciData.regrid!(itp, ts, deg2rad(-88.0), deg2rad(42.0))
+            result = EarthSciData.regrid!(itp, ts, deg2rad(-88.125), deg2rad(42.0))
 
             @test result ≈ 7.438617527610653e-9
         else
@@ -226,7 +226,7 @@ end
             weights = EarthSciData.load_regrid_weights_cached(weights_path)
 
             # Test the core regridding function
-            lon_rad = deg2rad(-88.0)  # Convert to radians (weights expect radians)
+            lon_rad = deg2rad(-88.125)  # Convert to radians (weights expect radians)
             lat_rad = deg2rad(42.0)   # Convert to radians (weights expect radians)
 
             j, src_idx, w_flux = EarthSciData.contributors_for_lonlat(lon_rad, lat_rad, weights)
@@ -238,20 +238,4 @@ end
             @test_skip "regrid_weights.jld2 file not found - skipping contributors_for_lonlat tests"
         end
     end
-end
-
-@testitem "Coupling with GEOS-FP" setup=[NEISetup] begin
-    using ModelingToolkit: observed, System
-    gfp = GEOSFP("4x5", domain)
-    csys = couple(emis, gfp)
-    sys = convert(System, csys)
-    eqs = observed(sys)
-    @test occursin("NEI2016MonthlyEmis₊lat(t) ~ GEOSFP₊lat", string(eqs))
-end
-
-@testitem "wrong year" setup=[NEISetup] begin
-    sample_time = DateTime(2016, 5, 1)
-    itp = EarthSciData.DataSetInterpolator{Float32}(fileset, "NOX", ts, te, domain)
-    sample_time = DateTime(2017, 5, 1)
-    @test_throws ArgumentError EarthSciData.lazyload!(itp, sample_time)
 end

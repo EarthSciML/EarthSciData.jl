@@ -305,7 +305,9 @@ for this dataset is Float32.
 
 NOTE: This uses conservative regridding which exactly conserves the total emissions mass
 when transferring from the NEI grid to the simulation grid, unlike interpolation which
-may not conserve mass exactly.
+may not conserve mass exactly. The regridding system only works with coordinates that
+exactly match the precomputed weight grid - if coordinates don't match exactly, it will
+throw a clear error message.
 """
 function NEI2016MonthlyEmis_regrid(
         sector::AbstractString,
