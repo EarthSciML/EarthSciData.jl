@@ -307,53 +307,6 @@ function regrid_unsafe(
 end
 
 """
-Vectorized mapping for an entire flux field for ONE SPECIES using precomputed weights.
-This is much faster than point-by-point regridding.
-
-Example usage (from your suggestion):
-```julia
-flux_mat = ds_nei["NO"][:, :, 1, 1] .* 907.185 ./ 86400 ./ (12000*12000)  # kg/s/m²
-src_flux_vec = vec(flux_mat)  # Flatten the 2D emission field for "NO" species
-dst_flux_vec = map_flux_all(weights, src_flux_vec)  # Apply regridding weights
-```
-"""
-function map_flux_all(weights, src_flux_vec::AbstractVector)
-    # The source vector should match the total number of source grid cells
-    # For NEI data, this should be the flattened size of the source grid (442 × 265 = 117,130)
-    if hasfield(typeof(weights), :src_dims)
-        n_src_expected = prod(weights.src_dims)  # Total source grid cells
-    else
-        n_src_expected = maximum(weights.col)  # Fallback: max source index
-    end
-    @assert length(src_flux_vec) == n_src_expected "Source flux vector size mismatch: got $(length(src_flux_vec)), expected $(n_src_expected) (NEI flattened grid size)"
-    
-    # Get destination grid dimensions
-    n_dst = length(weights.frac_b)
-    dst_flux_vec = zeros(eltype(src_flux_vec), n_dst)
-    
-    # Vectorized sparse matrix multiplication equivalent
-    @inbounds for i in eachindex(weights.row)
-        dst_idx = weights.row[i]  # destination grid index
-        src_idx = weights.col[i]  # source grid index
-        weight = weights.S[i]     # regridding weight
-        
-        dst_flux_vec[dst_idx] += weight * src_flux_vec[src_idx]
-    end
-    
-    # Normalize by fractional area (conservative regridding)
-    @inbounds for i in eachindex(dst_flux_vec)
-        frac = weights.frac_b[i]
-        if frac > eps()
-            dst_flux_vec[i] /= frac
-        else
-            dst_flux_vec[i] = 0.0
-        end
-    end
-    
-    return dst_flux_vec
-end
-
-"""
 regrid_from!(dsi::RegridDataSetInterpolator, dst::AbstractArray{T, N},
         src::AbstractArray{T, N}, model_grid, extrapolate_type = 0.0) where {T, N}
 
