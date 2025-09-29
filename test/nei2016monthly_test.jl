@@ -2,6 +2,7 @@
 @testsnippet NEISetup begin
     using Dates: DateTime
     using EarthSciMLBase
+    using EarthSciData
 
     domain = DomainInfo(
         DateTime(2016, 5, 1),

@@ -128,7 +128,7 @@ end
     function EarthSciData.loadmetadata(fs::DummyFileSet, varname)
         return EarthSciData.MetaData(
             [[0.0, 0.5, 1.0], [0.0, 1.0]],
-            u"m",
+            "m",
             "description",
             ["x"],
             [3, 2],

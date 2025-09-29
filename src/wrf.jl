@@ -68,7 +68,7 @@ function loadmetadata(fs::WRFFileSet, varname)::MetaData
         dims = deleteat!(dims, time_index)
         varsize = deleteat!(collect(size(var)), time_index)
 
-        _, unit_quantity = to_unit(var.attrib["units"])
+        unit_str = var.attrib["units"]
         description = var.attrib["description"]
 
         xdim = findfirst(x -> occursin("west_east", x), dims)
@@ -124,7 +124,7 @@ function loadmetadata(fs::WRFFileSet, varname)::MetaData
 
         return MetaData(
             coords,
-            unit_quantity,
+            unit_str,
             description,
             dims,
             varsize,

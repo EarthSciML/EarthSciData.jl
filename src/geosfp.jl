@@ -143,7 +143,7 @@ function loadmetadata(fs::GEOSFPFileSet, varname)::MetaData
         dims = deleteat!(dims, time_index)
         varsize = deleteat!(collect(size(var)), time_index)
 
-        _, units = to_unit(var.attrib["units"])
+        unit_str = var.attrib["units"]
         description = var.attrib["long_name"]
         @assert var.attrib["scale_factor"]==1.0 "Unexpected scale factor."
         coords = [fs.ds[d][:] for d in dims]
@@ -166,7 +166,7 @@ function loadmetadata(fs::GEOSFPFileSet, varname)::MetaData
 
         return MetaData(
             coords,
-            units,
+            unit_str,
             description,
             dims,
             varsize,

@@ -78,7 +78,7 @@ struct MetaData
     "The locations associated with each data point in the array."
     coords::Vector{Vector{Float64}}
     "Physical units of the data, e.g. m s⁻¹."
-    units::DynamicQuantities.AbstractQuantity
+    unit_str::AbstractString
     "Description of the data."
     description::AbstractString
     "Dimensions of the data, e.g. (lat, lon, layer)."
@@ -264,7 +264,7 @@ end
 """
 Return the units of the data.
 """
-ModelingToolkit.get_unit(itp::DataSetInterpolator) = itp.metadata.units
+ModelingToolkit.get_unit(itp::DataSetInterpolator) = units(itp)
 
 """
 Convert a vector of evenly spaced grid points to a range.
@@ -423,7 +423,8 @@ function update!(itp::DataSetInterpolator, t::DateTime)
         end
         interpolate_from!(itp, d, itp.load_cache, model_grid) # Copy results to correct location
         # Start loading the next time point asynchronously.
-        itp.loadtask = Threads.@spawn load_data_for_time!(itp, nexttimepoint(itp, times[idx]))
+        itp.loadtask = Threads.@spawn load_data_for_time!(
+            itp, nexttimepoint(itp, times[idx]))
     end
     itp.times = times
     itp.currenttime = t
@@ -497,7 +498,7 @@ $(SIGNATURES)
 
 Return the units of the data associated with this interpolator.
 """
-units(itp::DataSetInterpolator) = itp.metadata.units
+units(itp::DataSetInterpolator) = to_unit(itp.metadata.unit_str)[2]
 
 """
 $(SIGNATURES)

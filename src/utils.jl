@@ -34,6 +34,7 @@ function to_unit(u)
         "1/km" => (0.001, u"m^-1"),
         "km^-1" => (0.001, u"m^-1"),
         "<YYYYDD,HHMMSS>" => (1, Quantity(1.0)),
+        "1.0 m⁻² kg s⁻¹" => (1, u"m^-2*kg*s^-1"),
         "none" => (1, Quantity(1.0)),
         "?" => (1, Quantity(1.0)),
         "" => (1, Quantity(1.0)),

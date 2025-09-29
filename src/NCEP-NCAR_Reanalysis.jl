@@ -136,7 +136,7 @@ function EarthSciData.loadmetadata(fs::NCEPNCARReanalysisFileSet, varname)::Meta
         dims = deleteat!(dims, time_index)
         varsize = deleteat!(collect(size(var)), time_index)
 
-        _, unit_quantity = to_unit(var.attrib["units"])
+        unit_str = var.attrib["units"]
         description = var.attrib["long_name"]
 
         xdim = findfirst(x -> occursin("lon", x), dims)
@@ -173,7 +173,7 @@ function EarthSciData.loadmetadata(fs::NCEPNCARReanalysisFileSet, varname)::Meta
 
         return MetaData(
             coords,
-            unit_quantity,
+            unit_str,
             description,
             dims,
             varsize,

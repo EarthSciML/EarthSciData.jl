@@ -120,7 +120,7 @@ function loadmetadata(fs::NEI2016MonthlyEmisFileSet, varname)::MetaData
 
         return MetaData(
             coords,
-            units,
+            string(units),
             description,
             dims,
             varsize,
