@@ -4,6 +4,36 @@ export NEI2016MonthlyEmis, NEI2016MonthlyEmis_regrid
 const DIURNAL_FACTORS = [0.45, 0.45, 0.6, 0.6, 0.6, 0.6, 1.45, 1.45, 1.45, 1.45, 1.4, 1.4, 1.4, 1.4, 1.45, 1.45, 1.45, 1.45, 0.65, 0.65, 0.65, 0.65, 0.45, 0.45]
 const DIURNAL_FACTORS_NOx = [0.39598674, 0.31852847, 0.30128068, 0.29590213, 0.33177775, 0.43871498, 0.9094625, 1.5850095, 1.6223788, 1.3429453, 1.2265036, 1.1937649, 1.254314, 1.3282939, 1.331211, 1.4135737, 1.6848333, 1.710925, 1.3491899, 1.0586671, 0.84439224, 0.761263, 0.72693235, 0.5741503]
 
+# Load and create interpolator for delp_dry_surface
+const DELP_DRY_SURFACE_ITP = let
+    # Load the delp_dry_surface data
+    delp_data = load(joinpath(@__DIR__, "mean_domian_delp_dry_surface.jld2"), "mean_domian_delp_dry_surface")
+
+    # Define the grid coordinates
+    domain_lon = collect(-115:0.625:-68.75)
+    domain_lat = collect(25:0.5:53.7)
+
+    # Create 2D interpolator with flat extrapolation (use boundary values for out-of-bounds)
+    # Note: delp_data should be (lon, lat) ordered to match (domain_lon, domain_lat)
+    itp = interpolate((domain_lon, domain_lat), delp_data, Gridded(Linear()))
+    extrapolate(itp, Flat())
+end
+
+"""
+$(SIGNATURES)
+
+Interpolate the delp_dry_surface field at a given longitude and latitude.
+Returns the dry pressure thickness value in Pa.
+"""
+function delp_dry_surface_itp(lon, lat)
+    # Convert from radians to degrees if needed
+    lon_deg = rad2deg(lon)
+    lat_deg = rad2deg(lat)
+
+    # The interpolator now handles out-of-bounds automatically with Flat() extrapolation
+    return DELP_DRY_SURFACE_ITP(lon_deg, lat_deg)
+end
+
 """
 $(SIGNATURES)
 
@@ -39,11 +69,13 @@ end
 # Register the symbolic function
 @register_symbolic diurnal_itp(t, lon)
 @register_symbolic diurnal_itp_NOx(t, lon)
+@register_symbolic delp_dry_surface_itp(lon, lat)
 
 # Dummy function for unit validation. ModelingToolkit will call this function
 # with a DynamicQuantities.Quantity to get information about the type and units of the output.
 diurnal_itp(t::DynamicQuantities.Quantity, lon) = 1.0
 diurnal_itp_NOx(t::DynamicQuantities.Quantity, lon) = 1.0
+delp_dry_surface_itp(lon::DynamicQuantities.Quantity, lat::DynamicQuantities.Quantity) = 1.0
 
 """
 $(SIGNATURES)
@@ -112,7 +144,7 @@ function loadslice!(
         if scale != 1
             data .*= scale  # Now data is in kg/s per grid cell
         end
-        
+
         # Step 2: Convert from kg/s per grid cell to kg/s/m² for conservative regridding
         # This is the flux density that can be conservatively regridded
         Δx = fs.ds.attrib["XCELL"]  # Cell width in meters
@@ -205,6 +237,14 @@ A data loader for CMAQ-formatted monthly US National Emissions Inventory data fo
 available from: https://gaftp.epa.gov/Air/emismod/2016/v1/gridded/monthly_netCDF/.
 The emissions here are monthly averages, so there is no information about diurnal variation etc.
 
+The emissions are returned as mixing ratios in units of kg/kg/s by converting from the
+native flux density (kg/m²/s) using:
+
+    mixing_ratio = flux / (g0_100 * delp_dry_surface)
+
+where g0_100 ≈ 10.197 kg/m² and delp_dry_surface is the dry pressure thickness (physically unit in hPa, but here is unitless)
+that varies spatially across the domain.
+
 `spatial_ref` should be the spatial reference system that
 the simulation will be using. `x` and `y`, and should be the coordinate variables and grid
 spacing values for the simulation that is going to be run, corresponding to the given x and y
@@ -239,28 +279,44 @@ function NEI2016MonthlyEmis(
     x = :x in keys(pvdict) ? pvdict[:x] : pvdict[:lon]
     y = :y in keys(pvdict) ? pvdict[:y] : pvdict[:lat]
     lev = pvdict[:lev]
-    @parameters(Δz=60.0,
-        [unit = u"m", description = "Height of the first vertical grid layer"],)
+    @parameters(Δz=1.0,
+        [description = "Couldn't remove Δz without getting errors, so I set it to 1.0 without units"],)
     @parameters t_ref = get_tref(domaininfo) [unit = u"s", description = "Reference time"]
+    # Conversion constant: g0_100 = 100 hPa / g0 where g0 = 9.80665 m/s²
+    @parameters g0_100 = 100.0 / 9.80665 [unit = u"kg/m^2"]
     eqs = Equation[]
-    params = Any[t_ref]
+    params = Any[t_ref, g0_100]
     vars = Num[]
+
     for varname in varnames(fs)
         dt = EarthSciMLBase.eltype(domaininfo)
         itp = DataSetInterpolator{dt}(fs, varname, starttime, endtime, domaininfo;
             stream = stream)
+
+        # Don't pre-declare units - let ModelingToolkit infer from the actual equation
+        # The conversion formula divides flux (kg/m²/s) by (g0_100 * delp), giving kg/kg/s
+        # But we need zero_emis to match the units of the converted result
+        converted_units = units(itp) / u"kg/m^2"  # = 1/s (same as kg/kg/s for emissions)
         ze_name = Symbol(:zero_, varname)
-        zero_emis = only(@constants $(ze_name)=0 [unit = units(itp) / u"m"])
+        zero_emis = only(@constants $(ze_name)=0 [unit = converted_units])
         zero_emis = ModelingToolkit.unwrap(zero_emis) # Unsure why this is necessary.
-        # Apply diurnal scaling only to certain chemical species
+
+        # Apply diurnal scaling and mixing ratio conversion to certain chemical species
+        # The conversion is: mixing_ratio = flux / (g0_100 * delp_dry_surface(x, y))
         if varname in ["CO", "FORM", "ISOP"]
-            wrapper_f = (eq) -> ifelse(lev < 2, eq / Δz * scale * diurnal_itp(t + t_ref, x), zero_emis)
+            wrapper_f = (eq) -> ifelse(lev < 2,
+                eq / Δz * scale * diurnal_itp(t + t_ref, x) / (g0_100 * delp_dry_surface_itp(x, y)),
+                zero_emis)
         elseif varname in ["NO2", "NO"]
-            wrapper_f = (eq) -> ifelse(lev < 2, eq / Δz * scale * diurnal_itp_NOx(t + t_ref, x), zero_emis)
+            wrapper_f = (eq) -> ifelse(lev < 2,
+                eq / Δz * scale * diurnal_itp_NOx(t + t_ref, x) / (g0_100 * delp_dry_surface_itp(x, y)),
+                zero_emis)
         else
-            wrapper_f = (eq) -> ifelse(lev < 2, eq / Δz * scale, zero_emis)
+            wrapper_f = (eq) -> ifelse(lev < 2,
+                eq / Δz * scale / (g0_100 * delp_dry_surface_itp(x, y)),
+                zero_emis)
         end
-        
+
         eq,
         param = create_interp_equation(itp, "", t, t_ref, [x, y];
             wrapper_f = wrapper_f)
@@ -286,8 +342,14 @@ $(SIGNATURES)
 A data loader for CMAQ-formatted monthly US National Emissions Inventory data for year 2016,
 using conservative mass regridding instead of interpolation.
 
-This function is identical to `NEI2016MonthlyEmis` but uses conservative regridding to ensure 
-mass conservation when transferring emissions from the NEI grid to the simulation grid.
+This function uses conservative regridding to ensure mass conservation when transferring
+emissions from the NEI grid to the simulation grid. The emissions are returned as mixing
+ratios in units of kg/kg/s by converting from the native flux density (kg/m²/s) using:
+
+    mixing_ratio = flux / (g0_100 * delp_dry_surface)
+
+where g0_100 ≈ 10.197 kg/m² and delp_dry_surface is the dry pressure thickness (physically unit in hPa, but here is unitless)
+that varies spatially across the domain.
 
 `spatial_ref` should be the spatial reference system that
 the simulation will be using. `x` and `y`, and should be the coordinate variables and grid
@@ -325,28 +387,42 @@ function NEI2016MonthlyEmis_regrid(
     x = :x in keys(pvdict) ? pvdict[:x] : pvdict[:lon]
     y = :y in keys(pvdict) ? pvdict[:y] : pvdict[:lat]
     lev = pvdict[:lev]
-    @parameters(Δz=60.0,
-        [unit = u"m", description = "Height of the first vertical grid layer"],)
+    @parameters(Δz=1.0,
+        [description = "Couldn't remove Δz without getting errors, so I set it to 1.0 without units"],)
     @parameters t_ref = get_tref(domaininfo) [unit = u"s", description = "Reference time"]
+    # Conversion constant: g0_100 = 100 hPa / g0 where g0 = 9.80665 m/s²
+    @parameters g0_100 = 100.0 / 9.80665 [unit = u"kg/m^2"]
     eqs = Equation[]
-    params = Any[t_ref]
+    params = Any[t_ref, g0_100]
     vars = Num[]
+
     for varname in varnames(fs)
         dt = EarthSciMLBase.eltype(domaininfo)
         # Use RegridDataSetInterpolator for conservative regridding
         weights_path = joinpath(@__DIR__, "regrid_weights.jld2")
         itp = RegridDataSetInterpolator{dt}(fs, varname, starttime, endtime, domaininfo, weights_path;
             stream = stream)
-        @constants zero_emis=0 [unit = regrid_units(itp) / u"m"]
+
+        # Units after conversion: kg/m²/s -> kg/kg/s
+        converted_units = regrid_units(itp) / u"kg/m^2"
+
+        @constants zero_emis=0 [unit = converted_units]
         zero_emis = ModelingToolkit.unwrap(zero_emis) # Unsure why this is necessary.
-        
-        # Apply diurnal scaling only to certain chemical species
+
+        # Apply diurnal scaling and mixing ratio conversion to certain chemical species
+        # The conversion is: mixing_ratio = flux / (g0_100 * delp_dry_surface(x, y))
         if varname in ["CO", "FORM", "ISOP"]
-            wrapper_f = (eq) -> ifelse(lev < 2, eq / Δz * scale * diurnal_itp(t + t_ref, x), zero_emis)
+            wrapper_f = (eq) -> ifelse(lev < 2,
+                eq / Δz * scale * diurnal_itp(t + t_ref, x) / (g0_100 * delp_dry_surface_itp(x, y)),
+                zero_emis)
         elseif varname in ["NO2", "NO"]
-            wrapper_f = (eq) -> ifelse(lev < 2, eq / Δz * scale * diurnal_itp_NOx(t + t_ref, x), zero_emis)
+            wrapper_f = (eq) -> ifelse(lev < 2,
+                eq / Δz * scale * diurnal_itp_NOx(t + t_ref, x) / (g0_100 * delp_dry_surface_itp(x, y)),
+                zero_emis)
         else
-            wrapper_f = (eq) -> ifelse(lev < 2, eq / Δz * scale, zero_emis)
+            wrapper_f = (eq) -> ifelse(lev < 2,
+                eq / Δz * scale / (g0_100 * delp_dry_surface_itp(x, y)),
+                zero_emis)
         end
 
         eq,
