@@ -516,7 +516,7 @@ function GEOSFP(
         eqs,
         t,
         vars,
-        [pvdict[:lon], pvdict[:lat], lev, P_unit, lat2meters, lon2m, params...];
+        [pvdict[:lon], pvdict[:lat], lev, P_unit, Rd, g, lat2meters, lon2m, params...];
         name = name,
         metadata = Dict(CoupleType => GEOSFPCoupler,
             SysDiscreteEvent => create_updater_sys_event(name, params, starttime))
