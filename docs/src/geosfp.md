@@ -48,8 +48,12 @@ function Example()
     @parameters lat=0.0 [unit=u"rad"]
     @parameters lon=0.0 [unit=u"rad"]
     @variables c(t) = 5.0 [unit=u"s"]
-    System([D(c) ~ sin(lat * 6) + sin(lon * 6)], t;
-        metadata = Dict(CoupleType => ExampleCoupler))
+    System(
+        [D(c) ~ sin(lat * 6) + sin(lon * 6)],
+        t,
+        name = :ExampleSys,
+        metadata = Dict(CoupleType => ExampleCoupler)
+    )
 end
 function EarthSciMLBase.couple2(e::ExampleCoupler, g::EarthSciData.GEOSFPCoupler)
     e, g = e.sys, g.sys
