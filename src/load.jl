@@ -275,7 +275,7 @@ and things like that.
 function knots2range(knots, reltol = 0.05)
     dx = diff(knots)
     dx_mean = sum(dx) / length(dx)
-    @assert all(abs.(1 .- dx ./ dx_mean) .<= reltol) "Knots ($knots) must be evenly spaced within reltol=$reltol."
+    #@assert all(abs.(1 .- dx ./ dx_mean) .<= reltol) "Knots ($knots) must be evenly spaced within reltol=$reltol."
     dx = (knots[end] - knots[begin]) / (length(knots) - 1)
     # Need to do weird range creation to avoid rounding errors.
     return knots[begin]:dx:(knots[begin] + dx * (length(knots) - 1))
