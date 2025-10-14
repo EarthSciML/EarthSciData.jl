@@ -10,8 +10,8 @@ const DELP_DRY_SURFACE_ITP = let
     delp_data = load(joinpath(@__DIR__, "mean_domian_delp_dry_surface.jld2"), "mean_domian_delp_dry_surface")
 
     # Define the grid coordinates
-    domain_lon = collect(-125.0 : 0.625 : -66.875)
-    domain_lat = collect(25.0 : 0.5 : 49.0)
+    domain_lon = collect(-125.0:0.625:-66.875)
+    domain_lat = collect(25.0:0.5:49.0)
 
     # Create 2D interpolator with flat extrapolation (use boundary values for out-of-bounds)
     # Note: delp_data should be (lon, lat) ordered to match (domain_lon, domain_lat)
