@@ -296,7 +296,7 @@ function NEI2016MonthlyEmis(
         # Don't pre-declare units - let ModelingToolkit infer from the actual equation
         # The conversion formula divides flux (kg/m²/s) by (g0_100 * delp), giving kg/kg/s
         # But we need zero_emis to match the units of the converted result
-        converted_units = units(itp) / u"kg/m^2"  # = 1/s (same as kg/kg/s for emissions)
+        converted_units = units(itp) #/ u"kg/m^2"  # = 1/s (same as kg/kg/s for emissions)
         ze_name = Symbol(:zero_, varname)
         zero_emis = only(@constants $(ze_name)=0 [unit = converted_units])
         zero_emis = ModelingToolkit.unwrap(zero_emis) # Unsure why this is necessary.
