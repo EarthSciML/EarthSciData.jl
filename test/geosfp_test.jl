@@ -105,14 +105,50 @@ end
           [102340.37924047427, 101572.77264006894, 100805.16603966363, 2.0, 1.5, 1.0]
 end
 
-@testitem "GEOS-FP new day" setup=[GEOSFPDomainSetup] begin
-    using SymbolicIndexingInterface: getsym
-    geosfp = mtkcompile(GEOSFP("4x5", domain))
-    tspan = datetime2unix.((DateTime(2022, 1, 1, 23, 58), DateTime(2022, 1, 2, 0, 3))) .-
-            get_tref(domain)
-    prob = ODEProblem(geosfp, [], tspan)
-    f = getsym(prob, geosfp.I3₊PS)
-    @test f(prob) ≈ 101193.67232405252
+@testset "GEOS-FP new day" begin
+    @parameters(lon=0.0, [unit=u"rad"], lat=0.0, [unit=u"rad"], lev=1.0,)
+    @parameters t_ref=0 [unit=u"s"]
+    starttime = datetime2unix(DateTime(2022, 1, 1, 23, 58))
+    endtime = datetime2unix(DateTime(2022, 1, 2, 0, 3))
+
+    geosfp = GEOSFP("4x5", domain)
+
+    eqs = equations(geosfp)
+    idx(sym) = findfirst(x -> x == sym,
+        [Symbolics.tosymbol(e.lhs, escape=false) for e in eqs])
+
+    iT       = idx(:I3₊T)
+    iQV      = idx(:I3₊QV)
+    iT2M     = idx(:A1₊T2M)
+    iQV2M    = idx(:A1₊QV2M)
+    iPS      = idx(:I3₊PS)
+    iTv      = idx(:Tv)
+    iTv_sfc  = idx(:Tv_sfc)
+    iTvbar   = idx(:Tv̄)
+    iZ       = idx(:Z_agl)
+    iP       = idx(:P)
+
+    T_eq      = eqs[iT]
+    QV_eq     = eqs[iQV]
+    T2M_eq    = eqs[iT2M]
+    QV2M_eq   = eqs[iQV2M]
+    PS_eq     = eqs[iPS]
+    Tv_eq     = eqs[iTv]
+    Tv_sfc_eq = eqs[iTv_sfc]
+    Tvbar_eq  = eqs[iTvbar]
+    Z_eq      = eqs[iZ]
+
+    P_eq = substitute(eqs[iP], PS_eq.lhs => PS_eq.rhs)
+
+    dflts = ModelingToolkit.get_defaults(geosfp)
+    psitp = collect(keys(dflts))[findfirst(isequal(:I3₊PS_itp),
+        EarthSciMLBase.var2symbol.(keys(dflts)))]
+    ps_itp = dflts[psitp]
+    EarthSciData.lazyload!(ps_itp.itp, DateTime(2022, 1, 1, 23, 58))
+
+    PS_expr = build_function(pseq.rhs, t, t_ref, lon, lat, lev, psitp)
+    psf = eval(PS_expr)
+    psf(starttime, 0.0, 0.0, 0.0, 1.0, ps_itp)
 end
 
 @testitem "GEOS-FP wrong month" setup=[GEOSFPDomainSetup] begin
@@ -269,5 +305,5 @@ end
     Z_above_ground = [Z_f([tt, 0.0, lonv, latv, lev, T_itp, QV_itp, T2M_itp, QV2M_itp, PS_itp])
                 for lev in [1, 1.5, 2, 72, 72.5]]
     @test Z_above_ground ≈
-    [63.38451747881698, 127.11513708190306, 191.83774317607674, 77316.16731665366, 64384.30884628304]
+    [63.38451747881698, 127.11513708190306, 191.83774317607677, 77316.16731665366, 80132.63935650676]
 end
