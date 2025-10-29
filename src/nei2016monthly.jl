@@ -4,6 +4,9 @@ export NEI2016MonthlyEmis, NEI2016MonthlyEmis_regrid
 const DIURNAL_FACTORS = [0.45, 0.45, 0.6, 0.6, 0.6, 0.6, 1.45, 1.45, 1.45, 1.45, 1.4, 1.4, 1.4, 1.4, 1.45, 1.45, 1.45, 1.45, 0.65, 0.65, 0.65, 0.65, 0.45, 0.45]
 const DIURNAL_FACTORS_NOx = [0.39598674, 0.31852847, 0.30128068, 0.29590213, 0.33177775, 0.43871498, 0.9094625, 1.5850095, 1.6223788, 1.3429453, 1.2265036, 1.1937649, 1.254314, 1.3282939, 1.331211, 1.4135737, 1.6848333, 1.710925, 1.3491899, 1.0586671, 0.84439224, 0.761263, 0.72693235, 0.5741503]
 
+const DayofWeekFactors_NOx = [1.0706,1.0706,1.0706,1.0706,1.0706,0.863,0.784]
+const DayofWeekFactors_CO = [1.076,1.1076,1.0706,1.0706,1.0706,0.779,0.683]
+
 # Load and create interpolator for delp_dry_surface
 const DELP_DRY_SURFACE_ITP = let
     # Load the delp_dry_surface data
@@ -66,15 +69,51 @@ function diurnal_itp_NOx(t, lon)
     return DIURNAL_FACTORS_NOx[hour_of_day]
 end
 
+"""
+$(SIGNATURES)
+
+Day of week interpolation function that returns the scale factor for a given time.
+Returns different emission scaling factors based on the day of week.
+"""
+function dayofweek_itp_CO(t, lon)
+    ut = Dates.unix2datetime(t)
+
+    # Convert radians to degrees for timezone calculation
+    lon_deg = rad2deg(lon)
+    dt = floor(lon_deg / 15) # in hours (timezone offset)
+    t_local = t + dt * 3600 # in seconds
+    ut_local = Dates.unix2datetime(t_local)
+    day_of_week = Dates.dayofweek(ut_local)
+
+    return DayofWeekFactors_CO[day_of_week]
+end
+
+function dayofweek_itp_NOx(t, lon)
+    ut = Dates.unix2datetime(t)
+
+    # Convert radians to degrees for timezone calculation
+    lon_deg = rad2deg(lon)
+    dt = floor(lon_deg / 15) # in hours (timezone offset)
+    t_local = t + dt * 3600 # in seconds
+    ut_local = Dates.unix2datetime(t_local)
+    day_of_week = Dates.dayofweek(ut_local)
+
+    return DayofWeekFactors_NOx[day_of_week]
+end
+
 # Register the symbolic function
 @register_symbolic diurnal_itp(t, lon)
 @register_symbolic diurnal_itp_NOx(t, lon)
+@register_symbolic dayofweek_itp_CO(t, lon)
+@register_symbolic dayofweek_itp_NOx(t, lon)
 @register_symbolic delp_dry_surface_itp(lon, lat)
 
 # Dummy function for unit validation. ModelingToolkit will call this function
 # with a DynamicQuantities.Quantity to get information about the type and units of the output.
 diurnal_itp(t::DynamicQuantities.Quantity, lon) = 1.0
 diurnal_itp_NOx(t::DynamicQuantities.Quantity, lon) = 1.0
+dayofweek_itp_CO(t::DynamicQuantities.Quantity, lon) = 1.0
+dayofweek_itp_NOx(t::DynamicQuantities.Quantity, lon) = 1.0
 delp_dry_surface_itp(lon::DynamicQuantities.Quantity, lat::DynamicQuantities.Quantity) = 1.0
 
 """
@@ -420,7 +459,11 @@ function NEI2016MonthlyEmis_regrid(
 
         # Apply diurnal scaling and mixing ratio conversion to certain chemical species
         # The conversion is: mixing_ratio = flux / (g0_100 * delp_dry_surface(x, y))
-        if varname in ["CO", "FORM", "ISOP"]
+        if varname in ["CO"]
+            wrapper_f = (eq) -> ifelse(lev < 2,
+                eq / Δz * scale * dayofweek_itp_CO(t + t_ref, x) * diurnal_itp(t + t_ref, x) / (g0_100 * delp_dry_surface_itp(x, y)),
+                zero_emis)
+        elseif varname in ["FORM", "ISOP"]
             # wrapper_f = (eq) -> ifelse(lev < 2,
             #     eq / Δz * scale * diurnal_itp(t + t_ref, x) / (g0_100 * delp_dry_surface_itp(x, y)),
             #     zero_emis)
@@ -428,12 +471,9 @@ function NEI2016MonthlyEmis_regrid(
             eq / Δz * scale * diurnal_itp(t + t_ref, x),
             zero_emis)
         elseif varname in ["NO2", "NO"]
-            # wrapper_f = (eq) -> ifelse(lev < 2,
-            #     eq / Δz * scale * diurnal_itp_NOx(t + t_ref, x) / (g0_100 * delp_dry_surface_itp(x, y)),
-            #     zero_emis)
             wrapper_f = (eq) -> ifelse(lev < 2,
-            eq / Δz * scale * diurnal_itp_NOx(t + t_ref, x),
-            zero_emis)
+                eq / Δz * scale * dayofweek_itp_NOx(t + t_ref, x) * diurnal_itp_NOx(t + t_ref, x) / (g0_100 * delp_dry_surface_itp(x, y)),
+                zero_emis)
         else
             # wrapper_f = (eq) -> ifelse(lev < 2,
             #     eq / Δz * scale / (g0_100 * delp_dry_surface_itp(x, y)),
