@@ -109,7 +109,7 @@ end
     )
     sol = solve(prob, Tsit5())
     println(sol.u)
-    @test sol.u[end][end] ≈ 5.750157952328239e-11
+    @test sol.u[end][end] ≈ 5.693715670594291e-11
 end
 
 @testset "diurnal_itp function" begin
@@ -255,7 +255,7 @@ end
         # Test regridding function
         result = EarthSciData.regrid!(itp, ts, deg2rad(-88.125), deg2rad(42.0))
 
-        @test result ≈ 1.4874584451793892e-8   rtol = 0.01
+        @test result ≈ 1.1043172698528445e-8  rtol = 0.01
     end
 
     @testset "Direct regrid_from! test" begin
@@ -299,7 +299,7 @@ end
             # time dimension 2 is May data
 
         # Test if the direct regridded value matches expected
-        @test regridded_value ≈ 1.4874584451793892e-8 rtol = 0.01
+        @test regridded_value ≈ 1.1043172698528445e-8 rtol = 0.01
     end
 
     @testset "Direct regrid_from! test - 2*2.5 degree domain" begin
@@ -343,7 +343,7 @@ end
             # time dimension 2 is May data
 
         # Test if the direct regridded value matches expected
-        @test regridded_value ≈ 3.2903463487573787e-9 rtol = 0.01
+        @test regridded_value ≈ 1.9016343290117444e-9 rtol = 0.01
     end
 
     @testset "contributors_for_lonlat function" begin
@@ -429,7 +429,7 @@ end
     end
 
     factor = EarthSciData.dayofweek_itp_NOx(datetime2unix(ts)+1800, deg2rad(-88.125))*EarthSciData.diurnal_itp_NOx(datetime2unix(ts)+1800, deg2rad(-88.125))
-    @test NO_map[1, 1, end] ≈ 1.4874584451793892e-8*1800*factor /(100.0 / 9.80665 * 14.8498301901334) rtol = 0.01
+    @test NO_map[1, 1, end] ≈ 1.1043172698528445e-8*1800*factor /(100.0 / 9.80665 * 14.8498301901334) rtol = 0.01
     # The value is not exactly the same as the expected value because the model value is interpolated between the April and May regriddeddata.
     end
 
@@ -487,7 +487,7 @@ end
         end
     end
 
-    @test ACET_map[1, 1, end] ≈ 6.119836158271685e-10*3600 /(100.0 / 9.80665 * 14.8498301901334) rtol = 0.01
+    @test ACET_map[1, 1, end] ≈ 5.306331280986193e-10*3600 /(100.0 / 9.80665 * 14.8498301901334) rtol = 0.01
     # The value is not exactly the same as the expected value because the model value is interpolated between the April and May regriddeddata.
     end
 end

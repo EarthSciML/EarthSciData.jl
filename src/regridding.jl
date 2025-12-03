@@ -24,14 +24,12 @@ end
 
 """
 Build source grid polygons from NEI file set attributes
+Returns polygons directly in LCC meters (native coordinate system)
 """
 function build_source_grid_polygons_from_attributes(
     XORIG::Real, YORIG::Real, XCELL::Real, YCELL::Real,
     NCOLS::Integer, NROWS::Integer, native_sr::AbstractString
 )
-    geo_str = "+proj=longlat +datum=WGS84 +no_defs"
-    inv = Proj.Transformation(native_sr, geo_str; always_xy=true)
-    
     x_edges = collect(XORIG : XCELL : XORIG + NCOLS*XCELL)
     y_edges = collect(YORIG : YCELL : YORIG + NROWS*YCELL)
     nx = length(x_edges) - 1
@@ -42,8 +40,8 @@ function build_source_grid_polygons_from_attributes(
         y0, y1 = y_edges[j], y_edges[j+1]
         for i in 1:nx
             x0, x1 = x_edges[i], x_edges[i+1]
-            c1 = inv(x0, y0); c2 = inv(x1, y0); c3 = inv(x1, y1); c4 = inv(x0, y1)
-            polygon = [(c1[1], c1[2]), (c2[1], c2[2]), (c3[1], c3[2]), (c4[1], c4[2]), (c1[1], c1[2])]
+            # Keep polygons in LCC meters (native coordinate system)
+            polygon = [(x0, y0), (x1, y0), (x1, y1), (x0, y1), (x0, y0)]
             push!(source_grid, polygon)
         end
     end
@@ -53,9 +51,10 @@ end
 
 """
 Build target grid polygons from domain coordinates
-Returns: target_grid (polygons), lon_centers_deg, lat_centers_deg (computed from edges)
+Converts target grid from lon-lat to LCC for physically correct weight computation.
+Returns: target_grid (polygons in LCC), lon_centers_deg, lat_centers_deg (for indexing)
 """
-function build_target_grid_polygons(domain_coords::Tuple)
+function build_target_grid_polygons(domain_coords::Tuple, native_sr::AbstractString)
     lon_coords_rad, lat_coords_rad = domain_coords[1], domain_coords[2]
     
     lon_vec = collect(lon_coords_rad)
@@ -70,17 +69,29 @@ function build_target_grid_polygons(domain_coords::Tuple)
     nxi = length(lon_edges) - 1
     nyi = length(lat_edges) - 1
     
+    # Create transformation from lon-lat to LCC
+    geo_str = "+proj=longlat +datum=WGS84 +no_defs"
+    geo_to_lcc = Proj.Transformation(geo_str, native_sr; always_xy=true)
+    
+    # Build target grid polygons in LCC meters (for physically correct weight computation)
     target_grid = Vector{Vector{Tuple{Float64, Float64}}}()
     for j in 1:nyi
         lat0, lat1 = lat_edges[j], lat_edges[j+1]
         for i in 1:nxi
             lon0, lon1 = lon_edges[i], lon_edges[i+1]
-            polygon = [(lon0, lat0), (lon1, lat0), (lon1, lat1), (lon0, lat1), (lon0, lat0)]
+            # Project each corner from lon-lat to LCC
+            # Note: After projection, the quadrilateral may not be rectangular
+            x0, y0 = geo_to_lcc(lon0, lat0)
+            x1, y1 = geo_to_lcc(lon1, lat0)
+            x2, y2 = geo_to_lcc(lon1, lat1)
+            x3, y3 = geo_to_lcc(lon0, lat1)
+            # Match the example polygon construction exactly (even though it looks unusual)
+            polygon = [(x0, y0), (x1, y0), (x2, y1), (x3, y3), (x0, y0)]
             push!(target_grid, polygon)
         end
     end
     
-    # Compute centers from edges (to match polygons exactly)
+    # Compute centers from edges in lon-lat (for indexing/regridding operations)
     dst_lon_center_deg = Vector{Float64}(undef, length(target_grid))
     dst_lat_center_deg = Vector{Float64}(undef, length(target_grid))
     for j in 1:nyi
@@ -104,21 +115,29 @@ function compute_regridding_weights(
     target_lon_centers_deg::Vector{Float64},
     target_lat_centers_deg::Vector{Float64}
 )
-    @info "Computing regrid weights for $(length(target_grid)) target cells..."
+    @info "Computing regrid weights for $(length(target_grid)) target cells (in LCC coordinates)..."
     
-    R = ConservativeRegridding.Regridder(target_grid, source_grid)
+    # Compute weights in LCC coordinate system (physically correct for area calculations)
+    R = ConservativeRegridding.Regridder(target_grid, source_grid; normalize=false)
     
-    # Extract weight matrix
-    fields = fieldnames(typeof(R))
-    W = nothing
-    for f in fields
-        val = getfield(R, f)
-        if val isa SparseMatrixCSC
-            W = val
-            break
+    # Extract weight matrix (intersection areas in LCC coordinate system)
+    W = if hasfield(typeof(R), :A)
+        getfield(R, :A)
+    else
+        # Fallback: scan for SparseMatrixCSC
+        fields = fieldnames(typeof(R))
+        tmpW = nothing
+        for f in fields
+            val = getfield(R, f)
+            if val isa SparseMatrixCSC
+                tmpW = val
+                break
+            end
         end
+        @assert tmpW !== nothing "Could not extract weight matrix from Regridder"
+        tmpW
     end
-    @assert W !== nothing "Could not extract weight matrix from Regridder"
+    @assert W isa SparseMatrixCSC "Weight matrix must be sparse"
     
     row, col, S = findnz(W)
     frac_b = vec(sum(W, dims=2))
@@ -183,7 +202,7 @@ function compute_weights_for_domain(fs::FileSet, metadata::MetaData, domain)
                     end
                     
                     target_grid, target_lon_centers_deg, target_lat_centers_deg = 
-                        build_target_grid_polygons(target_coords)
+                        build_target_grid_polygons(target_coords, native_sr)
                     
                     weights = compute_regridding_weights(
                         source_grid, target_grid, target_lon_centers_deg, target_lat_centers_deg
