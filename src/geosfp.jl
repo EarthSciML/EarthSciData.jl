@@ -142,8 +142,8 @@ function loadmetadata(fs::GEOSFPFileSet, varname)::MetaData
         time_index = findfirst(isequal(timedim), dims)
         dims = deleteat!(dims, time_index)
         varsize = deleteat!(collect(size(var)), time_index)
-
-        unit_str = var.attrib["units"]
+        unit_attr = var.attrib["units"]
+        _, unit = to_unit(unit_attr)
         description = var.attrib["long_name"]
         @assert var.attrib["scale_factor"]==1.0 "Unexpected scale factor."
         coords = [fs.ds[d][:] for d in dims]
@@ -166,7 +166,7 @@ function loadmetadata(fs::GEOSFPFileSet, varname)::MetaData
 
         return MetaData(
             coords,
-            unit_str,
+            unit,
             description,
             dims,
             varsize,
@@ -511,6 +511,11 @@ function GEOSFP(
     lev_trans = δPδlev ~ expand_derivatives(Differential(lev)(pressure_eq.rhs))
     push!(eqs, lon_trans, lat_trans, lev_trans)
     push!(vars, δxδlon, δyδlat, δPδlev)
+
+    @variables δZδlev(t) [unit = u"m", description = "∂Z_agl/∂lev"]
+    eq_dZ_dlev = δZδlev ~ expand_derivatives(Differential(lev)(eq_Z_agl.rhs))
+    push!(eqs, eq_dZ_dlev)
+    push!(vars, δZδlev)
 
     sys = System(
         eqs,
