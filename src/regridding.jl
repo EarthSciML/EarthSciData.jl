@@ -1,240 +1,306 @@
 export regrid!, regrid_from!
 
+# Module-level cache for regridding weights
+const _weights_cache = Dict{Any, Any}()
+const _weights_cache_lock = ReentrantLock()
+
 """
-Load regrid weights from JLD2 format (simple, no caching)
+Helper function to compute edges from centers
 """
-function load_regrid_weights(path::AbstractString)
-    weights = load(path, "weights")
-    # Ensure src_dims field exists (calculate from weights if missing)
-    if !hasfield(typeof(weights), :src_dims)
-        # Calculate source grid dimensions from the maximum column index
-        # For NEI data, this should be 442 × 265 = 117,130 total cells
-        max_src_idx = maximum(weights.col)
-        # For now, assume we can infer dimensions from other fields or use max index
-        # This is a fallback - ideally src_dims should be saved with the weights
-        weights = merge(weights, (src_dims = (max_src_idx,),))  # 1D flattened size
+function edges_from_centers(c::AbstractVector{<:Real})
+    n = length(c)
+    @assert n ≥ 2
+    e = similar(c, n+1)
+    for i in 1:n-1
+        e[i+1] = (c[i] + c[i+1]) / 2
     end
-    return weights
+    e[1] = c[1] - (e[2]-c[1])
+    e[end] = c[end] + (c[end]-e[end-1])
+    if e[2] < e[1]
+        reverse!(e)
+    end
+    return e
 end
 
 """
-Create coordinate lookup table for exact matching - O(1) lookup
+Build source grid polygons from NEI file set attributes
 """
-function create_coordinate_lookup_table(xc_b_rad, yc_b_rad)
-    coord_to_index = Dict{Tuple{Float64, Float64}, Int}()
-    for (i, (lon, lat)) in enumerate(zip(xc_b_rad, yc_b_rad))
-        coord_to_index[(lon, lat)] = i
-    end
-    return coord_to_index
-end
-
-"""
-Exact coordinate lookup with small tolerance for floating point precision
-"""
-@inline function exact_coordinate_lookup(lon_rad::Real, lat_rad::Real, coord_lookup::Dict{Tuple{Float64, Float64}, Int})
-    coord_key = (Float64(lon_rad), Float64(lat_rad))
+function build_source_grid_polygons_from_attributes(
+    XORIG::Real, YORIG::Real, XCELL::Real, YCELL::Real,
+    NCOLS::Integer, NROWS::Integer, native_sr::AbstractString
+)
+    geo_str = "+proj=longlat +datum=WGS84 +no_defs"
+    inv = Proj.Transformation(native_sr, geo_str; always_xy=true)
     
-    # First try exact match
-    if haskey(coord_lookup, coord_key)
-        return coord_lookup[coord_key]
-    end
+    x_edges = collect(XORIG : XCELL : XORIG + NCOLS*XCELL)
+    y_edges = collect(YORIG : YCELL : YORIG + NROWS*YCELL)
+    nx = length(x_edges) - 1
+    ny = length(y_edges) - 1
     
-    # If no exact match, try with small tolerance for floating point precision
-    tolerance = 1e-14  # Much smaller tolerance closer to machine epsilon
-    for ((grid_lon, grid_lat), idx) in coord_lookup
-        if abs(grid_lon - lon_rad) < tolerance && abs(grid_lat - lat_rad) < tolerance
-            return idx
+    source_grid = Vector{Vector{Tuple{Float64, Float64}}}()
+    for j in 1:ny
+        y0, y1 = y_edges[j], y_edges[j+1]
+        for i in 1:nx
+            x0, x1 = x_edges[i], x_edges[i+1]
+            c1 = inv(x0, y0); c2 = inv(x1, y0); c3 = inv(x1, y1); c4 = inv(x0, y1)
+            polygon = [(c1[1], c1[2]), (c2[1], c2[2]), (c3[1], c3[2]), (c4[1], c4[2]), (c1[1], c1[2])]
+            push!(source_grid, polygon)
         end
     end
     
-    # If still no match, find the nearest neighbor for a more helpful error message
-    min_dist = Inf
-    nearest_lon_deg = 0.0
-    nearest_lat_deg = 0.0
-    for (grid_lon, grid_lat) in keys(coord_lookup)
-        dist = sqrt((grid_lon - lon_rad)^2 + (grid_lat - lat_rad)^2)
-        if dist < min_dist
-            min_dist = dist
-            nearest_lon_deg = rad2deg(grid_lon)
-            nearest_lat_deg = rad2deg(grid_lat)
-        end
-    end
-    
-    error("Domain coordinates ($(rad2deg(lon_rad))°, $(rad2deg(lat_rad))°) are not capable of regrid emission. "*
-          "This regridding system only works with coordinates that exactly match the precomputed weight grid. "*
-          "Nearest grid point: ($(round(nearest_lon_deg, digits=3))°, $(round(nearest_lat_deg, digits=3))°). "*
-          "Available coordinate range: lon $(rad2deg(minimum(first.(keys(coord_lookup)))))° to $(rad2deg(maximum(first.(keys(coord_lookup)))))°, "*
-          "lat $(rad2deg(minimum(last.(keys(coord_lookup)))))° to $(rad2deg(maximum(last.(keys(coord_lookup)))))°")
+    return source_grid
 end
 
 """
-contributors_for_target_index(j, weights) -> (src_idx::Vector{Int}, w_flux::Vector{Float64})
-Optimized version with preallocated arrays
+Build target grid polygons from domain coordinates
+Returns: target_grid (polygons), lon_centers_deg, lat_centers_deg (computed from edges)
 """
-function contributors_for_target_index_fast(j::Integer, weights, src_idx_buffer, w_flux_buffer)
-    fb = weights.frac_b[j]
-    if fb <= eps()
-        return 0, src_idx_buffer, w_flux_buffer
+function build_target_grid_polygons(domain_coords::Tuple)
+    lon_coords_rad, lat_coords_rad = domain_coords[1], domain_coords[2]
+    
+    lon_vec = collect(lon_coords_rad)
+    lat_vec = collect(lat_coords_rad)
+    
+    lon_centers_deg = rad2deg.(lon_vec)
+    lat_centers_deg = rad2deg.(lat_vec)
+    
+    lon_edges = edges_from_centers(lon_centers_deg)
+    lat_edges = edges_from_centers(lat_centers_deg)
+    
+    nxi = length(lon_edges) - 1
+    nyi = length(lat_edges) - 1
+    
+    target_grid = Vector{Vector{Tuple{Float64, Float64}}}()
+    for j in 1:nyi
+        lat0, lat1 = lat_edges[j], lat_edges[j+1]
+        for i in 1:nxi
+            lon0, lon1 = lon_edges[i], lon_edges[i+1]
+            polygon = [(lon0, lat0), (lon1, lat0), (lon1, lat1), (lon0, lat1), (lon0, lat0)]
+            push!(target_grid, polygon)
+        end
     end
     
-    # Find all indices where row == j (optimized)
-    count = 0
-    @inbounds for i in eachindex(weights.row)
-        if weights.row[i] == j
-            count += 1
-            if count <= length(src_idx_buffer)
-                src_idx_buffer[count] = weights.col[i]
-                w_flux_buffer[count] = weights.S[i] / fb
+    # Compute centers from edges (to match polygons exactly)
+    dst_lon_center_deg = Vector{Float64}(undef, length(target_grid))
+    dst_lat_center_deg = Vector{Float64}(undef, length(target_grid))
+    for j in 1:nyi
+        for i in 1:nxi
+            k = (j-1)*nxi + i
+            dst_lon_center_deg[k] = (lon_edges[i] + lon_edges[i+1]) / 2
+            dst_lat_center_deg[k] = (lat_edges[j] + lat_edges[j+1]) / 2
+        end
+    end
+    
+    return target_grid, dst_lon_center_deg, dst_lat_center_deg
+end
+
+"""
+Compute regridding weights dynamically using ConservativeRegridding
+Returns a NamedTuple with: row, col, S, frac_b, xc_b, yc_b, W
+"""
+function compute_regridding_weights(
+    source_grid::Vector{Vector{Tuple{Float64, Float64}}},
+    target_grid::Vector{Vector{Tuple{Float64, Float64}}},
+    target_lon_centers_deg::Vector{Float64},
+    target_lat_centers_deg::Vector{Float64}
+)
+    @info "Computing regrid weights for $(length(target_grid)) target cells..."
+    
+    R = ConservativeRegridding.Regridder(target_grid, source_grid)
+    
+    # Extract weight matrix
+    fields = fieldnames(typeof(R))
+    W = nothing
+    for f in fields
+        val = getfield(R, f)
+        if val isa SparseMatrixCSC
+            W = val
+            break
+        end
+    end
+    @assert W !== nothing "Could not extract weight matrix from Regridder"
+    
+    row, col, S = findnz(W)
+    frac_b = vec(sum(W, dims=2))
+    
+    xc_b_rad = deg2rad.(target_lon_centers_deg)
+    yc_b_rad = deg2rad.(target_lat_centers_deg)
+    
+    @info "Regridder created: $(size(W)) with $(length(row)) non-zero weights"
+    
+    return (row=row, col=col, S=S, frac_b=frac_b, xc_b=xc_b_rad, yc_b=yc_b_rad, W=W)
+end
+
+"""
+Generate a cache key for weights based on file set and domain
+"""
+function _weights_cache_key(fs::FileSet, domain)
+    grid = EarthSciMLBase.grid(domain, (false, false, false))
+    if length(grid) >= 2
+        grid_hash = hash((grid[1], grid[2]))
+        return (objectid(fs), grid_hash)
+    else
+        return (objectid(fs), hash(domain))
+    end
+end
+
+"""
+Compute regridding weights for a given domain dynamically
+Thread-safe: uses double-checked locking to prevent duplicate computations
+"""
+function compute_weights_for_domain(fs::FileSet, metadata::MetaData, domain)
+    cache_key = _weights_cache_key(fs, domain)
+    
+    lock(_weights_cache_lock) do
+        if haskey(_weights_cache, cache_key)
+            @debug "Reusing cached regridding weights"
+            return _weights_cache[cache_key]
+        end
+        
+        weights = lock(nclock) do
+            if hasfield(typeof(fs), :ds) && fs.ds !== nothing
+                if haskey(fs.ds.attrib, "XORIG") && haskey(fs.ds.attrib, "YORIG") &&
+                   haskey(fs.ds.attrib, "XCELL") && haskey(fs.ds.attrib, "YCELL") &&
+                   haskey(fs.ds.attrib, "NCOLS") && haskey(fs.ds.attrib, "NROWS")
+                    
+                    XORIG = fs.ds.attrib["XORIG"]
+                    YORIG = fs.ds.attrib["YORIG"]
+                    XCELL = fs.ds.attrib["XCELL"]
+                    YCELL = fs.ds.attrib["YCELL"]
+                    NCOLS = fs.ds.attrib["NCOLS"]
+                    NROWS = fs.ds.attrib["NROWS"]
+                    native_sr = metadata.native_sr
+                    
+                    source_grid = build_source_grid_polygons_from_attributes(
+                        XORIG, YORIG, XCELL, YCELL, NCOLS, NROWS, native_sr
+                    )
+                    
+                    grid = EarthSciMLBase.grid(domain, (false, false, false))
+                    if metadata.zdim <= 0
+                        target_coords = (grid[1], grid[2])
+                    else
+                        target_coords = (grid[1], grid[2])
+                    end
+                    
+                    target_grid, target_lon_centers_deg, target_lat_centers_deg = 
+                        build_target_grid_polygons(target_coords)
+                    
+                    weights = compute_regridding_weights(
+                        source_grid, target_grid, target_lon_centers_deg, target_lat_centers_deg
+                    )
+                    
+                    return weights
+                else
+                    error("File set does not have required NEI grid attributes")
+                end
             else
-                # Fallback to dynamic allocation if buffer too small
-                resize!(src_idx_buffer, count)
-                resize!(w_flux_buffer, count)
-                src_idx_buffer[count] = weights.col[i]
-                w_flux_buffer[count] = weights.S[i] / fb
+                error("File set does not have a dataset (ds field) for dynamic weight computation")
             end
         end
+        
+        _weights_cache[cache_key] = weights
+        return weights
     end
-    
-    return count, src_idx_buffer, w_flux_buffer
-end
-
-"""
-Fast lookup using exact coordinate matching - O(1) hash table lookup
-"""
-function contributors_for_lonlat_exact_match(lon_rad::Real, lat_rad::Real, weights, 
-                                           src_idx_buffer, w_flux_buffer, coord_lookup::Dict{Tuple{Float64, Float64}, Int})
-    # Direct O(1) hash table lookup
-    j = exact_coordinate_lookup(lon_rad, lat_rad, coord_lookup)
-    
-    count, src_idx_result, w_flux_result = contributors_for_target_index_fast(j, weights, src_idx_buffer, w_flux_buffer)
-    
-    return j, src_idx_result, w_flux_result, count
 end
 
 """
 RegridDataSetInterpolator - Conservative regridding with same architecture as DataSetInterpolator
-
-This now mirrors the DataSetInterpolator architecture:
-- Uses regrid_from!() for bulk preprocessing during cache loading (like interpolate_from!())
-- Stores regridded data in model-grid cache for fast array lookup during simulation
-- Provides same performance characteristics as interpolated version but with mass conservation
 """
 mutable struct RegridDataSetInterpolator{To, N, N2, FT, WT, DomT, ITPT}
     fs::FileSet
     varname::AbstractString
-    # This is the regridded data cache (on model grid) - equivalent to DataSetInterpolator.data
     data::Array{To, N}
-    # This is buffer that is used to interpolate from (same as DataSetInterpolator)
     interp_cache::Array{To, N}
-    itp::ITPT # The interpolator (same as DataSetInterpolator)
-    # The buffer that raw data is read into from NetCDF file (on source grid)
+    itp::ITPT
     load_cache::Array{To, N2}
-    # Regridding weights for conservative transformation
     weights::WT
-    metadata::Any
+    metadata::MetaData
     domain::DomT
     times::Vector{DateTime}
     currenttime::DateTime
     coord_trans::FT
-    # Async loading infrastructure (same as DataSetInterpolator)
     loadrequest::Channel{DateTime}
     loadresult::Channel
     copyfinish::Channel{Int}
     lock::ReentrantLock
     initialized::Bool
-    # Performance optimization: preallocated buffers (cluster-friendly)
-    src_idx_buffer::Vector{Int}
-    w_flux_buffer::Vector{Float64}
-    # Coordinate lookup table for exact matching - O(1) lookup
-    coord_lookup::Dict{Tuple{Float64, Float64}, Int}
 
     function RegridDataSetInterpolator{To}(
             fs::FileSet,
             varname::AbstractString,
             starttime::DateTime,
             endtime::DateTime,
-            domain,
-            weights_path::AbstractString;
+            domain;
             stream = true
     ) where {To <: Real}
         metadata = loadmetadata(fs, varname)
-        weights = load_regrid_weights(weights_path)
+        weights = compute_weights_for_domain(fs, metadata, domain)
         
-        # Check how many time indices we will need (same logic as DataSetInterpolator)
         dfi = DataFrequencyInfo(fs)
         cache_size = 2
         if !stream
-            cache_size = length(dfi.centerpoints)
+            cache_size = sum(
+                (starttime - dfi.frequency) .<=
+                dfi.centerpoints .<=
+                (endtime + dfi.frequency),
+            )
         end
         
-        # Initialize arrays with dummy sizes (like DataSetInterpolator)
-        # Real sizing happens in regrid_initialize!
         load_cache = zeros(To, repeat([1], length(metadata.varsize))...)
-        
-        # APPROACH 2: RegridDataSetInterpolator data is sized by REQUESTED domain
-        # regrid_from!() will calculate emission values for each requested domain grid point
-        # using the weights.jld2 file, then cache those values for fast access
         grid = EarthSciMLBase.grid(domain, metadata.staggering)
         if metadata.zdim <= 0
-            # NEI emissions are 2D (surface-only): use only lon,lat dimensions of requested domain
-            domain_dims = length.(grid[1:2])  # e.g., [3, 3] for test domain
+            domain_dims = length.(grid[1:2])
         else
-            # Other data might be 3D: use all dimensions of requested domain
-            domain_dims = length.(grid)  # e.g., [3, 3, 2] for test domain
+            domain_dims = length.(grid)
         end
-        data = zeros(To, domain_dims..., cache_size) # Requested domain + time dimension
-        interp_cache = similar(data) # Add interpolation cache like DataSetInterpolator
-        N = ndims(data)  # This will be 3 for emissions (lon, lat, time)
-        N2 = N - 1       # This will be 2 for emissions (lon, lat)
+        # Start with dummy size like DataSetInterpolator, will be resized in initialize!
+        data = zeros(To, repeat([2], length(domain_dims))..., cache_size)
+        interp_cache = similar(data)
+        N = ndims(data)
+        N2 = N - 1
         times = [DateTime(0, 1, 1) + Hour(i) for i in 1:cache_size]
         
-        # Don't create interpolator in constructor - it will be created in update_regrid_interpolator!
-        # after real data is loaded with correct times
-        itp2 = nothing
-        ITPT = Any  # Will be determined when real interpolator is created
+        _, itp2 = create_interpolator!(
+            interp_cache,
+            data,
+            repeat([0:0.1:0.1], length(domain_dims)),
+            times
+        )
+        ITPT = typeof(itp2)
         
-        # NO coordinate transformation needed for regridding!
-        # regrid_from!() already transforms data to domain coordinates
-        coord_trans = (x) -> x  # Identity transformation (no-op)
+        coord_trans = (x) -> x  # No coordinate transformation needed for regridding
         FT = typeof(coord_trans)
         WT = typeof(weights)
         DomT = typeof(domain)
 
-        # Small preallocated buffers for performance
-        buffer_size = min(100, length(weights.col) ÷ 10)
-        src_idx_buffer = Vector{Int}(undef, buffer_size)
-        w_flux_buffer = Vector{Float64}(undef, buffer_size)
-        
-        # Create coordinate lookup table
-        coord_lookup = create_coordinate_lookup_table(weights.xc_b, weights.yc_b)
-
-        # Async loading channels (same as DataSetInterpolator)
-        loadrequest = Channel{DateTime}(1)
-        loadresult = Channel(1)
-        copyfinish = Channel{Int}(1)
-
         new{To, N, N2, FT, WT, DomT, ITPT}(
             fs, varname, data, interp_cache, itp2, load_cache, weights, metadata, domain,
             times, DateTime(1, 1, 1), coord_trans,
-            loadrequest, loadresult, copyfinish,
-            ReentrantLock(), false, src_idx_buffer, w_flux_buffer, coord_lookup
+            Channel{DateTime}(0),
+            Channel(1),
+            Channel{Int}(0),
+            ReentrantLock(), false
         )
     end
 end
 
+function Base.show(io::IO, itp::RegridDataSetInterpolator)
+    print(io, "RegridDataSetInterpolator{$(typeof(itp.fs)), $(itp.varname)}")
+end
+
+ModelingToolkit.get_unit(rds::RegridDataSetInterpolator) = rds.metadata.units
+regrid_units(rds::RegridDataSetInterpolator) = rds.metadata.units
+regrid_description(rds::RegridDataSetInterpolator) = rds.metadata.description
+
 """
-Get model grid coordinates for regridding (equivalent to _model_grid for DataSetInterpolator)  
+Get model grid coordinates for regridding (same format as _model_grid in load.jl)
 """
 function _regrid_model_grid(rds::RegridDataSetInterpolator)
-    # Return coordinates for the REQUESTED domain
-    # The cached data is sized for the requested domain, and regrid_from! calculates values for each point
     grid = EarthSciMLBase.grid(rds.domain, rds.metadata.staggering)
-    if rds.metadata.zdim <= 0
-        # NEI emissions are 2D (surface-only): return only lon,lat coordinates of requested domain
-        return tuple_from_vals(rds.metadata.xdim, grid[1], rds.metadata.ydim, grid[2])
-    else
-        # Other data might be 3D: return all coordinates of requested domain
-        return tuple_from_vals(
+    if length(rds.metadata.varsize) == 2 && rds.metadata.zdim <= 0
+        grid_size = tuple_from_vals(rds.metadata.xdim, grid[1], rds.metadata.ydim, grid[2])
+    elseif length(rds.metadata.varsize) == 3
+        grid_size = tuple_from_vals(
             rds.metadata.xdim,
             grid[1],
             rds.metadata.ydim,
@@ -242,179 +308,47 @@ function _regrid_model_grid(rds::RegridDataSetInterpolator)
             rds.metadata.zdim,
             grid[3]
         )
+    else
+        error("Invalid data size")
     end
+    return grid_size
 end
 
 """
-regrid! - Fast array lookup from pre-regridded cache (equivalent to interp! for DataSetInterpolator)
-
-Now works like DataSetInterpolator.interp!():
-- Data is pre-regridded and cached on model grid during loading
-- This function does fast array lookup from the regridded cache
-- Much faster than the old point-wise regridding approach
-"""
-function regrid!(rds::RegridDataSetInterpolator{T, N, N2}, t::DateTime, locs::Vararg{T, N2})::T where {T, N, N2}
-    # Ensure regridded data is loaded and cached (like DataSetInterpolator.lazyload!)
-    regrid_lazyload!(rds, t)
-    regrid_unsafe(rds, t, locs...)
-end
-
-"""
-Fast lookup from pre-regridded cache without bounds checking (equivalent to interp_unsafe)
-MUCH SIMPLER than interpolation because regridded data is already on domain coordinates!
-No coordinate transformation needed - just direct interpolation from domain-grid cache.
-"""
-function regrid_unsafe(
-        rds::RegridDataSetInterpolator{T1, N, N2},
-        t::DateTime,
-        locs::Vararg{T2, N2}
-)::T1 where {T1, T2, N, N2}
-    if N2 != N - 1 # Number of locs has to be one less than the number of data dimensions so we can add the time in.
-        throw(ArgumentError("N2 must be equal to N-1"))
-    end
-    
-    # MUCH SIMPLER than DataSetInterpolator.interp_unsafe!
-    # No coordinate transformation needed because regrid_from!() already put data on domain grid
-    # Just direct interpolation from the regridded cache (which is on domain coordinates)
-    
-    # Ensure interpolator is initialized
-    if rds.itp === nothing
-        regrid_lazyload!(rds, t)
-    end
-    
-    try
-        return rds.itp(locs..., datetime2unix(t))
-    catch err
-        if isa(err, BoundsError)
-            # Out-of-bounds coordinates: return 0.0 (same as DataSetInterpolator extrapolation)
-            return T1(0.0)
-        else
-            # Other errors: try cache update fallback (same as DataSetInterpolator)
-            @warn "Regrid interpolation for $(rds.varname) failed at t=$(t), locs=$(locs); trying to update cache."
-            regrid_lazyload!(rds, t)
-            try
-                return rds.itp(locs..., datetime2unix(t))
-            catch err2
-                if isa(err2, BoundsError)
-                    # Still out-of-bounds after cache update: return 0.0
-                    return T1(0.0)
-                else
-                    rethrow(err2)
-                end
-            end
-        end
-    end
-end
-
-"""
-regrid_from!(dsi::RegridDataSetInterpolator, dst::AbstractArray{T, N},
-        src::AbstractArray{T, N}, model_grid, extrapolate_type = 0.0) where {T, N}
-
 Conservative regridding function that transforms data from source grid to destination grid.
-This function is the regridding equivalent of interpolate_from! and uses vectorized operations
-for maximum performance.
-
-Key differences from interpolate_from!:
-- Uses precomputed conservative weights for mass conservation
-- Vectorized operations instead of point-by-point calculations
-- Output size matches domain grid (not source grid)
-- Runs once per month, results cached for fast timestep access
-
-Args:
-    dsi: RegridDataSetInterpolator containing precomputed weights
-    dst: Destination array (model grid) - will be filled with regridded values
-    src: Source array (NEI data grid) for ONE SPECIES (e.g., "NO", "CO", etc.)
-    model_grid: Tuple of coordinate arrays for destination grid (unused for vectorized approach)
-    extrapolate_type: Unused for regridding (kept for interface compatibility)
+Uses vectorized operations with precomputed weights for maximum performance.
 """
 function regrid_from!(dsi::RegridDataSetInterpolator, dst::AbstractArray{T, N},
         src::AbstractArray{T, N}, model_grid, extrapolate_type = 0.0) where {T, N}
     
-    # Bulk regridding: Calculate emission values for ALL domain grid points using weights.jld2
-    # This mirrors interpolate_from! - bulk processing once per month, save results to dst cache
-    
-    
-    # Validate input dimensions
-    if N < 2
-        error("regrid_from! requires at least 2D arrays (lon, lat)")
-    end
-    
-    # Get source NEI data as flat vector for efficient indexing
     src_vec = vec(src)
+    W = dsi.weights.W
+    frac_b = dsi.weights.frac_b
     
-    # Pre-allocate temporary buffers for this operation (thread-safe)
-    buffer_size = min(100, length(dsi.weights.col) ÷ 10)
-    src_idx_buffer = Vector{Int}(undef, buffer_size)
-    w_flux_buffer = Vector{Float64}(undef, buffer_size)
+    # Vectorized regridding: W * src_vec / frac_b
+    dst_vec = (W * src_vec) ./ max.(frac_b, eps())
     
+    # Reshape to destination dimensions
     if N == 3
-        # 3D bulk regridding: Calculate for ALL model grid points
-        @inbounds for (i, x) in enumerate(model_grid[1])  # For each domain grid lon
-            for (j, y) in enumerate(model_grid[2])        # For each domain grid lat
-                for (k, z) in enumerate(model_grid[3])    # For each domain grid vertical level
-                    # Map to array indices (same as interpolate_from!)
-                    idx = tuple_from_vals(dsi.metadata.xdim, i,
+        nxi, nyi = length(model_grid[1]), length(model_grid[2])
+        dst_2d = reshape(dst_vec, nxi, nyi)
+        for (i, x) in enumerate(model_grid[1])
+            for (j, y) in enumerate(model_grid[2])
+                idx = tuple_from_vals(dsi.metadata.xdim, i, dsi.metadata.ydim, j)
+                for (k, z) in enumerate(model_grid[3])
+                    idx_full = tuple_from_vals(dsi.metadata.xdim, i,
                         dsi.metadata.ydim, j, dsi.metadata.zdim, k)
-                    locs = tuple_from_vals(dsi.metadata.xdim, x,
-                        dsi.metadata.ydim, y, dsi.metadata.zdim, z)
-                    locs = dsi.coord_trans(locs)
-                    
-                    # Apply precomputed weights to calculate emission value for this domain grid point
-                    try
-                        # Find which target grid point this domain coordinate corresponds to
-                        target_j = exact_coordinate_lookup(locs[1], locs[2], dsi.coord_lookup)
-                        # Get contributors and weights for this target point
-                        count, src_idx_result, w_flux_result = contributors_for_target_index_fast(
-                            target_j, dsi.weights, src_idx_buffer, w_flux_buffer)
-                        
-                        # Calculate regridded emission value using weights.jld2
-                        if count > 0
-                            regridded_value = T(0.0)
-                            for idx_w in 1:count
-                                regridded_value += w_flux_result[idx_w] * src_vec[src_idx_result[idx_w]]
-                            end
-                            dst[idx...] = regridded_value  # Save regridded result to cache
-                        else
-                            dst[idx...] = T(0.0)
-                        end
-                    catch
-                        # Domain coordinate not in regridding weights, set to zero
-                        dst[idx...] = T(0.0)
-                    end
+                    dst[idx_full...] = dst_2d[idx[1], idx[2]]
                 end
             end
         end
     elseif N == 2 && dsi.metadata.zdim <= 0
-        # 2D bulk regridding: Calculate for ALL model grid points
-        @inbounds for (i, x) in enumerate(model_grid[1])  # For each domain grid lon
-            for (j, y) in enumerate(model_grid[2])        # For each domain grid lat
-                # Map to array indices (same as interpolate_from!)
+        nxi, nyi = length(model_grid[1]), length(model_grid[2])
+        dst_2d = reshape(dst_vec, nxi, nyi)
+        for (i, x) in enumerate(model_grid[1])
+            for (j, y) in enumerate(model_grid[2])
                 idx = tuple_from_vals(dsi.metadata.xdim, i, dsi.metadata.ydim, j)
-                locs = tuple_from_vals(dsi.metadata.xdim, x, dsi.metadata.ydim, y)
-                locs = dsi.coord_trans(locs)
-                
-                # Apply precomputed weights to calculate emission value for this domain grid point
-                try
-                    # Find which target grid point this domain coordinate corresponds to
-                    target_j = exact_coordinate_lookup(locs[1], locs[2], dsi.coord_lookup)
-                    # Get contributors and weights for this target point
-                    count, src_idx_result, w_flux_result = contributors_for_target_index_fast(
-                        target_j, dsi.weights, src_idx_buffer, w_flux_buffer)
-                    
-                    # Calculate regridded emission value using weights.jld2
-                    if count > 0
-                        regridded_value = T(0.0)
-                        for idx_w in 1:count
-                            regridded_value += w_flux_result[idx_w] * src_vec[src_idx_result[idx_w]]
-                        end
-                        dst[idx...] = regridded_value  # Save regridded result to cache
-                    else
-                        dst[idx...] = T(0.0)
-                    end
-                catch
-                    # Domain coordinate not in regridding weights, set to zero
-                    dst[idx...] = T(0.0)
-                end
+                dst[idx...] = dst_2d[i, j]
             end
         end
     else
@@ -424,84 +358,28 @@ function regrid_from!(dsi::RegridDataSetInterpolator, dst::AbstractArray{T, N},
     return dst
 end
 
-# Helper functions removed - regrid_from! now works exactly like interpolate_from!
-
-# Interface functions - unique names for regridding
-ModelingToolkit.get_unit(rds::RegridDataSetInterpolator) = rds.metadata.units
-regrid_units(rds::RegridDataSetInterpolator) = rds.metadata.units
-regrid_description(rds::RegridDataSetInterpolator) = rds.metadata.description
-
-# Unused helper functions removed - code cleanup
-
-# Add regrid_unsafe with Real time argument (like DataSetInterpolator has)
-function regrid_unsafe(rds::RegridDataSetInterpolator{T, N, N2}, t::Real, locs::Vararg{T, N2})::T where {T, N, N2}
-    regrid_unsafe(rds, Dates.unix2datetime(t), locs...)
-end
-
-# Add ITPWrapper method for RegridDataSetInterpolator
-(itp::EarthSciData.ITPWrapper{<:RegridDataSetInterpolator})(t, locs::Vararg{T, N}) where {T, N} = regrid_unsafe(itp.itp, t, locs...)
-
-# Register symbolic functions for regrid! and regrid_unsafe
-@register_symbolic regrid!(rds::RegridDataSetInterpolator, t, loc1, loc2, loc3)
-@register_symbolic regrid!(rds::RegridDataSetInterpolator, t, loc1, loc2) false
-@register_symbolic regrid!(rds::RegridDataSetInterpolator, t, loc1) false
-@register_symbolic regrid_unsafe(rds::RegridDataSetInterpolator, t, loc1, loc2, loc3)
-@register_symbolic regrid_unsafe(rds::RegridDataSetInterpolator, t, loc1, loc2) false
-@register_symbolic regrid_unsafe(rds::RegridDataSetInterpolator, t, loc1) false
-
-# Additional interface methods with unique names for RegridDataSetInterpolator
-function regrid_get_tstops(rds::RegridDataSetInterpolator, starttime::DateTime)
-    dfi = DataFrequencyInfo(rds.fs)
-    datetime2unix.(sort([starttime, dfi.centerpoints...]))
-end
-
-"""
-Cache management functions - mirror DataSetInterpolator architecture
-"""
-
-"""
-Return the time points that should be cached in this regridding interpolator.
-"""
-function regrid_cache_times!(rds::RegridDataSetInterpolator, t::DateTime)
-    cache_size = length(rds.times)
-    dfi = DataFrequencyInfo(rds.fs)
-    ti = centerpoint_index(dfi, t)
-    # Currently assuming we're going forwards in time.
-    if t < dfi.centerpoints[ti]  # Load data starting with previous time step.
-        times = dfi.centerpoints[(ti - 1):(ti + cache_size - 2)]
-    else  # Load data starting with current time step.
-        times = dfi.centerpoints[ti:(ti + cache_size - 1)]
-    end
-    times
-end
-
-"""
-Initialize the regridding interpolator with async loading
-"""
-function regrid_initialize!(rds::RegridDataSetInterpolator, t::DateTime)
+function initialize!(rds::RegridDataSetInterpolator, t::DateTime)
     rds.load_cache = zeros(eltype(rds.load_cache), rds.metadata.varsize...)
-    
-    # The data array is already properly sized in the constructor for the requested domain!
-    # No need to resize - the constructor already set it to the correct requested domain size
-    
-    @info "Initialized regrid data cache with size: $(size(rds.data)) (requested domain + time)"
+    grid_size = length.(_regrid_model_grid(rds))
+    rds.data = zeros(eltype(rds.data), grid_size..., size(rds.data, length(size(rds.data))))
     Threads.@spawn regrid_async_loader(rds)
     rds.initialized = true
 end
 
-"""
-Async loader for regridding (mirrors DataSetInterpolator.async_loader)
-"""
 function regrid_async_loader(rds::RegridDataSetInterpolator)
     try
         while true
             t = take!(rds.loadrequest)
-            try
-                loadslice!(rds.load_cache, rds.fs, t, rds.varname)
-                put!(rds.loadresult, 0)
-            catch err
-                put!(rds.loadresult, err)
+            if t != DateTime(0, 1, 10)
+                try
+                    loadslice!(rds.load_cache, rds.fs, t, rds.varname)
+                catch err
+                    @error err
+                    put!(rds.loadresult, err)
+                    rethrow(err)
+                end
             end
+            put!(rds.loadresult, 0)
             take!(rds.copyfinish)
         end
     catch err
@@ -513,20 +391,14 @@ function regrid_async_loader(rds::RegridDataSetInterpolator)
     end
 end
 
-"""
-Update regridding cache (mirrors DataSetInterpolator.update!)
-Uses regrid_from!() for bulk preprocessing during cache loading
-"""
-function regrid_update!(rds::RegridDataSetInterpolator, t::DateTime)
+function update!(rds::RegridDataSetInterpolator, t::DateTime)
     @assert rds.initialized "Regridding interpolator has not been initialized"
     if isready(rds.loadresult)
-        # If a previous simulation ended in an error, dispose of extra result
         take!(rds.loadresult)
         put!(rds.copyfinish, 0)
     end
     times = regrid_cache_times!(rds, t)
 
-    # Figure out the overlap between the times we have and the times we need
     times_in_cache = intersect(times, rds.times)
     idxs_in_cache = [findfirst(x -> x == times_in_cache[i], rds.times)
                      for i in eachindex(times_in_cache)]
@@ -534,7 +406,6 @@ function regrid_update!(rds::RegridDataSetInterpolator, t::DateTime)
                      for i in eachindex(times_in_cache)]
     idxs_not_in_times = setdiff(eachindex(times), idxs_in_times)
 
-    # Move data we already have to where it should be
     N = ndims(rds.data)
     if all(idxs_in_cache .> idxs_in_times) && all(issorted.((idxs_in_cache, idxs_in_times)))
         for (new, old) in zip(idxs_in_times, idxs_in_cache)
@@ -551,83 +422,123 @@ function regrid_update!(rds::RegridDataSetInterpolator, t::DateTime)
         )
     end
 
-    model_grid = _regrid_model_grid(rds)
-    # Load the additional times we need and use regrid_from!() for bulk preprocessing
+    model_grid = EarthSciMLBase.grid(rds.domain, rds.metadata.staggering)
     for idx in idxs_not_in_times
         d = selectdim(rds.data, N, idx)
-        put!(rds.loadrequest, times[idx]) # Request next data
-        r = take!(rds.loadresult) # Wait for results
+        put!(rds.loadrequest, times[idx])
+        r = take!(rds.loadresult)
         if r != 0
             throw(r)
         end
-        # *** KEY CHANGE: Use regrid_from!() for bulk preprocessing ***
-        # Convert model_grid to tuple format if needed
-        model_grid_tuple = model_grid isa Tuple ? model_grid : Tuple(model_grid)
-        regrid_from!(rds, d, rds.load_cache, model_grid_tuple) # Regrid from source to model grid
-        put!(rds.copyfinish, 0) # Let the loader know we've finished copying
+        regrid_from!(rds, d, rds.load_cache, model_grid)
+        put!(rds.copyfinish, 0)
     end
     rds.times = times
     rds.currenttime = t
     @assert issorted(rds.times) "Regridding interpolator times are in wrong order"
-    update_regrid_interpolator!(rds)  # Create interpolator from regridded cache data
+    update_regrid_interpolator!(rds)
 end
 
-"""
-Update the regridding interpolator (equivalent to update_interpolator! for DataSetInterpolator)
-"""
 function update_regrid_interpolator!(rds::RegridDataSetInterpolator{To}) where {To}
     if size(rds.interp_cache) != size(rds.data)
         rds.interp_cache = similar(rds.data)
     end
     coords = _regrid_model_grid(rds)
-    
-    # Create interpolator from regridded data cache (same logic as DataSetInterpolator)
-    grid = tuple(coords..., knots2range(datetime2unix.(rds.times)))
-    copyto!(rds.interp_cache, rds.data)
-    itp = interpolate!(rds.interp_cache, BSpline(Linear()))
-    itp = scale(itp, grid)
-    rds.itp = itp
+    grid, itp2 = create_interpolator!(rds.interp_cache, rds.data, coords, rds.times)
+    @assert all([length(g) for g in grid] .== size(rds.data)) "invalid data size: $([length(g) for g in grid]) != $(size(rds.data))"
+    rds.itp = itp2
 end
 
-# Helper functions removed - now using simple interpolation approach like DataSetInterpolator
+function regrid_cache_times!(rds::RegridDataSetInterpolator, t::DateTime)
+    cache_size = length(rds.times)
+    dfi = DataFrequencyInfo(rds.fs)
+    ti = centerpoint_index(dfi, t)
+    if t < dfi.centerpoints[ti]
+        times = dfi.centerpoints[(ti - 1):(ti + cache_size - 2)]
+    else
+        times = dfi.centerpoints[ti:(ti + cache_size - 1)]
+    end
+    times
+end
 
-"""
-Lazy loading with cache management (equivalent to DataSetInterpolator.lazyload!)
-"""
-function regrid_lazyload!(rds::RegridDataSetInterpolator, t::DateTime)
+function lazyload!(rds::RegridDataSetInterpolator, t::DateTime)
     lock(rds.lock) do
         if rds.currenttime == t
             return
         end
-        if !rds.initialized # Initialize new interpolator
-            regrid_initialize!(rds, t)
-            regrid_update!(rds, t)
+        if !rds.initialized
+            initialize!(rds, t)
+            update!(rds, t)
             return
         end
         if t < rds.times[begin] || t >= rds.times[end]
-            regrid_update!(rds, t)
+            update!(rds, t)
         end
     end
     rds
 end
-
-function regrid_lazyload!(rds::RegridDataSetInterpolator, t::AbstractFloat)
-    regrid_lazyload!(rds, Dates.unix2datetime(t))
+function lazyload!(rds::RegridDataSetInterpolator, t::AbstractFloat)
+    lazyload!(rds, Dates.unix2datetime(t))
 end
 
-# Interface compatibility - RegridDataSetInterpolator must implement the same interface as DataSetInterpolator
-get_tstops(rds::RegridDataSetInterpolator, starttime::DateTime) = regrid_get_tstops(rds, starttime)
-lazyload!(rds::RegridDataSetInterpolator, t::DateTime) = regrid_lazyload!(rds, t)
-lazyload!(rds::RegridDataSetInterpolator, t::AbstractFloat) = regrid_lazyload!(rds, t)
-units(rds::RegridDataSetInterpolator) = regrid_units(rds)
-description(rds::RegridDataSetInterpolator) = regrid_description(rds)
+function regrid!(
+        rds::RegridDataSetInterpolator{T, N, N2},
+        t::DateTime,
+        locs::Vararg{T, N2}
+)::T where {T, N, N2}
+    lazyload!(rds, t)
+    regrid_unsafe(rds, t, locs...)
+end
 
-# Dummy functions for unit validation
+@generated function regrid_unsafe(
+        rds::RegridDataSetInterpolator{T1, N, N2},
+        t::DateTime,
+        locs::Vararg{T2, N2}
+) where {T1, T2, N, N2}
+    if N2 == N - 1
+        quote
+            try
+                rds.itp(locs..., datetime2unix(t))
+            catch err
+                @warn "Regridding for $(rds.varname) failed at t=$(t), locs=$(locs); trying to update interpolator."
+                lazyload!(rds, t)
+                rds.itp(locs..., datetime2unix(t))
+            end
+        end
+    else
+        throw(ArgumentError("N2 must be equal to N-1"))
+    end
+end
+
+function regrid!(rds::RegridDataSetInterpolator, t::Real, locs::Vararg{T, N})::T where {T, N}
+    regrid!(rds, Dates.unix2datetime(t), locs...)
+end
+function regrid_unsafe(
+        rds::RegridDataSetInterpolator, t::Real, locs::Vararg{T, N})::T where {T, N}
+    regrid_unsafe(rds, Dates.unix2datetime(t), locs...)
+end
+
 regrid!(rds::Union{DynamicQuantities.AbstractQuantity, Real}, t, locs...) = rds
 regrid_unsafe(rds::Union{DynamicQuantities.AbstractQuantity, Real}, t, locs...) = rds
 
-# Create regrid equation for RegridDataSetInterpolator
-# This allows RegridDataSetInterpolator to be used in the same way as DataSetInterpolator
+@register_symbolic regrid!(rds::RegridDataSetInterpolator, t, loc1, loc2, loc3)
+@register_symbolic regrid!(rds::RegridDataSetInterpolator, t, loc1, loc2) false
+@register_symbolic regrid!(rds::RegridDataSetInterpolator, t, loc1) false
+@register_symbolic regrid_unsafe(rds::RegridDataSetInterpolator, t, loc1, loc2, loc3)
+@register_symbolic regrid_unsafe(rds::RegridDataSetInterpolator, t, loc1, loc2) false
+@register_symbolic regrid_unsafe(rds::RegridDataSetInterpolator, t, loc1) false
+
+function get_tstops(rds::RegridDataSetInterpolator, starttime::DateTime)
+    dfi = DataFrequencyInfo(rds.fs)
+    datetime2unix.(sort([starttime, dfi.centerpoints...]))
+end
+
+units(rds::RegridDataSetInterpolator) = regrid_units(rds)
+description(rds::RegridDataSetInterpolator) = regrid_description(rds)
+
+# Add method for RegridDataSetInterpolator to existing ITPWrapper from load.jl
+(itp::ITPWrapper{<:RegridDataSetInterpolator})(t, locs::Vararg{T, N}) where {T, N} = regrid_unsafe(itp.itp, t, locs...)
+
 function create_regrid_equation(rds::RegridDataSetInterpolator, filename, t, t_ref, coords; wrapper_f = v -> v)
     n = length(filename) > 0 ? Symbol("$(filename)₊$(rds.varname)") :
         Symbol("$(rds.varname)")
@@ -638,14 +549,12 @@ function create_regrid_equation(rds::RegridDataSetInterpolator, filename, t, t_r
     p_itp = only(
         @parameters ($n_p::t_itp)(..)=itp [
         unit = regrid_units(rds),
-        description = "Interpolated $(n)"
+        description = "Regridded $(n)"
     ]
     )
 
-    # Create right hand side of equation.
     rhs = wrapper_f(p_itp(t_ref + t, coords...))
 
-    # Create left hand side of equation.
     desc = regrid_description(rds)
     uu = ModelingToolkit.get_unit(rhs)
     lhs = only(
@@ -659,4 +568,4 @@ function create_regrid_equation(rds::RegridDataSetInterpolator, filename, t, t_r
     eq = lhs ~ rhs
 
     return eq, p_itp
-end 
+end

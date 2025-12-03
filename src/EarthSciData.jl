@@ -9,6 +9,7 @@ using EarthSciMLBase, DiffEqCallbacks
 using DynamicQuantities, Latexify, ProgressMeter
 using Scratch
 using SparseArrays, JLD2
+using ConservativeRegridding
 
 # General utilities
 include("load.jl")

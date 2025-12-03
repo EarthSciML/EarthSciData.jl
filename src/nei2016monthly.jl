@@ -465,8 +465,8 @@ function NEI2016MonthlyEmis_regrid(
     for varname in varnames(fs)
         dt = EarthSciMLBase.eltype(domaininfo)
         # Use RegridDataSetInterpolator for conservative regridding
-        weights_path = joinpath(@__DIR__, "regrid_weights.jld2")
-        itp = RegridDataSetInterpolator{dt}(fs, varname, starttime, endtime, domaininfo, weights_path;
+        # Weights are automatically cached and reused for all variables
+        itp = RegridDataSetInterpolator{dt}(fs, varname, starttime, endtime, domaininfo;
             stream = stream)
 
         # Units after conversion: kg/m²/s -> kg/kg/s

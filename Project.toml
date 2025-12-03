@@ -4,6 +4,7 @@ authors = ["EarthSciML Authors"]
 version = "0.14.0"
 
 [deps]
+ConservativeRegridding = "8e50ac2c-eb48-49bc-a402-07c87b949343"
 DataInterpolations = "82cc6244-b520-54b8-b5a6-8a565e85f1d0"
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
 DiffEqCallbacks = "459566f4-90b8-5000-8ac3-15dfb0a30def"

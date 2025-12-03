@@ -95,6 +95,7 @@ end
     levrange=1:2,
     u_proto=zeros(Float64, 1, 1, 1, 1))
 
+    lon, lat, lev = EarthSciMLBase.pvars(domain)
     emis_regrid = NEI2016MonthlyEmis_regrid("mrggrid_withbeis_withrwc", domain)
     @constants uc = 1.0 [unit = u"s" description = "unit conversion"]
     eq = Differential(t)(emis_regrid.ACET) ~ equations(emis_regrid)[1].rhs / uc
@@ -108,7 +109,7 @@ end
     )
     sol = solve(prob, Tsit5())
     println(sol.u)
-    @test sol.u[end][end] ≈ 5.750045239024546e-11
+    @test sol.u[end][end] ≈ 5.750157952328239e-11
 end
 
 @testset "diurnal_itp function" begin
@@ -200,6 +201,13 @@ end
 end
 
 @testset "regridding" begin
+    domain = DomainInfo(
+        DateTime(2016, 5, 1),
+        DateTime(2016, 5, 2);
+        lonrange=deg2rad(-125):deg2rad(0.625):deg2rad(-66.875),
+        latrange=deg2rad(25):deg2rad(0.5):deg2rad(49),
+        levrange = 1:10
+    )
     emis = NEI2016MonthlyEmis_regrid("mrggrid_withbeis_withrwc", domain)
     eqs = equations(emis)
     @test length(eqs) == 69
@@ -208,23 +216,27 @@ end
     sample_time = DateTime(2016, 5, 1)
 
     @testset "regridding weights loading" begin
-        # Test that weights file can be loaded
-        weights_path = joinpath(dirname(@__DIR__), "src", "regrid_weights.jld2")
-        if isfile(weights_path)
-            weights = EarthSciData.load_regrid_weights(weights_path)
-            @test haskey(weights, :xc_b) || haskey(weights, "xc_b")
-            @test haskey(weights, :yc_b) || haskey(weights, "yc_b")
-            @test haskey(weights, :row) || haskey(weights, "row")
-            @test haskey(weights, :col) || haskey(weights, "col")
-            @test haskey(weights, :S) || haskey(weights, "S")
-            @test haskey(weights, :frac_b) || haskey(weights, "frac_b")
-        else
-            @test_skip "regrid_weights.jld2 file not found - skipping regridding weight tests"
-        end
+        # Test that weights can be computed dynamically
+        domain = DomainInfo(
+            DateTime(2016, 5, 1),
+            DateTime(2016, 5, 2);
+            lonrange=deg2rad(-125):deg2rad(0.625):deg2rad(-66.875),
+            latrange=deg2rad(25):deg2rad(0.5):deg2rad(49),
+            levrange = 1:10
+        )
+        ts, te = get_tspan_datetime(domain)
+        fileset = EarthSciData.NEI2016MonthlyEmisFileSet("mrggrid_withbeis_withrwc", ts, te)
+        metadata = EarthSciData.loadmetadata(fileset, "NO")
+        weights = EarthSciData.compute_weights_for_domain(fileset, metadata, domain)
+        @test haskey(weights, :xc_b) || haskey(weights, "xc_b")
+        @test haskey(weights, :yc_b) || haskey(weights, "yc_b")
+        @test haskey(weights, :row) || haskey(weights, "row")
+        @test haskey(weights, :col) || haskey(weights, "col")
+        @test haskey(weights, :S) || haskey(weights, "S")
+        @test haskey(weights, :frac_b) || haskey(weights, "frac_b")
     end
 
     @testset "RegridDataSetInterpolator creation" begin
-        weights_path = joinpath(dirname(@__DIR__), "src", "regrid_weights.jld2")
         domain = DomainInfo(
             DateTime(2016, 5, 16, 12, 0, 0),
             DateTime(2016, 5, 17, 12, 0, 0);
@@ -234,83 +246,130 @@ end
         )
         ts, te = get_tspan_datetime(domain)
         fileset = EarthSciData.NEI2016MonthlyEmisFileSet("mrggrid_withbeis_withrwc", ts, te)
-        if isfile(weights_path)
-            # Test creating RegridDataSetInterpolator
-            itp = EarthSciData.RegridDataSetInterpolator{Float64}(fileset, "NO", ts, te, domain, weights_path)
-            @test itp.varname == "NO"
-            @test itp.weights !== nothing
-            @test itp.metadata !== nothing
+        # Test creating RegridDataSetInterpolator (weights computed dynamically)
+        itp = EarthSciData.RegridDataSetInterpolator{Float64}(fileset, "NO", ts, te, domain)
+        @test itp.varname == "NO"
+        @test itp.weights !== nothing
+        @test itp.metadata !== nothing
 
-            # Test regridding function
-            result = EarthSciData.regrid!(itp, ts, deg2rad(-88.125), deg2rad(42.0))
+        # Test regridding function
+        result = EarthSciData.regrid!(itp, ts, deg2rad(-88.125), deg2rad(42.0))
 
-            @test result ≈ 1.4877230760034898e-8   rtol = 0.01
-        else
-            @test_skip "regrid_weights.jld2 file not found - skipping RegridDataSetInterpolator tests"
-        end
+        @test result ≈ 1.4874584451793892e-8   rtol = 0.01
     end
 
     @testset "Direct regrid_from! test" begin
-        weights_path = joinpath(dirname(@__DIR__), "src", "regrid_weights.jld2")
-        if isfile(weights_path)
-            # Use the same domain as above
-            domain = DomainInfo(
-                DateTime(2016, 5, 1),
-                DateTime(2016, 5, 2);
-                lonrange=deg2rad(-125):deg2rad(0.625):deg2rad(-66.875),
-                latrange=deg2rad(25):deg2rad(0.5):deg2rad(49),
-                levrange = 1:10
-            )
-            ts, te = get_tspan_datetime(domain)
-            fileset = EarthSciData.NEI2016MonthlyEmisFileSet("mrggrid_withbeis_withrwc", ts, te)
+        # Use the same domain as above
+        domain = DomainInfo(
+            DateTime(2016, 5, 1),
+            DateTime(2016, 5, 2);
+            lonrange=deg2rad(-125):deg2rad(0.625):deg2rad(-66.875),
+            latrange=deg2rad(25):deg2rad(0.5):deg2rad(49),
+            levrange = 1:10
+        )
+        ts, te = get_tspan_datetime(domain)
+        fileset = EarthSciData.NEI2016MonthlyEmisFileSet("mrggrid_withbeis_withrwc", ts, te)
 
-            # Create RegridDataSetInterpolator
-            itp = EarthSciData.RegridDataSetInterpolator{Float64}(fileset, "NO", ts, te, domain, weights_path)
+        # Create RegridDataSetInterpolator (weights computed dynamically)
+        itp = EarthSciData.RegridDataSetInterpolator{Float64}(fileset, "NO", ts, te, domain)
 
             # Initialize and load data
-            EarthSciData.regrid_initialize!(itp, ts)
-            EarthSciData.regrid_update!(itp, ts)
+            EarthSciData.initialize!(itp, ts)
+            EarthSciData.update!(itp, ts)
 
-            grid_coords = EarthSciData._regrid_model_grid(itp)
+            # Get grid coordinates from domain (data array is [lon, lat, time])
+            grid = EarthSciMLBase.grid(domain, itp.metadata.staggering)
+            lon_grid = grid[1]
+            lat_grid = grid[2]
 
-            # Test direct array lookup at [44, 35] location, time dimension 2( time dimension 1 is April data)
+            # Test direct array lookup, time dimension 2 (time dimension 1 is April data)
             # Convert coordinates to radians
-            lon_coord = deg2rad(-88.125)  # This should be at index 44
-            lat_coord = deg2rad(42.0)     # This should be at index 35
+            lon_coord = deg2rad(-88.125)
+            lat_coord = deg2rad(42.0)
 
-            # Check if coordinates match grid points
-            lon_idx = findfirst(x -> abs(x - lon_coord) < 1e-10, grid_coords[1])
+            # Find indices
+            lon_idx = findfirst(x -> abs(x - lon_coord) < 1e-10, lon_grid)
+            lat_idx = findfirst(x -> abs(x - lat_coord) < 1e-10, lat_grid)
             @test lon_idx == 60
-            lat_idx = findfirst(x -> abs(x - lat_coord) < 1e-10, grid_coords[2])
             @test lat_idx == 35
+
             # Get the regridded data directly from the cache
-            regridded_value = itp.data[60, 35, 2]  # [lon_idx, lat_idx, time_idx]
+            # Data array is [lon, lat, time] since domain_dims = length.(grid[1:2])
+            regridded_value = itp.data[lon_idx, lat_idx, 2]  # [lon_idx, lat_idx, time_idx]
             # time dimension 2 is May data
 
-            # Test if the direct regridded value matches expected
-            @test regridded_value ≈ 1.4877230760034898e-8 rtol = 0.01
-        else
-            @test_skip "regrid_weights.jld2 file not found - skipping direct regrid_from! test"
-        end
+        # Test if the direct regridded value matches expected
+        @test regridded_value ≈ 1.4874584451793892e-8 rtol = 0.01
+    end
+
+    @testset "Direct regrid_from! test - 2*2.5 degree domain" begin
+        # Use the same domain as above
+        domain = DomainInfo(
+            DateTime(2016, 5, 1),
+            DateTime(2016, 5, 2);
+            lonrange=deg2rad(-125):deg2rad(2.5):deg2rad(-66.875),
+            latrange=deg2rad(25):deg2rad(2.0):deg2rad(49),
+            levrange = 1:10
+        )
+        ts, te = get_tspan_datetime(domain)
+        fileset = EarthSciData.NEI2016MonthlyEmisFileSet("mrggrid_withbeis_withrwc", ts, te)
+
+        # Create RegridDataSetInterpolator (weights computed dynamically)
+        itp = EarthSciData.RegridDataSetInterpolator{Float64}(fileset, "NO", ts, te, domain)
+
+            # Initialize and load data
+            EarthSciData.initialize!(itp, ts)
+            EarthSciData.update!(itp, ts)
+
+            # Get grid coordinates from domain (data array is [lon, lat, time])
+            grid = EarthSciMLBase.grid(domain, itp.metadata.staggering)
+            lon_grid = grid[1]
+            lat_grid = grid[2]
+
+            # Test direct array lookup, time dimension 2 (time dimension 1 is April data)
+            # Convert coordinates to radians
+            lon_coord = deg2rad(-87.5)
+            lat_coord = deg2rad(41.0)
+
+            # Find indices
+            lon_idx = findfirst(x -> abs(x - lon_coord) < 1e-10, lon_grid)
+            lat_idx = findfirst(x -> abs(x - lat_coord) < 1e-10, lat_grid)
+            @test lon_idx == 16
+            @test lat_idx == 9
+
+            # Get the regridded data directly from the cache
+            # Data array is [lon, lat, time] since domain_dims = length.(grid[1:2])
+            regridded_value = itp.data[lon_idx, lat_idx, 2]  # [lon_idx, lat_idx, time_idx]
+            # time dimension 2 is May data
+
+        # Test if the direct regridded value matches expected
+        @test regridded_value ≈ 3.2903463487573787e-9 rtol = 0.01
     end
 
     @testset "contributors_for_lonlat function" begin
-        weights_path = joinpath(dirname(@__DIR__), "src", "regrid_weights.jld2")
-        if isfile(weights_path)
-            weights = EarthSciData.load_regrid_weights_cached(weights_path)
+        # Test that weights are computed correctly
+        domain = DomainInfo(
+            DateTime(2016, 5, 1),
+            DateTime(2016, 5, 2);
+            lonrange=deg2rad(-125):deg2rad(0.625):deg2rad(-66.875),
+            latrange=deg2rad(25):deg2rad(0.5):deg2rad(49),
+            levrange = 1:10
+        )
+        ts, te = get_tspan_datetime(domain)
+        fileset = EarthSciData.NEI2016MonthlyEmisFileSet("mrggrid_withbeis_withrwc", ts, te)
+        metadata = EarthSciData.loadmetadata(fileset, "NO")
+        weights = EarthSciData.compute_weights_for_domain(fileset, metadata, domain)
 
-            # Test the core regridding function
-            lon_rad = deg2rad(-88.125)  # Convert to radians (weights expect radians)
-            lat_rad = deg2rad(42.0)   # Convert to radians (weights expect radians)
-
-            j, src_idx, w_flux = EarthSciData.contributors_for_lonlat(lon_rad, lat_rad, weights)
-            @test j == 3256
-            @test src_idx[1] == 74630
-            @test w_flux[1] == 0.0006596109476296964
-
-        else
-            @test_skip "regrid_weights.jld2 file not found - skipping contributors_for_lonlat tests"
-        end
+        # Test that weights have the expected structure
+        @test haskey(weights, :W)
+        @test haskey(weights, :row)
+        @test haskey(weights, :col)
+        @test haskey(weights, :S)
+        @test haskey(weights, :frac_b)
+        @test haskey(weights, :xc_b)
+        @test haskey(weights, :yc_b)
+        @test length(weights.xc_b) > 0
+        @test length(weights.yc_b) > 0
     end
 
 @testset "regrid emission values" begin
@@ -321,6 +380,7 @@ end
         latrange=deg2rad(42):deg2rad(0.5):deg2rad(43),
         levrange = 1:2
     )
+    lon, lat, lev = EarthSciMLBase.pvars(domain)
     emis = NEI2016MonthlyEmis_regrid("mrggrid_withbeis_withrwc", domain)
     eqs = equations(emis)
     @test length(eqs) == 69
@@ -331,7 +391,7 @@ end
 
 
     # 3. Setup output array
-    t_end = 3600  # in seconds (you can use longer for realistic change)
+    t_end = 1800  # in seconds (you can use longer for realistic change)
     nt = 5  # number of time steps saved
     lon_grid = deg2rad(-88.125):deg2rad(0.625):deg2rad(-86.875)
     lat_grid = deg2rad(42):deg2rad(0.5):deg2rad(43)
@@ -367,5 +427,67 @@ end
             NO_map[i, j, :] = getindex.(sol.u, 1)  # extract scalar values
         end
     end
-    @test NO_map[1, 1, end] ≈ 1.4877230035317165e-8*3600*0.88 /(100.0 / 9.80665 * 14.8498301901334)
+
+    factor = EarthSciData.dayofweek_itp_NOx(datetime2unix(ts)+1800, deg2rad(-88.125))*EarthSciData.diurnal_itp_NOx(datetime2unix(ts)+1800, deg2rad(-88.125))
+    @test NO_map[1, 1, end] ≈ 1.4874584451793892e-8*1800*factor /(100.0 / 9.80665 * 14.8498301901334) rtol = 0.01
+    # The value is not exactly the same as the expected value because the model value is interpolated between the April and May regriddeddata.
+    end
+
+
+@testset "regrid emission values -- ACET " begin
+    domain = DomainInfo(
+        DateTime(2016, 5, 15),
+        DateTime(2016, 5, 16);
+        lonrange=deg2rad(-88.125):deg2rad(0.625):deg2rad(-86.875),
+        latrange=deg2rad(42):deg2rad(0.5):deg2rad(43),
+        levrange = 1:2
+    )
+    lon, lat, lev = EarthSciMLBase.pvars(domain)
+    emis = NEI2016MonthlyEmis_regrid("mrggrid_withbeis_withrwc", domain)
+
+    ts, te = get_tspan_datetime(domain)
+    sample_time = ts
+
+
+    # 3. Setup output array
+    t_end = 3600  # in seconds (you can use longer for realistic change)
+    nt = 5  # number of time steps saved
+    lon_grid = deg2rad(-88.125):deg2rad(0.625):deg2rad(-86.875)
+    lat_grid = deg2rad(42):deg2rad(0.5):deg2rad(43)
+    ACET_map = Array{Float64}(undef, length(lon_grid), length(lat_grid), nt)
+    tspan = (0.0, t_end)
+
+    # 4. Constants
+    @constants uc = 1.0 [unit = u"s", description = "unit conversion"]
+
+
+    saveat = range(tspan[1], tspan[2], length=nt)
+
+    # 5. Loop over grid points
+    total_points = length(lon_grid) * length(lat_grid)
+    for (i, lon_val) in enumerate(lon_grid)
+        for (j, lat_val) in enumerate(lat_grid)
+            # Create ODE system
+            eq = Differential(t)(emis.ACET) ~ equations(emis)[1].rhs / uc
+            sys = extend(ODESystem([eq], t, [], []; name = Symbol("ACET_sys_$(i)_$(j)")), emis)
+            sys = structural_simplify(sys)
+
+            # Setup problem
+            prob = ODEProblem(sys, zeros(1), tspan, [
+                lat => lat_val,
+                lon => lon_val,
+                lev => 1.0
+            ])
+
+            # Solve
+            sol = solve(prob, Tsit5(), saveat=saveat)
+
+            # Store time series
+            ACET_map[i, j, :] = getindex.(sol.u, 1)  # extract scalar values
+        end
+    end
+
+    @test ACET_map[1, 1, end] ≈ 6.119836158271685e-10*3600 /(100.0 / 9.80665 * 14.8498301901334) rtol = 0.01
+    # The value is not exactly the same as the expected value because the model value is interpolated between the April and May regriddeddata.
+    end
 end
