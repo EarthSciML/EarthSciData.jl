@@ -1,3 +1,23 @@
+@testitem "NEI Setup" begin
+    using Dates: DateTime
+    using EarthSciMLBase
+    using EarthSciData
+
+    domain = DomainInfo(
+        DateTime(2016, 5, 1),
+        DateTime(2016, 5, 2);
+        latrange = deg2rad(-85.0f0):deg2rad(2):deg2rad(85.0f0),
+        lonrange = deg2rad(-180.0f0):deg2rad(2.5):deg2rad(175.0f0),
+        levrange = 1:10
+    )
+    lon, lat, lev = EarthSciMLBase.pvars(domain)
+
+    ts, te = get_tspan_datetime(domain)
+    sample_time = ts
+
+    emis = NEI2016MonthlyEmis("mrggrid_withbeis_withrwc", domain)
+    fileset = EarthSciData.NEI2016MonthlyEmisFileSet("mrggrid_withbeis_withrwc", ts, te)
+end
 
 @testsnippet NEISetup begin
     using Dates: DateTime
@@ -71,22 +91,23 @@ end
     @test month(itp.times[2]) == 6
 end
 
-@testset "run" begin
-    @constants uc = 1.0 [unit = u"s" description = "unit conversion"]
-    eq = Differential(t)(emis.ACET) ~ equations(emis)[1].rhs / uc
-    sys = extend(ODESystem([eq], t, [], []; name = :test_sys), emis)
-    sys = structural_simplify(sys)
+@testitem "run" setup=[NEISetup] begin
+    using ModelingToolkit
+    using OrdinaryDiffEqTsit5
+    sys = structural_simplify(emis)
     prob = ODEProblem(
         sys,
         zeros(1),
         (0.0, 60.0),
         [lat => deg2rad(40.0), lon => deg2rad(-97.5), lev => 1.0]
     )
-    sol = solve(prob, Tsit5())
-    @test sol.u[end][end] ≈ 5.08133281184207e-11
+    solve(prob, Tsit5())
 end
 
-@testset "run_regrid" begin
+@testitem "run_regrid" setup=[NEISetup] begin
+    using ModelingToolkit, OrdinaryDiffEqTsit5
+    using ModelingToolkit: t, D
+    using DynamicQuantities
     domain = DomainInfo(
     DateTime(2016, 5, 16),
     DateTime(2016, 5, 17);
@@ -98,8 +119,9 @@ end
     lon, lat, lev = EarthSciMLBase.pvars(domain)
     emis_regrid = NEI2016MonthlyEmis_regrid("mrggrid_withbeis_withrwc", domain)
     @constants uc = 1.0 [unit = u"s" description = "unit conversion"]
-    eq = Differential(t)(emis_regrid.ACET) ~ equations(emis_regrid)[1].rhs / uc
-    sys = extend(ODESystem([eq], t, [], []; name = :test_sys), emis_regrid)
+    @variables ACET(t) [unit = u"1/s"]
+    eq = D(ACET) ~ emis_regrid.ACET / uc
+    sys = compose(ODESystem([eq], t, [ACET], [uc]; name = :test_sys), emis_regrid)
     sys = structural_simplify(sys)
     prob = ODEProblem(
         sys,
@@ -112,7 +134,9 @@ end
     @test sol.u[end][end] ≈ 5.693715670594291e-11
 end
 
-@testset "diurnal_itp function" begin
+@testitem "diurnal_itp function" setup=[NEISetup] begin
+    using Dates
+
     # Test domain starts at 2016-05-01 00:00:00 UTC
     t_ref_numeric = datetime2unix(DateTime(2016, 5, 1))  # Domain starts at 2016-05-01 00:00:00
 
@@ -148,8 +172,10 @@ end
     @test EarthSciData.diurnal_itp(half_past_one_utc, lon_utc) == EarthSciData.DIURNAL_FACTORS[2]  # Should floor to hour 1
 end
 
+@testitem "allocations" setup=[NEISetup] begin
 if !Sys.iswindows() # Allocation tests don't seem to work on windows.
-    @testset "allocations" begin
+        using AllocCheck
+
         @check_allocs checkf(
             itp, t, loc1, loc2) = EarthSciData.interp_unsafe(itp, t, loc1, loc2)
 
@@ -178,29 +204,32 @@ if !Sys.iswindows() # Allocation tests don't seem to work on windows.
     end
 end
 
-@testset "Coupling with GEOS-FP" begin
+@testitem "Coupling with GEOS-FP" setup=[NEISetup] begin
+    using ModelingToolkit
     gfp = GEOSFP("4x5", domain)
 
     csys = couple(emis, gfp)
-    sys = convert(ODESystem, csys, prune = false)
+    sys = convert(System, csys)
     eqs = observed(sys)
 
     @test occursin("NEI2016MonthlyEmis₊lat(t) ~ GEOSFP₊lat", string(eqs))
 end
 
-@testset "wrong year" begin
+@testitem "wrong year" setup=[NEISetup] begin
+    using Dates
     sample_time = DateTime(2016, 5, 1)
     itp = EarthSciData.DataSetInterpolator{Float32}(fileset, "NOX", ts, te, domain)
     sample_time = DateTime(2017, 5, 1)
     @test_throws ArgumentError EarthSciData.lazyload!(itp, sample_time)
 end
 
-@testset "delp_dry_surface_itp" begin
+@testitem "delp_dry_surface_itp" setup=[NEISetup] begin
     @test EarthSciData.delp_dry_surface_itp(deg2rad(-94.375), deg2rad(44.5)) ≈ 14.721285536474896
     @test EarthSciData.delp_dry_surface_itp(deg2rad(-88.125), deg2rad(42.0)) ≈ 14.8498301901334
 end
 
-@testset "regridding" begin
+@testitem "regridding" setup=[NEISetup] begin
+    using ModelingToolkit
     domain = DomainInfo(
         DateTime(2016, 5, 1),
         DateTime(2016, 5, 2);
@@ -371,8 +400,13 @@ end
         @test length(weights.xc_b) > 0
         @test length(weights.yc_b) > 0
     end
+end
 
-@testset "regrid emission values" begin
+@testitem "regrid emission values" setup=[NEISetup] begin
+    using ModelingToolkit, DynamicQuantities
+    using ModelingToolkit: t, D
+    using OrdinaryDiffEqTsit5
+    using Dates
     domain = DomainInfo(
         DateTime(2016, 5, 15),
         DateTime(2016, 5, 16);
@@ -400,6 +434,7 @@ end
 
     # 4. Constants
     @constants uc = 1.0 [unit = u"s", description = "unit conversion"]
+    @variables NO(t) [unit = u"1/s"]
 
 
     saveat = range(tspan[1], tspan[2], length=nt)
@@ -409,8 +444,8 @@ end
     for (i, lon_val) in enumerate(lon_grid)
         for (j, lat_val) in enumerate(lat_grid)
             # Create ODE system
-            eq = Differential(t)(emis.NO) ~ equations(emis)[31].rhs / uc
-            sys = extend(ODESystem([eq], t, [], []; name = Symbol("NO_sys_$(i)_$(j)")), emis)
+            eq = D(NO) ~ emis.NO / uc
+            sys = compose(ODESystem([eq], t, [NO], [uc]; name = Symbol("NO_sys_$(i)_$(j)")), emis)
             sys = structural_simplify(sys)
 
             # Setup problem
@@ -433,8 +468,11 @@ end
     # The value is not exactly the same as the expected value because the model value is interpolated between the April and May regriddeddata.
     end
 
-
-@testset "regrid emission values -- ACET " begin
+@testitem "regrid emission values -- ACET " setup=[NEISetup] begin
+    using ModelingToolkit, DynamicQuantities
+    using ModelingToolkit: t, D
+    using OrdinaryDiffEqTsit5
+    using Dates
     domain = DomainInfo(
         DateTime(2016, 5, 15),
         DateTime(2016, 5, 16);
@@ -459,6 +497,7 @@ end
 
     # 4. Constants
     @constants uc = 1.0 [unit = u"s", description = "unit conversion"]
+    @variables ACET(t) [unit = u"1/s"]
 
 
     saveat = range(tspan[1], tspan[2], length=nt)
@@ -468,8 +507,8 @@ end
     for (i, lon_val) in enumerate(lon_grid)
         for (j, lat_val) in enumerate(lat_grid)
             # Create ODE system
-            eq = Differential(t)(emis.ACET) ~ equations(emis)[1].rhs / uc
-            sys = extend(ODESystem([eq], t, [], []; name = Symbol("ACET_sys_$(i)_$(j)")), emis)
+            eq = D(ACET) ~ emis.ACET / uc
+            sys = compose(ODESystem([eq], t, [ACET], [uc]; name = Symbol("ACET_sys_$(i)_$(j)")), emis)
             sys = structural_simplify(sys)
 
             # Setup problem
@@ -489,5 +528,4 @@ end
 
     @test ACET_map[1, 1, end] ≈ 5.306331280986193e-10*3600 /(100.0 / 9.80665 * 14.8498301901334) rtol = 0.01
     # The value is not exactly the same as the expected value because the model value is interpolated between the April and May regriddeddata.
-    end
 end

@@ -34,7 +34,7 @@ function build_source_grid_polygons_from_attributes(
     y_edges = collect(YORIG : YCELL : YORIG + NROWS*YCELL)
     nx = length(x_edges) - 1
     ny = length(y_edges) - 1
-    
+
     source_grid = Vector{Vector{Tuple{Float64, Float64}}}()
     for j in 1:ny
         y0, y1 = y_edges[j], y_edges[j+1]
@@ -45,7 +45,7 @@ function build_source_grid_polygons_from_attributes(
             push!(source_grid, polygon)
         end
     end
-    
+
     return source_grid
 end
 
@@ -56,23 +56,23 @@ Returns: target_grid (polygons in LCC), lon_centers_deg, lat_centers_deg (for in
 """
 function build_target_grid_polygons(domain_coords::Tuple, native_sr::AbstractString)
     lon_coords_rad, lat_coords_rad = domain_coords[1], domain_coords[2]
-    
+
     lon_vec = collect(lon_coords_rad)
     lat_vec = collect(lat_coords_rad)
-    
+
     lon_centers_deg = rad2deg.(lon_vec)
     lat_centers_deg = rad2deg.(lat_vec)
-    
+
     lon_edges = edges_from_centers(lon_centers_deg)
     lat_edges = edges_from_centers(lat_centers_deg)
-    
+
     nxi = length(lon_edges) - 1
     nyi = length(lat_edges) - 1
-    
+
     # Create transformation from lon-lat to LCC
     geo_str = "+proj=longlat +datum=WGS84 +no_defs"
     geo_to_lcc = Proj.Transformation(geo_str, native_sr; always_xy=true)
-    
+
     # Build target grid polygons in LCC meters (for physically correct weight computation)
     target_grid = Vector{Vector{Tuple{Float64, Float64}}}()
     for j in 1:nyi
@@ -90,7 +90,7 @@ function build_target_grid_polygons(domain_coords::Tuple, native_sr::AbstractStr
             push!(target_grid, polygon)
         end
     end
-    
+
     # Compute centers from edges in lon-lat (for indexing/regridding operations)
     dst_lon_center_deg = Vector{Float64}(undef, length(target_grid))
     dst_lat_center_deg = Vector{Float64}(undef, length(target_grid))
@@ -101,7 +101,7 @@ function build_target_grid_polygons(domain_coords::Tuple, native_sr::AbstractStr
             dst_lat_center_deg[k] = (lat_edges[j] + lat_edges[j+1]) / 2
         end
     end
-    
+
     return target_grid, dst_lon_center_deg, dst_lat_center_deg
 end
 
@@ -116,10 +116,10 @@ function compute_regridding_weights(
     target_lat_centers_deg::Vector{Float64}
 )
     @info "Computing regrid weights for $(length(target_grid)) target cells (in LCC coordinates)..."
-    
+
     # Compute weights in LCC coordinate system (physically correct for area calculations)
     R = ConservativeRegridding.Regridder(target_grid, source_grid; normalize=false)
-    
+
     # Extract weight matrix (intersection areas in LCC coordinate system)
     W = if hasfield(typeof(R), :A)
         getfield(R, :A)
@@ -138,15 +138,15 @@ function compute_regridding_weights(
         tmpW
     end
     @assert W isa SparseMatrixCSC "Weight matrix must be sparse"
-    
+
     row, col, S = findnz(W)
     frac_b = vec(sum(W, dims=2))
-    
+
     xc_b_rad = deg2rad.(target_lon_centers_deg)
     yc_b_rad = deg2rad.(target_lat_centers_deg)
-    
+
     @info "Regridder created: $(size(W)) with $(length(row)) non-zero weights"
-    
+
     return (row=row, col=col, S=S, frac_b=frac_b, xc_b=xc_b_rad, yc_b=yc_b_rad, W=W)
 end
 
@@ -169,19 +169,19 @@ Thread-safe: uses double-checked locking to prevent duplicate computations
 """
 function compute_weights_for_domain(fs::FileSet, metadata::MetaData, domain)
     cache_key = _weights_cache_key(fs, domain)
-    
+
     lock(_weights_cache_lock) do
         if haskey(_weights_cache, cache_key)
             @debug "Reusing cached regridding weights"
             return _weights_cache[cache_key]
         end
-        
+
         weights = lock(nclock) do
             if hasfield(typeof(fs), :ds) && fs.ds !== nothing
                 if haskey(fs.ds.attrib, "XORIG") && haskey(fs.ds.attrib, "YORIG") &&
                    haskey(fs.ds.attrib, "XCELL") && haskey(fs.ds.attrib, "YCELL") &&
                    haskey(fs.ds.attrib, "NCOLS") && haskey(fs.ds.attrib, "NROWS")
-                    
+
                     XORIG = fs.ds.attrib["XORIG"]
                     YORIG = fs.ds.attrib["YORIG"]
                     XCELL = fs.ds.attrib["XCELL"]
@@ -189,25 +189,25 @@ function compute_weights_for_domain(fs::FileSet, metadata::MetaData, domain)
                     NCOLS = fs.ds.attrib["NCOLS"]
                     NROWS = fs.ds.attrib["NROWS"]
                     native_sr = metadata.native_sr
-                    
+
                     source_grid = build_source_grid_polygons_from_attributes(
                         XORIG, YORIG, XCELL, YCELL, NCOLS, NROWS, native_sr
                     )
-                    
+
                     grid = EarthSciMLBase.grid(domain, (false, false, false))
                     if metadata.zdim <= 0
                         target_coords = (grid[1], grid[2])
                     else
                         target_coords = (grid[1], grid[2])
                     end
-                    
-                    target_grid, target_lon_centers_deg, target_lat_centers_deg = 
+
+                    target_grid, target_lon_centers_deg, target_lat_centers_deg =
                         build_target_grid_polygons(target_coords, native_sr)
-                    
+
                     weights = compute_regridding_weights(
                         source_grid, target_grid, target_lon_centers_deg, target_lat_centers_deg
                     )
-                    
+
                     return weights
                 else
                     error("File set does not have required NEI grid attributes")
@@ -216,7 +216,7 @@ function compute_weights_for_domain(fs::FileSet, metadata::MetaData, domain)
                 error("File set does not have a dataset (ds field) for dynamic weight computation")
             end
         end
-        
+
         _weights_cache[cache_key] = weights
         return weights
     end
@@ -254,7 +254,7 @@ mutable struct RegridDataSetInterpolator{To, N, N2, FT, WT, DomT, ITPT}
     ) where {To <: Real}
         metadata = loadmetadata(fs, varname)
         weights = compute_weights_for_domain(fs, metadata, domain)
-        
+
         dfi = DataFrequencyInfo(fs)
         cache_size = 2
         if !stream
@@ -264,7 +264,7 @@ mutable struct RegridDataSetInterpolator{To, N, N2, FT, WT, DomT, ITPT}
                 (endtime + dfi.frequency),
             )
         end
-        
+
         load_cache = zeros(To, repeat([1], length(metadata.varsize))...)
         grid = EarthSciMLBase.grid(domain, metadata.staggering)
         if metadata.zdim <= 0
@@ -278,7 +278,7 @@ mutable struct RegridDataSetInterpolator{To, N, N2, FT, WT, DomT, ITPT}
         N = ndims(data)
         N2 = N - 1
         times = [DateTime(0, 1, 1) + Hour(i) for i in 1:cache_size]
-        
+
         _, itp2 = create_interpolator!(
             interp_cache,
             data,
@@ -286,7 +286,7 @@ mutable struct RegridDataSetInterpolator{To, N, N2, FT, WT, DomT, ITPT}
             times
         )
         ITPT = typeof(itp2)
-        
+
         coord_trans = (x) -> x  # No coordinate transformation needed for regridding
         FT = typeof(coord_trans)
         WT = typeof(weights)
@@ -307,8 +307,8 @@ function Base.show(io::IO, itp::RegridDataSetInterpolator)
     print(io, "RegridDataSetInterpolator{$(typeof(itp.fs)), $(itp.varname)}")
 end
 
-ModelingToolkit.get_unit(rds::RegridDataSetInterpolator) = rds.metadata.units
-regrid_units(rds::RegridDataSetInterpolator) = rds.metadata.units
+ModelingToolkit.get_unit(rds::RegridDataSetInterpolator) = rds.metadata.unit_str
+regrid_units(rds::RegridDataSetInterpolator) = rds.metadata.unit_str
 regrid_description(rds::RegridDataSetInterpolator) = rds.metadata.description
 
 """
@@ -339,14 +339,14 @@ Uses vectorized operations with precomputed weights for maximum performance.
 """
 function regrid_from!(dsi::RegridDataSetInterpolator, dst::AbstractArray{T, N},
         src::AbstractArray{T, N}, model_grid, extrapolate_type = 0.0) where {T, N}
-    
+
     src_vec = vec(src)
     W = dsi.weights.W
     frac_b = dsi.weights.frac_b
-    
+
     # Vectorized regridding: W * src_vec / frac_b
     dst_vec = (W * src_vec) ./ max.(frac_b, eps())
-    
+
     # Reshape to destination dimensions
     if N == 3
         nxi, nyi = length(model_grid[1]), length(model_grid[2])
@@ -373,7 +373,7 @@ function regrid_from!(dsi::RegridDataSetInterpolator, dst::AbstractArray{T, N},
     else
         error("Invalid dimension configuration for regridding")
     end
-    
+
     return dst
 end
 
@@ -552,7 +552,7 @@ function get_tstops(rds::RegridDataSetInterpolator, starttime::DateTime)
     datetime2unix.(sort([starttime, dfi.centerpoints...]))
 end
 
-units(rds::RegridDataSetInterpolator) = regrid_units(rds)
+units(rds::RegridDataSetInterpolator) =  to_unit(regrid_units(rds))[2]
 description(rds::RegridDataSetInterpolator) = regrid_description(rds)
 
 # Add method for RegridDataSetInterpolator to existing ITPWrapper from load.jl
@@ -567,7 +567,7 @@ function create_regrid_equation(rds::RegridDataSetInterpolator, filename, t, t_r
     t_itp = typeof(itp)
     p_itp = only(
         @parameters ($n_p::t_itp)(..)=itp [
-        unit = regrid_units(rds),
+        unit = units(rds),
         description = "Regridded $(n)"
     ]
     )

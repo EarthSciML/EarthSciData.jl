@@ -105,7 +105,8 @@ end
           [102340.37924047427, 101572.77264006894, 100805.16603966363, 2.0, 1.5, 1.0]
 end
 
-@testset "GEOS-FP new day" begin
+@testitem "GEOS-FP new day" setup=[GEOSFPDomainSetup] begin
+    using DynamicQuantities
     @parameters(lon=0.0, [unit=u"rad"], lat=0.0, [unit=u"rad"], lev=1.0,)
     @parameters t_ref=0 [unit=u"s"]
     starttime = datetime2unix(DateTime(2022, 1, 1, 23, 58))
@@ -161,7 +162,8 @@ end
     @test_throws Base.Exception f(prob)
 end
 
-@testset "GEOS-FP height above ground" begin
+@testitem "GEOS-FP height above ground" setup=[GEOSFPDomainSetup] begin
+    using DynamicQuantities
     tt = datetime2unix(DateTime(2022, 1, 2))
     @parameters lat, [unit = u"rad"], lon, [unit = u"rad"], lev
     @parameters t_ref=0 [unit=u"s"]
@@ -234,7 +236,7 @@ end
     @test Z_above_ground ≈
           [63.38451747881698, 127.11513708190306, 191.83774317607677, 77316.16731665366, 80132.63935650676]
 end
-@testset "GEOS-FP height above ground" begin
+@testitem "GEOS-FP height above ground" setup=[GEOSFPDomainSetup] begin
     tt = datetime2unix(DateTime(2022, 1, 2))
     @parameters lat, [unit = u"rad"], lon, [unit = u"rad"], lev
     @parameters t_ref=0 [unit=u"s"]

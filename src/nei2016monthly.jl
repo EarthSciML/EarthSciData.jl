@@ -355,6 +355,7 @@ function NEI2016MonthlyEmis(
         ze_name = Symbol(:zero_, varname)
         zero_emis = only(@constants $(ze_name)=0 [unit = converted_units])
         zero_emis = ModelingToolkit.unwrap(zero_emis) # Unsure why this is necessary.
+        push!(params, zero_emis)
 
         # Apply diurnal scaling and mixing ratio conversion to certain chemical species
         # The conversion is: mixing_ratio = flux / (g0_100 * delp_dry_surface(x, y))
@@ -375,29 +376,23 @@ function NEI2016MonthlyEmis(
                 eq / Δz * scale * dayofweek_itp_NOx(t + t_ref, x) * diurnal_itp_NOx(t + t_ref, x) / (g0_100 * delp_dry_surface_itp(x, y)),
                 zero_emis)
         else
-            # wrapper_f = (eq) -> ifelse(lev < 2,
-            #     eq / Δz * scale / (g0_100 * delp_dry_surface_itp(x, y)),
-            #     zero_emis)
-            wrapper_f = (eq) -> ifelse(lev < 2,
-            eq / Δz * scale,
-            zero_emis)
+            wrapper_f = (eq) -> ifelse(lev < 2, eq / Δz * scale / (g0_100 * delp_dry_surface_itp(x, y)), zero_emis)
         end
 
-        eq,
-        param = create_interp_equation(itp, "", t, t_ref, [x, y];
+        eq, param = create_interp_equation(itp, "", t, t_ref, [x, y];
             wrapper_f = wrapper_f)
         push!(eqs, eq)
         push!(params, param)
         push!(vars, eq.lhs)
     end
-    sys = ODESystem(
+    sys = System(
         eqs,
         t,
         vars,
-        [x, y, lev, Δz, params...];
+        [x; y; lev; Δz; params];
         name = name,
-        metadata = Dict(:coupletype => NEI2016MonthlyEmisCoupler,
-            :sys_discrete_event => create_updater_sys_event(name, params, starttime))
+        metadata = Dict(CoupleType => NEI2016MonthlyEmisCoupler,
+            SysDiscreteEvent => create_updater_sys_event(name, params, starttime))
     )
     return sys
 end
@@ -470,10 +465,11 @@ function NEI2016MonthlyEmis_regrid(
             stream = stream)
 
         # Units after conversion: kg/m²/s -> kg/kg/s
-        converted_units = regrid_units(itp) / u"kg/m^2"
+        converted_units = units(itp) / u"kg/m^2"
 
         @constants zero_emis=0 [unit = converted_units]
         zero_emis = ModelingToolkit.unwrap(zero_emis) # Unsure why this is necessary.
+        push!(params, zero_emis)
 
         # Apply diurnal scaling and mixing ratio conversion to certain chemical species
         # The conversion is: mixing_ratio = flux / (g0_100 * delp_dry_surface(x, y))
@@ -494,11 +490,8 @@ function NEI2016MonthlyEmis_regrid(
                 eq / Δz * scale * dayofweek_itp_NOx(t + t_ref, x) * diurnal_itp_NOx(t + t_ref, x) / (g0_100 * delp_dry_surface_itp(x, y)),
                 zero_emis)
         else
-            # wrapper_f = (eq) -> ifelse(lev < 2,
-            #     eq / Δz * scale / (g0_100 * delp_dry_surface_itp(x, y)),
-            #     zero_emis)
             wrapper_f = (eq) -> ifelse(lev < 2,
-            eq / Δz * scale,
+            eq / Δz * scale  / (g0_100 * delp_dry_surface_itp(x, y)),
             zero_emis)
         end
 
@@ -513,7 +506,7 @@ function NEI2016MonthlyEmis_regrid(
         eqs,
         t,
         vars,
-        [x, y, lev, Δz, params...];
+        [x; y; lev; Δz; params];
         name = name,
         metadata = Dict(CoupleType => NEI2016MonthlyEmisCoupler,
             SysDiscreteEvent => create_updater_sys_event(name, params, starttime))
