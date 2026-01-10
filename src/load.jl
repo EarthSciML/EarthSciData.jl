@@ -150,7 +150,7 @@ data records for the times immediately before and after the current time step.
 the interpolator. `spatial_ref` is the spatial reference system that the simulation will be using.
 `stream` specifies whether the data should be streamed in as needed or loaded all at once.
 """
-mutable struct DataSetInterpolator{To, N, N2, FT, ITPT, DomT}
+mutable struct DataSetInterpolator{To, N, N2, FT, ITPT, DomT, ET}
     fs::FileSet
     varname::AbstractString
     # This is the actual data.
@@ -166,13 +166,14 @@ mutable struct DataSetInterpolator{To, N, N2, FT, ITPT, DomT}
     times::Vector{DateTime}
     currenttime::DateTime
     coord_trans::FT
+    extrapolate_type::ET
     loadtask::Task
     lock::ReentrantLock
     initialized::Bool
 
     function DataSetInterpolator{To}(fs::FileSet, varname::AbstractString,
             starttime::DateTime, endtime::DateTime, domain::DomainInfo;
-            stream = true) where {To <: Real}
+            stream = true, extrapolate_type = Flat()) where {To <: Real}
         metadata = loadmetadata(fs, varname)
 
         # Check how many time indices we will need.
@@ -218,7 +219,7 @@ mutable struct DataSetInterpolator{To, N, N2, FT, ITPT, DomT}
         FT = typeof(coord_trans)
 
         td = Threads.@spawn (() -> DateTime(0, 1, 10))() # Placeholder for async loading task.
-        itp = new{To, N, N2, FT, ITPT, typeof(domain)}(
+        itp = new{To, N, N2, FT, ITPT, typeof(domain), typeof(extrapolate_type)}(
             fs,
             varname,
             data,
@@ -230,6 +231,7 @@ mutable struct DataSetInterpolator{To, N, N2, FT, ITPT, DomT}
             times,
             DateTime(1, 1, 1),
             coord_trans,
+            extrapolate_type,
             td,
             ReentrantLock(),
             false
@@ -421,7 +423,8 @@ function update!(itp::DataSetInterpolator, t::DateTime)
         if fetch(itp.loadtask) != times[idx] # Check if correct time is already loaded.
             load_data_for_time!(itp, times[idx]) # Load data if not already loaded.
         end
-        interpolate_from!(itp, d, itp.load_cache, model_grid) # Copy results to correct location
+        interpolate_from!(itp, d, itp.load_cache, model_grid;
+            extrapolate_type=itp.extrapolate_type) # Copy results to correct location
         # Start loading the next time point asynchronously.
         itp.loadtask = Threads.@spawn load_data_for_time!(
             itp, nexttimepoint(itp, times[idx]))
@@ -433,7 +436,7 @@ function update!(itp::DataSetInterpolator, t::DateTime)
 end
 
 function interpolate_from!(dsi::DataSetInterpolator, dst::AbstractArray{T, N},
-        src::AbstractArray{T, N}, model_grid, extrapolate_type = 0.0) where {T, N}
+        src::AbstractArray{T, N}, model_grid; extrapolate_type = Flat()) where {T, N}
     data_grid = Tuple(knots2range.(dsi.metadata.coords))
     dsi.metadata.xdim, dsi.metadata.ydim
     itp = interpolate!(src, BSpline(Linear()))

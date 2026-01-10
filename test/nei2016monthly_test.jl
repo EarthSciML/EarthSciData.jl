@@ -173,10 +173,9 @@ end
 end
 
 @testitem "allocations" setup=[NEISetup] begin
-if !Sys.iswindows() # Allocation tests don't seem to work on windows.
-        using AllocCheck
-
-        @check_allocs checkf(
+     using AllocCheck
+    if !Sys.iswindows() # Allocation tests don't seem to work on windows.
+        AllocCheck.@check_allocs checkf(
             itp, t, loc1, loc2) = EarthSciData.interp_unsafe(itp, t, loc1, loc2)
 
         sample_time = DateTime(2016, 5, 1)
@@ -187,6 +186,7 @@ if !Sys.iswindows() # Allocation tests don't seem to work on windows.
         try
             checkf(itp, sample_time, deg2rad(-97.0f0), deg2rad(40.0f0))
         catch err
+            @warn "Allocation errors:\n$(err.errors)"
             @test length(err.errors) == 1
             s = err.errors[1]
             contains(string(s), "libproj.proj_trans")
@@ -197,6 +197,7 @@ if !Sys.iswindows() # Allocation tests don't seem to work on windows.
         try # If there is an error, it should occur in the proj library.
             checkf(itp2, sample_time, deg2rad(-97.0), deg2rad(40.0))
         catch err
+            @warn "Allocation errors:\n$(err.errors)"
             @test length(err.errors) == 1
             s = err.errors[1]
             contains(string(s), "libproj.proj_trans")
