@@ -270,6 +270,27 @@ function loadmetadata(fs::NEI2016MonthlyEmisFileSet, varname)::MetaData
     end
 end
 
+function get_geometry(fs::NEI2016MonthlyEmisFileSet, m::MetaData)
+    x₀,y₀,Δx,Δy,nx,ny = lock(nclock) do
+        x₀ = fs.ds.attrib["XORIG"]
+        y₀ = fs.ds.attrib["YORIG"]
+        Δx = fs.ds.attrib["XCELL"]
+        Δy = fs.ds.attrib["YCELL"]
+        nx = fs.ds.attrib["NCOLS"]
+        ny = fs.ds.attrib["NROWS"]
+        x₀,y₀,Δx,Δy,nx,ny
+    end
+    x = range(start=x₀, step=Δx, length=nx)
+    y = range(start=y₀, step=Δy, length=ny)
+    nx, ny = length(x) - 1, length(y) - 1
+    polys = Vector{Vector{NTuple{2, Float64}}}(undef, nx*ny)
+    for i in 1:nx, j in 1:ny
+        polys[(i-1)*ny + j] = [(x[i], y[j]), (x[i+1], y[j]), (x[i+1], y[j+1]),
+            (x[i], y[j+1]), (x[i], y[j])]
+    end
+    return polys
+end
+
 """
 $(SIGNATURES)
 
@@ -326,7 +347,9 @@ function NEI2016MonthlyEmis(
         stream = true
 )
     starttime, endtime = get_tspan_datetime(domaininfo)
-    fs = NEI2016MonthlyEmisFileSet(sector, starttime, endtime)
+    _fs = NEI2016MonthlyEmisFileSet(sector, starttime, endtime)
+    fs = FileSetWithRegridder(_fs,
+        regridder(_fs, loadmetadata(_fs, first(varnames(_fs))), domaininfo))
     pvdict = Dict([Symbol(v) => v for v in EarthSciMLBase.pvars(domaininfo)]...)
     @assert :x in keys(pvdict)||:lon in keys(pvdict) "x or lon must be specified in the domaininfo"
     @assert :y in keys(pvdict)||:lat in keys(pvdict) "y or lat must be specified in the domaininfo"
@@ -343,7 +366,7 @@ function NEI2016MonthlyEmis(
     params = Any[t_ref, g0_100]
     vars = Num[]
 
-    for varname in varnames(fs)
+    for varname in varnames(fs.fs)
         dt = EarthSciMLBase.eltype(domaininfo)
         itp = DataSetInterpolator{dt}(fs, varname, starttime, endtime, domaininfo;
             stream = stream)

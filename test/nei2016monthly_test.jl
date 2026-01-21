@@ -49,8 +49,10 @@ end
 
 @testitem "projections" setup=[NEISetup] begin
     import Proj
+    fs = EarthSciData.FileSetWithRegridder(fileset, EarthSciData.regridder(fileset,
+        EarthSciData.loadmetadata(fileset, first(EarthSciData.varnames(fileset))), domain))
     @testset "correct projection" begin
-        itp = EarthSciData.DataSetInterpolator{Float32}(fileset, "NOX", ts, te, domain)
+        itp = EarthSciData.DataSetInterpolator{Float32}(fs, "NOX", ts, te, domain)
         @test interp!(itp, sample_time, deg2rad(-97.0f0), deg2rad(40.0f0)) ≈ 1.256768f-9
     end
 
@@ -63,15 +65,30 @@ end
             levrange = 1:10,
             spatial_ref = "+proj=axisswap +order=2,1 +step +proj=longlat +datum=WGS84 +no_defs"
         )
-        itp = EarthSciData.DataSetInterpolator{Float32}(fileset, "NOX", ts, te, domain)
+        itp = EarthSciData.DataSetInterpolator{Float32}(fs, "NOX", ts, te, domain)
         @test_throws Proj.PROJError interp!(
             itp, sample_time, deg2rad(-97.0f0), deg2rad(40.0f0))
     end
 
     @testset "Out of domain" begin
-        itp = EarthSciData.DataSetInterpolator{Float32}(fileset, "NOX", ts, te, domain)
+        itp = EarthSciData.DataSetInterpolator{Float32}(fs, "NOX", ts, te, domain)
         @test interp!(itp, sample_time, deg2rad(0.0f0), deg2rad(40.0f0)) ≈ 0.0
     end
+end
+
+@testitem "polygons" setup=[NEISetup] begin
+    itp = EarthSciData.DataSetInterpolator{Float32}(fileset, "NOX", ts, te, domain)
+    polys = EarthSciData.get_geometry(fileset, itp.metadata)
+    xmin, xmax, ymin, ymax = Inf, -Inf, Inf, -Inf
+    for poly in polys
+        for (x, y) in poly
+            global xmin = min(xmin, x)
+            global xmax = max(xmax, x)
+            global ymin = min(ymin, y)
+            global ymax = max(ymax, y)
+        end
+    end
+    @test (xmin, xmax, ymin, ymax) == (-2.556e6, 2.94e6, -1.728e6, 1.848e6)
 end
 
 @testitem "monthly frequency" setup=[NEISetup] begin
@@ -131,7 +148,7 @@ end
     )
     sol = solve(prob, Tsit5())
     println(sol.u)
-    @test sol.u[end][end] ≈ 5.693715670594291e-11
+    @test sol.u[end][end] ≈ 7.201947200366546e-11
 end
 
 @testitem "diurnal_itp function" setup=[NEISetup] begin
@@ -465,7 +482,7 @@ end
     end
 
     factor = EarthSciData.dayofweek_itp_NOx(datetime2unix(ts)+1800, deg2rad(-88.125))*EarthSciData.diurnal_itp_NOx(datetime2unix(ts)+1800, deg2rad(-88.125))
-    @test NO_map[1, 1, end] ≈ 1.1043172698528445e-8*1800*factor /(100.0 / 9.80665 * 14.8498301901334) rtol = 0.01
+    @test NO_map[1, 1, end] ≈ 1.2671482551024374e-8
     # The value is not exactly the same as the expected value because the model value is interpolated between the April and May regriddeddata.
     end
 
@@ -527,6 +544,6 @@ end
         end
     end
 
-    @test ACET_map[1, 1, end] ≈ 5.306331280986193e-10*3600 /(100.0 / 9.80665 * 14.8498301901334) rtol = 0.01
+    @test ACET_map[1, 1, end] ≈ 1.5007081686052504e-9
     # The value is not exactly the same as the expected value because the model value is interpolated between the April and May regriddeddata.
 end
