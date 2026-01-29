@@ -659,9 +659,6 @@ function create_updater_sys_event(name, params, starttime::DateTime)
         function update_itps!(modified, observed, ctx, integ)
             function loadf(p_itp)
                 p_itp.itp = lazyload!(p_itp.itp, integ.t + t_ref)
-                if integ.t == all_tstops[end] # Shut down async loader at last timem stop.
-                    close(p_itp.itp.loadrequest)
-                end
                 return p_itp
             end
             NamedTuple((k => loadf(v) for (k, v) in pairs(modified)))
