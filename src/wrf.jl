@@ -176,7 +176,7 @@ function WRF(domaininfo::DomainInfo; name = :WRF, stream = true)
 
     z_params = Dict()
     for varname in varnames(fs)
-        dt = EarthSciMLBase.dtype(domaininfo)
+        dt = eltype(domaininfo)
         itp = DataSetInterpolator{dt}(
             fs,
             varname,
@@ -257,8 +257,10 @@ function WRF(domaininfo::DomainInfo; name = :WRF, stream = true)
     push!(eqs, lev_trans)
     push!(vars, δzδlev)
 
-    sys = ODESystem(eqs, t, vars, [pvdict[xdim], pvdict[ydim], pvdict[:lev], params...];
+    all_params = [pvdict[xdim], pvdict[ydim], pvdict[:lev], params...]
+    sys = System(eqs, t, vars, all_params;
         name = name,
+        initial_conditions = _itp_defaults(all_params),
         metadata = Dict(CoupleType => WRFCoupler,
             SysDiscreteEvent => create_updater_sys_event(name, params, starttime))
     )

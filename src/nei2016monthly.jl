@@ -208,12 +208,14 @@ function NEI2016MonthlyEmis(
         push!(params, param, zero_emis)
         push!(vars, eq.lhs)
     end
+    all_params = [x, y, lev, Δz, params...]
     sys = System(
         eqs,
         t,
         vars,
-        [x, y, lev, Δz, params...];
+        all_params;
         name = name,
+        initial_conditions = _itp_defaults(all_params),
         metadata = Dict(CoupleType => NEI2016MonthlyEmisCoupler,
             SysDiscreteEvent => create_updater_sys_event(name, params, starttime))
     )

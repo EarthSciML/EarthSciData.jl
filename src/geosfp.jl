@@ -423,7 +423,7 @@ function GEOSFP(
     vars = Num[]
     for (filename, fs) in filesets
         for varname in varnames(fs)
-            dt = EarthSciMLBase.dtype(domaininfo)
+            dt = eltype(domaininfo)
             itp = DataSetInterpolator{dt}(
                 fs,
                 varname,
@@ -512,12 +512,14 @@ function GEOSFP(
     push!(eqs, lon_trans, lat_trans, lev_trans)
     push!(vars, δxδlon, δyδlat, δPδlev)
 
+    all_params = [pvdict[:lon], pvdict[:lat], lev, P_unit, Rd, g, lat2meters, lon2m, params...]
     sys = System(
         eqs,
         t,
         vars,
-        [pvdict[:lon], pvdict[:lat], lev, P_unit, Rd, g, lat2meters, lon2m, params...];
+        all_params;
         name = name,
+        initial_conditions = _itp_defaults(all_params),
         metadata = Dict(CoupleType => GEOSFPCoupler,
             SysDiscreteEvent => create_updater_sys_event(name, params, starttime))
     )
@@ -548,7 +550,7 @@ function partialderivatives_δPδlev_geosfp(geosfp; default_lev = 1.0)
         [Symbolics.tosymbol(eq.lhs, escape = false) for eq in equations(geosfp)]
     )
     # Get interpolator for surface pressure.
-    ps_eq = ModelingToolkit.namespace_equation(equations(geosfp)[ii], geosfp)
+    ps_eq = ModelingToolkit.namespace_equations(geosfp)[ii]
     ps = ps_eq.rhs
     @constants P_unit=1.0 [unit = u"Pa", description = "Unit pressure"]
     # Function to calculate pressure at a given level in the hybrid grid.
