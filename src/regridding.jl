@@ -49,12 +49,12 @@ function regrid_horizontal!(dst_field, regridder::ConservativeRegridding.Regridd
 end
 
 function interpolate_from!(dst::AbstractArray{T, N},
-        src::AbstractArray{T, N}, mta::MetaData, model_grid; extrapolate_type = Flat()) where {T, N}
+        src::AbstractArray{T, N}, mta::MetaData, model_grid, domain::DomainInfo;
+        extrapolate_type = Flat()) where {T, N}
     data_grid = Tuple(knots2range.(mta.coords))
-    mta.xdim, mta.ydim
     itp = interpolate!(src, BSpline(Linear()))
     itp = extrapolate(scale(itp, data_grid), extrapolate_type)
-    ct = coord_trans(mta, model_grid)
+    ct = coord_trans(mta, domain)
     if N == 3
         for (i, x) in enumerate(model_grid[1])
             for (j, y) in enumerate(model_grid[2])
@@ -93,7 +93,7 @@ function regridder(fs::FileSet, metadata::MetaData, domain::DomainInfo)
     if any(metadata.staggering) # Are any of the dimensions staggered?
         model_grid = EarthSciMLBase.grid(domain, metadata.staggering)
         regrid! = (dst::AbstractArray, src::AbstractArray; extrapolate_type = Flat()) -> begin
-            interpolate_from!(dst, src, metadata, model_grid;
+            interpolate_from!(dst, src, metadata, model_grid, domain;
                 extrapolate_type = extrapolate_type)
         end
     else

@@ -25,7 +25,7 @@ Symbolics = "0c5d862f-8b57-4792-8d23-62f2024744c7"
 
 [compat]
 AllocCheck = "0.2"
-ConservativeRegridding = "0.3"
+ConservativeRegridding = "0.1"
 DataInterpolations = "8"
 DiffEqCallbacks = "4.3"
 DocStringExtensions = "0.9.3"

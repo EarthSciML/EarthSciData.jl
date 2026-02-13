@@ -204,7 +204,7 @@ mutable struct DataSetInterpolator{To, N, N2, FT, ITPT, DomT, ET, FSRG}
         metadata = loadmetadata(fs, varname)
         model_grid = EarthSciMLBase.grid(domain, metadata.staggering)
         regrid_f = (dst::AbstractArray, src::AbstractArray; extrapolate_type = extrapolate_type) -> begin
-            interpolate_from!(dst, src, metadata, model_grid;
+            interpolate_from!(dst, src, metadata, model_grid, domain;
                 extrapolate_type = extrapolate_type)
         end
         fswr = FileSetWithRegridder(fs, regrid_f)
