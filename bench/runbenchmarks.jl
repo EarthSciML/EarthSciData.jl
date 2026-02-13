@@ -23,7 +23,7 @@ end
 @variables ACET(t) = 0.0 [unit = u"kg*m^-3"]
 @constants c = 1000 [unit = u"s"]
 
-@named sys = ODESystem([D(ACET) ~ 0], t, metadata = Dict(:coupletype => SysCoupler))
+@named sys = System([D(ACET) ~ 0], t, metadata = Dict(:coupletype => SysCoupler))
 
 domain = DomainInfo(
     DateTime(2016, 5, 1), DateTime(2016, 5, 2),

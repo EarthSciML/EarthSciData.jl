@@ -217,7 +217,7 @@ function NCEPNCARReanalysis(
 
     z_params = Dict()
     for varname in varnames(fs)
-        dt = EarthSciMLBase.dtype(domaininfo)
+        dt = eltype(domaininfo)
         itp = DataSetInterpolator{dt}(
             fs,
             String(varname),
@@ -296,13 +296,15 @@ function NCEPNCARReanalysis(
         push!(vars, δzδlev)
     end
 
+    all_params = [pvdict[xdim], pvdict[ydim], pvdict[:lev], lat2meters, lon2m, hPa2Pa, Rd, g,
+        params...]
     sys = System(
         eqs,
         t,
         vars,
-        [pvdict[xdim], pvdict[ydim], pvdict[:lev], lat2meters, lon2m, hPa2Pa, Rd, g,
-            params...];
+        all_params;
         name = name,
+        initial_conditions = _itp_defaults(all_params),
         metadata = Dict(CoupleType => NCEPNCARReanalysisCoupler,
             SysDiscreteEvent => create_updater_sys_event(name, params, starttime))
     )

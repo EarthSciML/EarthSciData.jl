@@ -66,18 +66,18 @@ end
         "GEOSFP₊A3dyn₊OMEGA_itp(GEOSFP₊t_ref + t, lon, lat, lev)",
         "GEOSFP₊A3dyn₊V(t, lon, lat, lev)",
         "GEOSFP₊A3dyn₊V_itp(GEOSFP₊t_ref + t, lon, lat, lev)",
-        "Differential(t)(ExampleSys₊c(t, lon, lat, lev))",
-        "Differential(lon)(ExampleSys₊c(t, lon, lat, lev)",
+        "Differential(t, 1)(ExampleSys₊c(t, lon, lat, lev))",
+        "Differential(lon, 1)(ExampleSys₊c(t, lon, lat, lev)",
         "MeanWind₊v_lon(t, lon, lat, lev)",
         "lon2m",
-        "Differential(lat)(ExampleSys₊c(t, lon, lat, lev)",
+        "Differential(lat, 1)(ExampleSys₊c(t, lon, lat, lev)",
         "MeanWind₊v_lat(t, lon, lat, lev)",
         "lat2meters",
         "sin(ExampleSys₊c_unit*ExampleSys₊lat(t, lon, lat, lev))",
         "sin(ExampleSys₊c_unit*ExampleSys₊lon(t, lon, lat, lev))",
         "ExampleSys₊c(t, lon, lat, lev)",
         "t",
-        "Differential(lev)(ExampleSys₊c(t, lon, lat, lev))",
+        "Differential(lev, 1)(ExampleSys₊c(t, lon, lat, lev))",
         "MeanWind₊v_lev(t, lon, lat, lev)",
         "P_unit"
     ]
@@ -158,12 +158,12 @@ end
 
     P_eq = substitute(eqs[iP], PS_eq.lhs => PS_eq.rhs)
 
-    dflts = ModelingToolkit.get_defaults(geosfp)
+    all_params = parameters(geosfp)
 
     function load_itp(symname)
-        key = collect(keys(dflts))[findfirst(isequal(symname),
-            EarthSciMLBase.var2symbol.(keys(dflts)))]
-        itpvar = dflts[key]
+        key = all_params[findfirst(isequal(symname),
+            EarthSciMLBase.var2symbol.(all_params))]
+        itpvar = ModelingToolkit.getdefault(key)
         EarthSciData.lazyload!(itpvar.itp, tt)
         return key, itpvar
     end
@@ -185,7 +185,15 @@ end
     Z_rhs = ModelingToolkit.substitute(Z_rhs, P_eq.lhs => P_eq.rhs)
     Z_rhs = ModelingToolkit.substitute(Z_rhs, PS_eq.lhs => PS_eq.rhs)
 
-    Z_rhs = ModelingToolkit.subs_constants(Z_rhs)
+    # Substitute constants with their numeric values
+    for p in all_params
+        if ModelingToolkit.hasdefault(p)
+            v = ModelingToolkit.getdefault(p)
+            if v isa Number
+                Z_rhs = ModelingToolkit.substitute(Z_rhs, p => v)
+            end
+        end
+    end
 
     Z_expr = build_function(Z_rhs, [t, t_ref, lon, lat, lev, Titp, QVitp, T2Mitp, QV2Mitp, PSitp])
 
