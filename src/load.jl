@@ -198,6 +198,20 @@ mutable struct DataSetInterpolator{To, N, N2, FT, ITPT, DomT, ET, FSRG}
     lock::ReentrantLock
     initialized::Bool
 
+    function DataSetInterpolator{To}(fs::FileSet, varname::AbstractString,
+            starttime::DateTime, endtime::DateTime, domain::DomainInfo;
+            stream = true, extrapolate_type = Flat()) where {To <: Real}
+        metadata = loadmetadata(fs, varname)
+        model_grid = EarthSciMLBase.grid(domain, metadata.staggering)
+        regrid_f = (dst::AbstractArray, src::AbstractArray; extrapolate_type = extrapolate_type) -> begin
+            interpolate_from!(dst, src, metadata, model_grid;
+                extrapolate_type = extrapolate_type)
+        end
+        fswr = FileSetWithRegridder(fs, regrid_f)
+        DataSetInterpolator{To}(fswr, varname, starttime, endtime, domain;
+            stream = stream, extrapolate_type = extrapolate_type)
+    end
+
     function DataSetInterpolator{To}(fs::FileSetWithRegridder, varname::AbstractString,
             starttime::DateTime, endtime::DateTime, domain::DomainInfo;
             stream = true, extrapolate_type = Flat()) where {To <: Real}
@@ -640,9 +654,6 @@ function create_updater_sys_event(name, params, starttime::DateTime)
         function update_itps!(modified, observed, ctx, integ)
             function loadf(p_itp)
                 p_itp.itp = lazyload!(p_itp.itp, integ.t + t_ref)
-                if integ.t == all_tstops[end] # Shut down async loader at last timem stop.
-                    close(p_itp.itp.loadrequest)
-                end
                 return p_itp
             end
             NamedTuple((k => loadf(v) for (k, v) in pairs(modified)))

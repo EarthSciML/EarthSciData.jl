@@ -74,17 +74,3 @@ end
     @test_nowarn solve(prob, KenCarp3())
 end
 
-domain_2 = DomainInfo(
-    DateTime(2016, 5, 1), DateTime(2016, 5, 2),
-    lonrange = deg2rad(-125):deg2rad(0.625):deg2rad(-66.875),
-    latrange = deg2rad(25):deg2rad(0.5):deg2rad(49),
-    levrange = 1:1:2
-)
-
-emis_2 = NEI2016MonthlyEmis_regrid("mrggrid_withbeis_withrwc", domain_2)
-
-csys_2 = couple(sys, emis_2, domain_2)
-
-dt = 100.0
-st = SolverStrangSerial(Tsit5(), dt)
-prob = ODEProblem(csys_2, st)

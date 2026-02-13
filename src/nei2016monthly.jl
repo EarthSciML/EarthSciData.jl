@@ -1,4 +1,4 @@
-export NEI2016MonthlyEmis, NEI2016MonthlyEmis_regrid
+export NEI2016MonthlyEmis
 
 # Diurnal scale factors for 24 hours (0-23) for UTC-0
 const DIURNAL_FACTORS = [0.45, 0.45, 0.6, 0.6, 0.6, 0.6, 1.45, 1.45, 1.45, 1.45, 1.4, 1.4, 1.4, 1.4, 1.45, 1.45, 1.45, 1.45, 0.65, 0.65, 0.65, 0.65, 0.45, 0.45]
@@ -280,12 +280,13 @@ function get_geometry(fs::NEI2016MonthlyEmisFileSet, m::MetaData)
         ny = fs.ds.attrib["NROWS"]
         x₀,y₀,Δx,Δy,nx,ny
     end
-    x = range(start=x₀, step=Δx, length=nx)
-    y = range(start=y₀, step=Δy, length=ny)
-    nx, ny = length(x) - 1, length(y) - 1
+    # Create edges (nx+1 and ny+1 points) so we get nx*ny cells
+    x = range(start=x₀, step=Δx, length=nx+1)
+    y = range(start=y₀, step=Δy, length=ny+1)
+    # Use column-major (x-fastest) ordering to match vec() on data arrays
     polys = Vector{Vector{NTuple{2, Float64}}}(undef, nx*ny)
-    for i in 1:nx, j in 1:ny
-        polys[(i-1)*ny + j] = [(x[i], y[j]), (x[i+1], y[j]), (x[i+1], y[j+1]),
+    for j in 1:ny, i in 1:nx
+        polys[(j-1)*nx + i] = [(x[i], y[j]), (x[i+1], y[j]), (x[i+1], y[j+1]),
             (x[i], y[j+1]), (x[i], y[j])]
     end
     return polys
@@ -420,119 +421,3 @@ function NEI2016MonthlyEmis(
     return sys
 end
 
-"""
-$(SIGNATURES)
-
-A data loader for CMAQ-formatted monthly US National Emissions Inventory data for year 2016,
-using conservative mass regridding instead of interpolation.
-
-This function uses conservative regridding to ensure mass conservation when transferring
-emissions from the NEI grid to the simulation grid. The emissions are returned as mixing
-ratios in units of kg/kg/s by converting from the native flux density (kg/m²/s) using:
-
-    mixing_ratio = flux / (g0_100 * delp_dry_surface)
-
-where g0_100 ≈ 10.197 kg/m² and delp_dry_surface is the dry pressure thickness (physically unit in hPa, but here is unitless)
-that varies spatially across the domain.
-
-`spatial_ref` should be the spatial reference system that
-the simulation will be using. `x` and `y`, and should be the coordinate variables and grid
-spacing values for the simulation that is going to be run, corresponding to the given x and y
-values of the given `spatial_ref`,
-and the `lev` represents the variable for the vertical grid level.
-x and y must be in the same units as `spatial_ref`.
-
-`dtype` represents the desired data type of the interpolated values. The native data type
-for this dataset is Float32.
-
-`scale` is a scaling factor to apply to the emissions data. The default value is 1.0.
-
-`stream` specifies whether the data should be streamed in as needed or loaded all at once.
-
-NOTE: This uses conservative regridding which exactly conserves the total emissions mass
-when transferring from the NEI grid to the simulation grid, unlike interpolation which
-may not conserve mass exactly. The regridding system only works with coordinates that
-exactly match the precomputed weight grid - if coordinates don't match exactly, it will
-throw a clear error message.
-"""
-function NEI2016MonthlyEmis_regrid(
-        sector::AbstractString,
-        domaininfo::DomainInfo;
-        scale = 1.0,
-        name = :NEI2016MonthlyEmis_regrid,
-        stream = true
-)
-    starttime, endtime = get_tspan_datetime(domaininfo)
-    fs = NEI2016MonthlyEmisFileSet(sector, starttime, endtime)
-    pvdict = Dict([Symbol(v) => v for v in EarthSciMLBase.pvars(domaininfo)]...)
-    @assert :x in keys(pvdict)||:lon in keys(pvdict) "x or lon must be specified in the domaininfo"
-    @assert :y in keys(pvdict)||:lat in keys(pvdict) "y or lat must be specified in the domaininfo"
-    @assert :lev in keys(pvdict) "lev must be specified in the domaininfo"
-    x = :x in keys(pvdict) ? pvdict[:x] : pvdict[:lon]
-    y = :y in keys(pvdict) ? pvdict[:y] : pvdict[:lat]
-    lev = pvdict[:lev]
-    @parameters(Δz=1.0,
-        [description = "Couldn't remove Δz without getting errors, so I set it to 1.0 without units"],)
-    @parameters t_ref = get_tref(domaininfo) [unit = u"s", description = "Reference time"]
-    # Conversion constant: g0_100 = 100 hPa / g0 where g0 = 9.80665 m/s²
-    @parameters g0_100 = 100.0 / 9.80665 [unit = u"kg/m^2"]
-    eqs = Equation[]
-    params = Any[t_ref, g0_100]
-    vars = Num[]
-
-    for varname in varnames(fs)
-        dt = EarthSciMLBase.eltype(domaininfo)
-        # Use RegridDataSetInterpolator for conservative regridding
-        # Weights are automatically cached and reused for all variables
-        itp = RegridDataSetInterpolator{dt}(fs, varname, starttime, endtime, domaininfo;
-            stream = stream)
-
-        # Units after conversion: kg/m²/s -> kg/kg/s
-        converted_units = units(itp) / u"kg/m^2"
-
-        @constants zero_emis=0 [unit = converted_units]
-        zero_emis = ModelingToolkit.unwrap(zero_emis) # Unsure why this is necessary.
-        push!(params, zero_emis)
-
-        # Apply diurnal scaling and mixing ratio conversion to certain chemical species
-        # The conversion is: mixing_ratio = flux / (g0_100 * delp_dry_surface(x, y))
-        if varname in ["CO"]
-            wrapper_f = (eq) -> ifelse(lev < 2,
-                eq / Δz * scale * dayofweek_itp_CO(t + t_ref, x) * diurnal_itp(t + t_ref, x) / (g0_100 * delp_dry_surface_itp(x, y)),
-                zero_emis)
-        elseif varname in ["FORM"]
-            wrapper_f = (eq) -> ifelse(lev < 2,
-                eq / Δz * scale * diurnal_itp(t + t_ref, x) / (g0_100 * delp_dry_surface_itp(x, y)),
-                zero_emis)
-        elseif varname in ["ISOP"]
-            wrapper_f = (eq) -> ifelse(lev < 2,
-                eq / Δz * scale * diurnal_itp_ISOP(t + t_ref, x) / (g0_100 * delp_dry_surface_itp(x, y)),
-                zero_emis)
-        elseif varname in ["NO2", "NO"]
-            wrapper_f = (eq) -> ifelse(lev < 2,
-                eq / Δz * scale * dayofweek_itp_NOx(t + t_ref, x) * diurnal_itp_NOx(t + t_ref, x) / (g0_100 * delp_dry_surface_itp(x, y)),
-                zero_emis)
-        else
-            wrapper_f = (eq) -> ifelse(lev < 2,
-            eq / Δz * scale  / (g0_100 * delp_dry_surface_itp(x, y)),
-            zero_emis)
-        end
-
-        eq,
-        param = create_regrid_equation(itp, "", t, t_ref, [x, y];
-            wrapper_f = wrapper_f)
-        push!(eqs, eq)
-        push!(params, param, zero_emis)
-        push!(vars, eq.lhs)
-    end
-    sys = System(
-        eqs,
-        t,
-        vars,
-        [x; y; lev; Δz; params];
-        name = name,
-        metadata = Dict(CoupleType => NEI2016MonthlyEmisCoupler,
-            SysDiscreteEvent => create_updater_sys_event(name, params, starttime))
-    )
-    return sys
-end
