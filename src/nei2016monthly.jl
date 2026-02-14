@@ -322,23 +322,13 @@ native flux density (kg/m²/s) using:
 where g0_100 ≈ 10.197 kg/m² and delp_dry_surface is the dry pressure thickness (physically unit in hPa, but here is unitless)
 that varies spatially across the domain.
 
-`spatial_ref` should be the spatial reference system that
-the simulation will be using. `x` and `y`, and should be the coordinate variables and grid
-spacing values for the simulation that is going to be run, corresponding to the given x and y
-values of the given `spatial_ref`,
-and the `lev` represents the variable for the vertical grid level.
-x and y must be in the same units as `spatial_ref`.
-
-`dtype` represents the desired data type of the interpolated values. The native data type
-for this dataset is Float32.
-
 `scale` is a scaling factor to apply to the emissions data. The default value is 1.0.
 
 `stream` specifies whether the data should be streamed in as needed or loaded all at once.
 
-NOTE: This is an interpolator that returns an emissions value by interpolating between the
-centers of the nearest grid cells in the underlying emissions grid, so it may not exactly conserve the total
-emissions mass, especially if the simulation grid is coarser than the emissions grid.
+Conservative regridding (via ConservativeRegridding.jl) is used by default to map emissions
+from the native NEI Lambert Conformal Conic grid to the simulation domain grid, preserving
+total emissions mass.
 """
 function NEI2016MonthlyEmis(
         sector::AbstractString,
