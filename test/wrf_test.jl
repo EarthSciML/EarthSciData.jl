@@ -211,3 +211,22 @@ end
         655.5566269461963, 352.24392973192874, 279.69888985290606]
     @test δzδlevs ≈ δzδlev_want
 end
+
+@testitem "wrf ground level vertical velocity" setup=[WRFSetup] begin
+    using SymbolicIndexingInterface: setp, getsym, parameter_values
+
+    wrf_sys = mtkcompile(WRF(domain))
+    prob = ODEProblem(wrf_sys, [], get_tref(domain))
+    f = getsym(prob, wrf_sys.W)
+    setter = setp(wrf_sys, [wrf_sys.lon, wrf_sys.lat, wrf_sys.lev])
+    ps = parameter_values(prob)
+
+    ws = map([0.5, 1, 1.5, 2, 21.5, 30, 31.5]) do lev
+        setter(prob, [deg2rad(-118.2707), deg2rad(34.0059), lev])
+        f(prob)
+    end
+
+    w_want = [0.0, 0.00520469831395109, 0.01040939662790218, 0.011643543143849931,
+        -0.016975643831838198, 0.026965458394074104, 0.022436248330301084]
+    @test ws ≈ w_want
+end
