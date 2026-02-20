@@ -1,7 +1,7 @@
 name = "EarthSciData"
 uuid = "a293c155-435f-439d-9c11-a083b6b47337"
-authors = ["EarthSciML Authors"]
 version = "0.14.0"
+authors = ["EarthSciML Authors"]
 
 [deps]
 ConservativeRegridding = "8e50ac2c-eb48-49bc-a402-07c87b949343"
@@ -22,6 +22,7 @@ Proj = "c94c279d-25a6-4763-9509-64d165bea63e"
 SciMLBase = "0bca4576-84f4-4d90-8ffe-ffa030f20462"
 Scratch = "6c6a2e73-6563-6170-7368-637461726353"
 Symbolics = "0c5d862f-8b57-4792-8d23-62f2024744c7"
+TestItemRunner = "f8b46487-2199-4994-9208-9a1283c18c0a"
 
 [compat]
 AllocCheck = "0.2"
@@ -32,12 +33,12 @@ DocStringExtensions = "0.9.3"
 DomainSets = "0.7.15"
 Downloads = "1"
 DynamicQuantities = "1"
-EarthSciMLBase = "0.24"
+EarthSciMLBase = "0.25"
 Interpolations = "0.16"
 JLD2 = "0.5"
 LaTeXStrings = "1.3"
 Latexify = "0.16.7"
-ModelingToolkit = "10.10"
+ModelingToolkit = "11"
 NCDatasets = "0.14"
 OrdinaryDiffEqLowOrderRK = "1.2"
 OrdinaryDiffEqSDIRK = "1.3"
@@ -46,8 +47,8 @@ ProgressMeter = "1"
 Proj = "1.8"
 SciMLBase = "2.90"
 Scratch = "1"
-SymbolicIndexingInterface = "0.3.41"
-Symbolics = "6.37.1"
+SymbolicIndexingInterface = "0.3.41, 0.4"
+Symbolics = "7"
 TestItemRunner = "1.1.0"
 julia = "1.10"
 

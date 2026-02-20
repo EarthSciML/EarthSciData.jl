@@ -617,6 +617,20 @@ function create_interp_equation(itp::DataSetInterpolator, filename, t, t_ref, co
     return eq, p_itp
 end
 
+# In MTK v11, parameter defaults set via `@parameters x = val` are stored as
+# metadata on the symbolic variable but are NOT included in `initial_conditions(sys)`.
+# This function extracts ITPWrapper defaults from a list of parameters so they
+# can be passed to the System constructor via the `initial_conditions` kwarg.
+function _itp_defaults(params)
+    dflts = Pair[]
+    for p in params
+        if ModelingToolkit.hasdefault(p) && ModelingToolkit.getdefault(p) isa ITPWrapper
+            push!(dflts, p => ModelingToolkit.getdefault(p))
+        end
+    end
+    return dflts
+end
+
 # Utility function to get the variables that are needed to solve a
 # system.
 function needed_vars(sys)
@@ -634,12 +648,11 @@ function create_updater_sys_event(name, params, starttime::DateTime)
     t_ref = datetime2unix(starttime)
     function sys_event(sys::ModelingToolkit.AbstractSystem)
         needed = needed_vars(sys)
-        dflts = ModelingToolkit.get_defaults(sys)
         psyms = []
         params_to_update = []
         for p in parameters(sys) # Figure out which parameters need to be updated.
             psym = EarthSciMLBase.var2symbol(p)
-            if (psym in pnames) && (psym in needed) && (dflts[p] isa ITPWrapper)
+            if (psym in pnames) && (psym in needed) && ModelingToolkit.hasdefault(p) && ModelingToolkit.getdefault(p) isa ITPWrapper
                 push!(psyms, psym)
                 push!(params_to_update, p)
             end
@@ -647,7 +660,7 @@ function create_updater_sys_event(name, params, starttime::DateTime)
         params_to_update = NamedTuple{Tuple(psyms)}(params_to_update)
         all_tstops = []
         for p_itp in params_to_update
-            itp = dflts[p_itp].itp
+            itp = ModelingToolkit.getdefault(p_itp).itp
             push!(all_tstops, get_tstops(itp, starttime)...)
         end
         all_tstops = unique(all_tstops) .- t_ref

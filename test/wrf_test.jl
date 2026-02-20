@@ -59,7 +59,7 @@ end
     function Example()
         @variables c(t) [unit = u"mol/m^3"]
         eqs = [D(c) ~ (sin(lat * c_unit) + sin(lon * c_unit)) * c / t]
-        return ODESystem(
+        return System(
             eqs,
             t;
             name = :ExampleSys,
@@ -97,14 +97,14 @@ end
         "WRF₊PHB(t, lon, lat, lev)",
         "lon2m",
         "lat2meters",
-        "Differential(lat)(ExampleSys₊c(t, lon, lat, lev)",
-        "Differential(t)(ExampleSys₊c(t, lon, lat, lev))",
-        "Differential(lon)(ExampleSys₊c(t, lon, lat, lev)",
+        "Differential(lat, 1)(ExampleSys₊c(t, lon, lat, lev)",
+        "Differential(t, 1)(ExampleSys₊c(t, lon, lat, lev))",
+        "Differential(lon, 1)(ExampleSys₊c(t, lon, lat, lev)",
         "sin(ExampleSys₊c_unit*ExampleSys₊lat(t, lon, lat, lev))",
         "sin(ExampleSys₊c_unit*ExampleSys₊lon(t, lon, lat, lev))",
         "ExampleSys₊c(t, lon, lat, lev)",
         "t",
-        "Differential(lev)(ExampleSys₊c(t, lon, lat, lev))"
+        "Differential(lev, 1)(ExampleSys₊c(t, lon, lat, lev))"
     ]
 
     have_eqs = string.(eqs)

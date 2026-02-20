@@ -15,7 +15,7 @@
     eqs = [D(u) ~ p + 1e-20 * lev * p * x * y / c # Need to make sure all coordinates are included in model.
            v ~ (x + y) * lev]
 
-    sys = ODESystem(eqs, t; name = :sys)
+    sys = System(eqs, t; name = :sys)
 
     domain = DomainInfo(
         DateTime(2000, 1, 1, 0, 0, 0),
