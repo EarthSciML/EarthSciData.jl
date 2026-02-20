@@ -1,7 +1,7 @@
 name = "EarthSciData"
 uuid = "a293c155-435f-439d-9c11-a083b6b47337"
-authors = ["EarthSciML Authors"]
 version = "0.14.0"
+authors = ["EarthSciML Authors"]
 
 [deps]
 ConservativeRegridding = "8e50ac2c-eb48-49bc-a402-07c87b949343"
@@ -34,7 +34,7 @@ Downloads = "1"
 DynamicQuantities = "1"
 EarthSciMLBase = "0.24"
 Interpolations = "0.16"
-JLD2 = "0.5"
+JLD2 = "0.5, 0.6"
 LaTeXStrings = "1.3"
 Latexify = "0.16.7"
 ModelingToolkit = "10.10"
