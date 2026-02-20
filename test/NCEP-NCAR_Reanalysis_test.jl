@@ -23,7 +23,7 @@ end
 
 @testitem "coordinates" setup=[NCEPSetup] begin
     mdU = EarthSciData.loadmetadata(fs, "uwnd")
-    @test mdU.staggering == (false, false, false)
+    @test mdU.staggering == (true, false, false)
 
     @testset "uwnd" begin
         mdU = EarthSciData.loadmetadata(fs, "uwnd")
@@ -134,8 +134,9 @@ end
         setter(prob, [lonv, latv, lev])
         f(prob)
     end
-    W_val_want = [0.00525, 0.00255, -0.01597, -0.00248, 0.01633, 0.08086]
-    @test W_val≈W_val_want rtol=1e-3
+    W_val_want = [0.0019118377540854117, 0.0016255623000058477, -0.015113770574739198,
+        -0.002477431693133608, 0.015227246265886294, -0.0]
+    @test W_val≈W_val_want
 end
 
 @testitem "ncep pressure" setup=[NCEPSetup, NCEPProb] begin
@@ -156,4 +157,15 @@ end
     end
     δzδlev_want = [598, 649, 1358, 1583, 2232, 4410]
     @test δzδlev_vals≈δzδlev_want rtol=1e-3
+end
+
+
+@testitem "ncep ground level vertical velocity" setup=[NCEPSetup, NCEPProb] begin
+    f = getsym(prob, :omega)
+    omega_vals = map([0.5, 1]) do lev
+        setter(prob, [lonv, latv, lev])
+        f(prob)
+    end
+    omega_want = [0.0, -0.024750000797212124]
+    @test omega_vals≈omega_want
 end

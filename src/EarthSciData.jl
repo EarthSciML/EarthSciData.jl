@@ -8,6 +8,8 @@ using ModelingToolkit: t
 using EarthSciMLBase, DiffEqCallbacks
 using DynamicQuantities, Latexify, ProgressMeter
 using Scratch
+using JLD2
+using ConservativeRegridding
 
 # General utilities
 include("load.jl")
@@ -17,6 +19,7 @@ include("utils.jl")
 include("netcdf.jl")
 include("geosfp.jl")
 include("wrf.jl")
+include("regridding.jl")
 include("nei2016monthly.jl")
 include("netcdf_output.jl")
 include("NCEP-NCAR_Reanalysis.jl")

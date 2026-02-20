@@ -169,7 +169,7 @@ function EarthSciData.loadmetadata(fs::NCEPNCARReanalysisFileSet, varname)::Meta
             reverse!(coords[ydim])
         end
 
-        staggering = (false, false, false)
+        staggering = ncepncarstaggering(varname)
 
         return MetaData(
             coords,
@@ -224,7 +224,10 @@ function NCEPNCARReanalysis(
             starttime,
             endtime,
             domaininfo;
-            stream = stream
+            stream = stream,
+            # Use zero extrapolation for vertical velocity to avoid mass transport
+            # through the ground.
+            extrapolate_type = varname == :omega ? 0.0 : Flat()
         )
         dims = dimnames(itp)
         coords = Num[]
@@ -328,4 +331,20 @@ function build_pressure_expr(lev)
         1.1922907152559059e+04 * lev^2 - 1.1382718486210386e+04 * lev +
         5.3378676414996389e+03
     )
+end
+
+# Return grid staggering for the given variable,
+# true for edge-aligned and false for center-aligned.
+# It should always be a triple of booleans for the
+# x, y, and z dimensions, respectively, regardless
+# of the dimensions of the variable.
+function ncepncarstaggering(varname)::NTuple{3, Bool}
+    if varname == "uwnd"
+        return (true, false, false)
+    elseif varname == "vwnd"
+        return (false, true, false)
+    elseif varname == "omega"
+        return (false, false, true)
+    end
+    return (false, false, false)
 end
