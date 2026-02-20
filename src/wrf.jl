@@ -183,7 +183,10 @@ function WRF(domaininfo::DomainInfo; name = :WRF, stream = true)
             starttime,
             endtime,
             domaininfo;
-            stream = stream
+            stream = stream,
+            # Use zero extrapolation for vertical velocity to avoid mass transport
+            # through the ground.
+            extrapolate_type = varname == "W" ? 0.0 : Flat()
         )
         dims = dimnames(itp)
         coords = Num[]

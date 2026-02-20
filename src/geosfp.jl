@@ -142,7 +142,6 @@ function loadmetadata(fs::GEOSFPFileSet, varname)::MetaData
         time_index = findfirst(isequal(timedim), dims)
         dims = deleteat!(dims, time_index)
         varsize = deleteat!(collect(size(var)), time_index)
-
         unit_str = var.attrib["units"]
         description = var.attrib["long_name"]
         @assert var.attrib["scale_factor"]==1.0 "Unexpected scale factor."
@@ -430,7 +429,10 @@ function GEOSFP(
                 starttime,
                 endtime,
                 domaininfo;
-                stream = stream
+                stream = stream,
+                # Use zero extrapolation for vertical velocity to avoid mass transport
+                # through the ground.
+                extrapolate_type = varname == "OMEGA" ? 0.0 : Flat()
             )
             dims = dimnames(itp)
             coords = Num[]
@@ -457,8 +459,8 @@ function GEOSFP(
     push!(vars, P)
 
     # ------------------ Geopotential height via hypsometric relation ---------
-    @constants Rd = 287.05  [unit = u"J/(kg*K)", description = "Dry-air gas constant"]
-    @constants g  = 9.80665 [unit = u"m/s^2",   description = "Gravity"]
+    @constants Rd = 287.05 [unit = u"J/(kg*K)", description = "Dry-air gas constant"]
+    @constants g = 9.80665 [unit = u"m/s^2", description = "Gravity"]
 
     syms = EarthSciMLBase.var2symbol.(vars)
     getvar(sym::Symbol) = begin
@@ -469,27 +471,28 @@ function GEOSFP(
 
     T = getvar(:I3₊T)
     QV = getvar(:I3₊QV)
-    T2M  = getvar(:A1₊T2M)
+    T2M = getvar(:A1₊T2M)
     QV2M = getvar(:A1₊QV2M)
-    PS   = i3ps
+    PS = i3ps
 
-    @variables Tv(t)     [unit = u"K", description = "Virtual temperature"]
-    @variables Tv_sfc(t) [unit = u"K", description = "Virtual temperature at 2 m (near-surface)"]
-    @variables Tv̄(t)     [unit = u"K", description = "Layer-mean virtual temperature"]
-    @variables Z_agl(t)  [unit = u"m", description = "Geopotential height above ground level"]
+    @variables Tv(t) [unit = u"K", description = "Virtual temperature"]
+    @variables Tv_sfc(t) [
+        unit = u"K", description = "Virtual temperature at 2 m (near-surface)"]
+    @variables Tv̄(t) [unit = u"K", description = "Layer-mean virtual temperature"]
+    @variables Z_agl(t) [
+        unit = u"m", description = "Geopotential height above ground level"]
 
-    eq_Tv = Tv ~ T  * (1 + 0.61 * QV)
-    eq_Tv_sfc = Tv_sfc ~ T2M  * (1 + 0.61 * QV2M)
-    eq_Tvbar  = Tv̄    ~ 0.5  * (Tv + Tv_sfc)
+    eq_Tv = Tv ~ T * (1 + 0.61 * QV)
+    eq_Tv_sfc = Tv_sfc ~ T2M * (1 + 0.61 * QV2M)
+    eq_Tvbar = Tv̄ ~ 0.5 * (Tv + Tv_sfc)
 
     Pmid = P_unit*Ap(lev+0.5) + Bp(lev+0.5)*PS
 
     eq_Z_agl = Z_agl ~ (Rd * Tv̄ / g) * log(PS / Pmid)
 
     push!(eqs, eq_Tv, eq_Tv_sfc, eq_Tvbar, eq_Z_agl)
-    push!(vars, Tv,   Tv_sfc,    Tv̄,     Z_agl)
+    push!(vars, Tv, Tv_sfc, Tv̄, Z_agl)
     # ------------------------------------------------------------------------
-
 
     # Coordinate transforms.
     @variables δxδlon(t) [
@@ -511,6 +514,11 @@ function GEOSFP(
     lev_trans = δPδlev ~ expand_derivatives(Differential(lev)(pressure_eq.rhs))
     push!(eqs, lon_trans, lat_trans, lev_trans)
     push!(vars, δxδlon, δyδlat, δPδlev)
+
+    @variables δZδlev(t) [unit = u"m", description = "∂Z_agl/∂lev"]
+    eq_dZ_dlev = δZδlev ~ expand_derivatives(Differential(lev)(eq_Z_agl.rhs))
+    push!(eqs, eq_dZ_dlev)
+    push!(vars, δZδlev)
 
     all_params = [pvdict[:lon], pvdict[:lat], lev, P_unit, Rd, g, lat2meters, lon2m, params...]
     sys = System(

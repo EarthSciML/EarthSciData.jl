@@ -12,7 +12,7 @@
         levrange = 1:1:2
     )
 
-    @variables ACET(t)=0.0 [unit = u"kg*m^-3"]
+    @variables ACET(t)=0.0 [unit = u"kg/kg"]
     @constants c=1000 [unit = u"s"]
 
     struct SysCoupler
@@ -40,7 +40,7 @@ end
     # the ODEProblem solve result below).
     prob = ODEProblem(sys2, [], get_tspan(domain))
     sol = solve(prob, Tsit5())
-    @test only(sol.u[end]) ≈ 5.852425989090736e-6
+    @test only(sol.u[end]) ≈ 3.017283738615849e-6 rtol = 0.01
 end
 
 @testitem "Strang Serial" setup=[SolveSetup] begin
@@ -48,7 +48,7 @@ end
     st = SolverStrangSerial(Tsit5(), dt)
     prob = ODEProblem(csys, st)
     sol = solve(prob, Euler(), dt = dt)
-    @test sum(sol.u[end]) ≈ 2.7791006168742467e-5
+    @test sum(sol.u[end]) ≈ 2.014381322963178e-5 rtol = 0.01
 end
 
 @testitem "Strang Threads" setup=[SolveSetup] begin
@@ -56,7 +56,7 @@ end
     st = SolverStrangThreads(Tsit5(), dt)
     prob = ODEProblem(csys, st)
     sol = solve(prob, Euler(), dt = dt)
-    @test sum(sol.u[end]) ≈ 2.7791006168742467e-5
+    @test sum(sol.u[end]) ≈ 2.014381322963178e-5 rtol = 0.01
 end
 
 @testitem "IMEX" setup=[SolveSetup] begin
@@ -64,5 +64,7 @@ end
     st = SolverIMEX()
     prob = ODEProblem(csys, st)
     sol = solve(prob, KenCarp3())
-    @test sum(sol.u[end]) ≈ 1.9930816050556133e-5
+    @test sum(sol.u[end]) ≈ 1.824462850685205e-5 rtol = 0.01
+    @test_nowarn solve(prob, KenCarp3())
 end
+

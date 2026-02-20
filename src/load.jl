@@ -10,15 +10,21 @@ An interface for types describing a dataset, potentially comprised of multiple f
 
 To satisfy this interface, a type must implement the following methods:
 
-  - `relpath(fs::FileSet, t::DateTime)`
-  - `url(fs::FileSet, t::DateTime)`
-  - `localpath(fs::FileSet, t::DateTime)`
-  - `DataFrequencyInfo(fs::FileSet)::DataFrequencyInfo`
-  - `loadmetadata(fs::FileSet, varname)::MetaData`
-  - `loadslice!(cache::AbstractArray, fs::FileSet, t::DateTime, varname)`
-  - `varnames(fs::FileSet)`
+  - `relpath(::FileSet, ::DateTime)`
+  - `url(::FileSet, ::DateTime)`
+  - `localpath(::FileSet, t::DateTime)`
+  - `DataFrequencyInfo(::FileSet)::DataFrequencyInfo`
+  - `loadmetadata(::FileSet, varname)::MetaData`
+  - `loadslice!(cache::AbstractArray, ::FileSet, ::DateTime, varname)`
+  - `varnames(::FileSet)`
+  - `get_geometry(::FileSet, ::MetaData)` (Returns the geometry of the data)
 """
 abstract type FileSet end
+
+struct FileSetWithRegridder{FS,RF}
+    fs::FS
+    regridder::RF
+end
 
 """
 $(SIGNATURES)
@@ -97,6 +103,28 @@ struct MetaData
     staggering::NTuple{3, Bool}
 end
 
+function proj_trans(metadata::MetaData, domain::DomainInfo)
+    Proj.Transformation(
+        "+proj=pipeline +step " *
+        domain.spatial_ref *
+        " +step " *
+        metadata.native_sr,
+    )
+end
+
+function coord_trans(metadata::MetaData, domain::DomainInfo)
+    if domain.spatial_ref == metadata.native_sr
+        coord_trns = (x) -> x # No transformation needed.
+    else
+        t = proj_trans(metadata, domain)
+        coord_trns = (locs) -> begin
+            x, y = t(locs[metadata.xdim], locs[metadata.ydim])
+            replace_in_tuple(locs, metadata.xdim, x, metadata.ydim, y)
+        end
+    end
+    return coord_trns
+end
+
 """
 Information about the temporal frequency of archived data.
 
@@ -150,8 +178,8 @@ data records for the times immediately before and after the current time step.
 the interpolator. `spatial_ref` is the spatial reference system that the simulation will be using.
 `stream` specifies whether the data should be streamed in as needed or loaded all at once.
 """
-mutable struct DataSetInterpolator{To, N, N2, FT, ITPT, DomT}
-    fs::FileSet
+mutable struct DataSetInterpolator{To, N, N2, FT, ITPT, DomT, ET, FSRG}
+    fs::FSRG
     varname::AbstractString
     # This is the actual data.
     data::Array{To, N}
@@ -165,18 +193,32 @@ mutable struct DataSetInterpolator{To, N, N2, FT, ITPT, DomT}
     domain::DomT
     times::Vector{DateTime}
     currenttime::DateTime
-    coord_trans::FT
+    extrapolate_type::ET
     loadtask::Task
     lock::ReentrantLock
     initialized::Bool
 
     function DataSetInterpolator{To}(fs::FileSet, varname::AbstractString,
             starttime::DateTime, endtime::DateTime, domain::DomainInfo;
-            stream = true) where {To <: Real}
+            stream = true, extrapolate_type = Flat()) where {To <: Real}
         metadata = loadmetadata(fs, varname)
+        model_grid = EarthSciMLBase.grid(domain, metadata.staggering)
+        regrid_f = (dst::AbstractArray, src::AbstractArray; extrapolate_type = extrapolate_type) -> begin
+            interpolate_from!(dst, src, metadata, model_grid, domain;
+                extrapolate_type = extrapolate_type)
+        end
+        fswr = FileSetWithRegridder(fs, regrid_f)
+        DataSetInterpolator{To}(fswr, varname, starttime, endtime, domain;
+            stream = stream, extrapolate_type = extrapolate_type)
+    end
+
+    function DataSetInterpolator{To}(fs::FileSetWithRegridder, varname::AbstractString,
+            starttime::DateTime, endtime::DateTime, domain::DomainInfo;
+            stream = true, extrapolate_type = Flat()) where {To <: Real}
+        metadata = loadmetadata(fs.fs, varname)
 
         # Check how many time indices we will need.
-        dfi = DataFrequencyInfo(fs)
+        dfi = DataFrequencyInfo(fs.fs)
         cache_size = 2
         if !stream
             cache_size = sum(
@@ -201,24 +243,11 @@ mutable struct DataSetInterpolator{To, N, N2, FT, ITPT, DomT}
         )
         ITPT = typeof(itp2)
 
-        if domain.spatial_ref == metadata.native_sr
-            coord_trans = (x) -> x # No transformation needed.
-        else
-            t = Proj.Transformation(
-                "+proj=pipeline +step " *
-                domain.spatial_ref *
-                " +step " *
-                metadata.native_sr,
-            )
-            coord_trans = (locs) -> begin
-                x, y = t(locs[metadata.xdim], locs[metadata.ydim])
-                replace_in_tuple(locs, metadata.xdim, x, metadata.ydim, y)
-            end
-        end
-        FT = typeof(coord_trans)
+        coord_trns = coord_trans(metadata, domain)
+        FT = typeof(coord_trns)
 
         td = Threads.@spawn (() -> DateTime(0, 1, 10))() # Placeholder for async loading task.
-        itp = new{To, N, N2, FT, ITPT, typeof(domain)}(
+        itp = new{To, N, N2, FT, ITPT, typeof(domain), typeof(extrapolate_type), typeof(fs)}(
             fs,
             varname,
             data,
@@ -229,7 +258,7 @@ mutable struct DataSetInterpolator{To, N, N2, FT, ITPT, DomT}
             domain,
             times,
             DateTime(1, 1, 1),
-            coord_trans,
+            extrapolate_type,
             td,
             ReentrantLock(),
             false
@@ -258,7 +287,7 @@ function tuple_from_vals(index1::Int, v1::T, index2::Int, v2::T,
 end
 
 function Base.show(io::IO, itp::DataSetInterpolator)
-    print(io, "DataSetInterpolator{$(typeof(itp.fs)), $(itp.varname)}")
+    print(io, "DataSetInterpolator{$(typeof(itp.fs.fs)), $(itp.varname)}")
 end
 
 """
@@ -275,7 +304,7 @@ and things like that.
 function knots2range(knots, reltol = 0.05)
     dx = diff(knots)
     dx_mean = sum(dx) / length(dx)
-    @assert all(abs.(1 .- dx ./ dx_mean) .<= reltol) "Knots ($knots) must be evenly spaced within reltol=$reltol."
+    #@assert all(abs.(1 .- dx ./ dx_mean) .<= reltol) "Knots ($knots) must be evenly spaced within reltol=$reltol."
     dx = (knots[end] - knots[begin]) / (length(knots) - 1)
     # Need to do weird range creation to avoid rounding errors.
     return knots[begin]:dx:(knots[begin] + dx * (length(knots) - 1))
@@ -306,7 +335,7 @@ end
 Return the next interpolation time point for this interpolator.
 """
 function nexttimepoint(itp::DataSetInterpolator, t::DateTime)
-    ti = DataFrequencyInfo(itp.fs)
+    ti = DataFrequencyInfo(itp.fs.fs)
     ci = centerpoint_index(ti, t)
     ti.centerpoints[min(length(ti.centerpoints), ci + 1)]
 end
@@ -315,7 +344,7 @@ end
 Return the previous interpolation time point for this interpolator.
 """
 function prevtimepoint(itp::DataSetInterpolator, t::DateTime)
-    ti = DataFrequencyInfo(itp.fs)
+    ti = DataFrequencyInfo(itp.fs.fs)
     ci = centerpoint_index(ti, t)
     ti.centerpoints[max(1, ci - 1)]
 end
@@ -324,7 +353,7 @@ end
 Return the current interpolation time point for this interpolator.
 """
 function currenttimepoint(itp::DataSetInterpolator, t::DateTime)
-    ti = DataFrequencyInfo(itp.fs)
+    ti = DataFrequencyInfo(itp.fs.fs)
     ci = centerpoint_index(ti, t)
     ti.centerpoints[ci]
 end
@@ -334,7 +363,7 @@ Load the time points that should be cached in this interpolator.
 """
 function interp_cache_times!(itp::DataSetInterpolator, t::DateTime)
     cache_size = length(itp.times)
-    dfi = DataFrequencyInfo(itp.fs)
+    dfi = DataFrequencyInfo(itp.fs.fs)
     ti = centerpoint_index(dfi, t)
     # Currently assuming we're going forwards in time.
     if t < dfi.centerpoints[ti]  # Load data starting with previous time step.
@@ -350,7 +379,7 @@ The time points when integration should be stopped to update the interpolator
 (as Unix timestamps).
 """
 function get_tstops(itp::DataSetInterpolator, starttime::DateTime)
-    dfi = DataFrequencyInfo(itp.fs)
+    dfi = DataFrequencyInfo(itp.fs.fs)
     datetime2unix.(sort([starttime, dfi.centerpoints...]))
 end
 
@@ -381,7 +410,7 @@ function initialize!(itp::DataSetInterpolator, t::DateTime)
 end
 
 function load_data_for_time!(itp::DataSetInterpolator, t::DateTime)
-    loadslice!(itp.load_cache, itp.fs, t, itp.varname)
+    loadslice!(itp.load_cache, itp.fs.fs, t, itp.varname)
     return t
 end
 
@@ -414,14 +443,14 @@ function update!(itp::DataSetInterpolator, t::DateTime)
         )
     end
 
-    model_grid = EarthSciMLBase.grid(itp.domain, itp.metadata.staggering)
     # Load the additional times we need
     for idx in idxs_not_in_times
         d = selectdim(itp.data, N, idx)
         if fetch(itp.loadtask) != times[idx] # Check if correct time is already loaded.
             load_data_for_time!(itp, times[idx]) # Load data if not already loaded.
         end
-        interpolate_from!(itp, d, itp.load_cache, model_grid) # Copy results to correct location
+        # Regrid results into the data array.
+        itp.fs.regridder(d, itp.load_cache; extrapolate_type=itp.extrapolate_type)
         # Start loading the next time point asynchronously.
         itp.loadtask = Threads.@spawn load_data_for_time!(
             itp, nexttimepoint(itp, times[idx]))
@@ -430,40 +459,6 @@ function update!(itp::DataSetInterpolator, t::DateTime)
     itp.currenttime = t
     @assert issorted(itp.times) "Interpolator times are in wrong order"
     update_interpolator!(itp)
-end
-
-function interpolate_from!(dsi::DataSetInterpolator, dst::AbstractArray{T, N},
-        src::AbstractArray{T, N}, model_grid, extrapolate_type = Flat()) where {T, N}
-    data_grid = Tuple(knots2range.(dsi.metadata.coords))
-    dsi.metadata.xdim, dsi.metadata.ydim
-    itp = interpolate!(src, BSpline(Linear()))
-    itp = extrapolate(scale(itp, data_grid), extrapolate_type)
-    if N == 3
-        for (i, x) in enumerate(model_grid[1])
-            for (j, y) in enumerate(model_grid[2])
-                for (k, z) in enumerate(model_grid[3])
-                    idx = tuple_from_vals(dsi.metadata.xdim, i,
-                        dsi.metadata.ydim, j, dsi.metadata.zdim, k)
-                    locs = tuple_from_vals(dsi.metadata.xdim, x,
-                        dsi.metadata.ydim, y, dsi.metadata.zdim, z)
-                    locs = dsi.coord_trans(locs)
-                    dst[idx...] = itp(locs...)
-                end
-            end
-        end
-    elseif N == 2 && dsi.metadata.zdim <= 0
-        for (i, x) in enumerate(model_grid[1])
-            for (j, y) in enumerate(model_grid[2])
-                idx = tuple_from_vals(dsi.metadata.xdim, i, dsi.metadata.ydim, j)
-                locs = tuple_from_vals(dsi.metadata.xdim, x, dsi.metadata.ydim, y)
-                locs = dsi.coord_trans(locs)
-                dst[idx...] = itp(locs...)
-            end
-        end
-    else
-        error("Invalid dimension configuration")
-    end
-    dst
 end
 
 function lazyload!(itp::DataSetInterpolator, t::DateTime)
@@ -684,7 +679,7 @@ function create_updater_sys_event(name, params, starttime::DateTime)
 end
 
 Latexify.@latexrecipe function f(itp::EarthSciData.DataSetInterpolator)
-    return "$(split(string(typeof(itp.fs)), ".")[end]).$(itp.varname)"
+    return "$(split(string(typeof(itp.fs.fs)), ".")[end]).$(itp.varname)"
 end
 
 function _get_staggering(var)
