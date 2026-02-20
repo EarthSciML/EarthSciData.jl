@@ -123,16 +123,20 @@ end
     levrange=1:2,
     u_proto=zeros(Float64, 1, 1, 1, 1))
 
-    lon, lat, lev = EarthSciMLBase.pvars(domain)
     emis_nei = NEI2016MonthlyEmis("mrggrid_withbeis_withrwc", domain)
     @constants uc = 1.0 [unit = u"s" description = "unit conversion"]
-    @variables ACET(t) [unit = u"1/s"]
+    @variables ACET(t) = 0.0 [unit = u"1/s"]
     eq = D(ACET) ~ emis_nei.ACET / uc
     sys = compose(System([eq], t, [ACET], [uc]; name = :test_sys), emis_nei)
     sys = mtkcompile(sys)
+    # After composition, parameters are namespaced; extract them from the compiled system
+    ps = parameters(sys)
+    lat_p = only(filter(p -> endswith(string(Symbol(p)), "₊lat"), ps))
+    lon_p = only(filter(p -> endswith(string(Symbol(p)), "₊lon"), ps))
+    lev_p = only(filter(p -> endswith(string(Symbol(p)), "₊lev"), ps))
     prob = ODEProblem(
         sys,
-        [lat => deg2rad(40.0), lon => deg2rad(-97.5), lev => 1.0],
+        [lat_p => deg2rad(40.0), lon_p => deg2rad(-97.5), lev_p => 1.0],
         (0.0, 60.0),
     )
     sol = solve(prob, Tsit5())
@@ -302,7 +306,6 @@ end
         latrange=deg2rad(42):deg2rad(0.5):deg2rad(43),
         levrange = 1:2
     )
-    lon, lat, lev = EarthSciMLBase.pvars(domain)
     emis = NEI2016MonthlyEmis("mrggrid_withbeis_withrwc", domain)
     eqs = equations(emis)
     @test length(eqs) == 69
@@ -318,7 +321,7 @@ end
     tspan = (0.0, t_end)
 
     @constants uc = 1.0 [unit = u"s", description = "unit conversion"]
-    @variables NO(t) [unit = u"1/s"]
+    @variables NO(t) = 0.0 [unit = u"1/s"]
 
     saveat = range(tspan[1], tspan[2], length=nt)
 
@@ -327,9 +330,14 @@ end
             eq = D(NO) ~ emis.NO / uc
             sys = compose(System([eq], t, [NO], [uc]; name = Symbol("NO_sys_$(i)_$(j)")), emis)
             sys = mtkcompile(sys)
+            # After composition, parameters are namespaced; extract them from the compiled system
+            ps = parameters(sys)
+            lat_p = only(filter(p -> endswith(string(Symbol(p)), "₊lat"), ps))
+            lon_p = only(filter(p -> endswith(string(Symbol(p)), "₊lon"), ps))
+            lev_p = only(filter(p -> endswith(string(Symbol(p)), "₊lev"), ps))
 
             prob = ODEProblem(sys,
-                [lat => lat_val, lon => lon_val, lev => 1.0],
+                [lat_p => lat_val, lon_p => lon_val, lev_p => 1.0],
                 tspan)
 
             sol = solve(prob, Tsit5(), saveat=saveat)
@@ -352,7 +360,6 @@ end
         latrange=deg2rad(42):deg2rad(0.5):deg2rad(43),
         levrange = 1:2
     )
-    lon, lat, lev = EarthSciMLBase.pvars(domain)
     emis = NEI2016MonthlyEmis("mrggrid_withbeis_withrwc", domain)
 
     ts, te = get_tspan_datetime(domain)
@@ -365,7 +372,7 @@ end
     tspan = (0.0, t_end)
 
     @constants uc = 1.0 [unit = u"s", description = "unit conversion"]
-    @variables ACET(t) [unit = u"1/s"]
+    @variables ACET(t) = 0.0 [unit = u"1/s"]
 
     saveat = range(tspan[1], tspan[2], length=nt)
 
@@ -374,9 +381,14 @@ end
             eq = D(ACET) ~ emis.ACET / uc
             sys = compose(System([eq], t, [ACET], [uc]; name = Symbol("ACET_sys_$(i)_$(j)")), emis)
             sys = mtkcompile(sys)
+            # After composition, parameters are namespaced; extract them from the compiled system
+            ps = parameters(sys)
+            lat_p = only(filter(p -> endswith(string(Symbol(p)), "₊lat"), ps))
+            lon_p = only(filter(p -> endswith(string(Symbol(p)), "₊lon"), ps))
+            lev_p = only(filter(p -> endswith(string(Symbol(p)), "₊lev"), ps))
 
             prob = ODEProblem(sys,
-                [lat => lat_val, lon => lon_val, lev => 1.0],
+                [lat_p => lat_val, lon_p => lon_val, lev_p => 1.0],
                 tspan)
 
             sol = solve(prob, Tsit5(), saveat=saveat)
