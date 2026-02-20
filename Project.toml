@@ -1,6 +1,6 @@
 name = "EarthSciData"
 uuid = "a293c155-435f-439d-9c11-a083b6b47337"
-version = "0.14.0"
+version = "0.15.0"
 authors = ["EarthSciML Authors"]
 
 [deps]
