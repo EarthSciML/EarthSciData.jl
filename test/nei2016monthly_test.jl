@@ -102,12 +102,11 @@ end
 @testitem "run" setup=[NEISetup] begin
     using ModelingToolkit
     using OrdinaryDiffEqTsit5
-    sys = structural_simplify(emis)
+    sys = mtkcompile(emis)
     prob = ODEProblem(
         sys,
-        zeros(1),
+        [lat => deg2rad(40.0), lon => deg2rad(-97.5), lev => 1.0],
         (0.0, 60.0),
-        [lat => deg2rad(40.0), lon => deg2rad(-97.5), lev => 1.0]
     )
     solve(prob, Tsit5())
 end
@@ -129,13 +128,12 @@ end
     @constants uc = 1.0 [unit = u"s" description = "unit conversion"]
     @variables ACET(t) [unit = u"1/s"]
     eq = D(ACET) ~ emis_nei.ACET / uc
-    sys = compose(ODESystem([eq], t, [ACET], [uc]; name = :test_sys), emis_nei)
-    sys = structural_simplify(sys)
+    sys = compose(System([eq], t, [ACET], [uc]; name = :test_sys), emis_nei)
+    sys = mtkcompile(sys)
     prob = ODEProblem(
         sys,
-        zeros(1),
+        [lat => deg2rad(40.0), lon => deg2rad(-97.5), lev => 1.0],
         (0.0, 60.0),
-        [lat => deg2rad(40.0), lon => deg2rad(-97.5), lev => 1.0]
     )
     sol = solve(prob, Tsit5())
     @test sol.u[end][end] != 0.0  # Ensure we get a nonzero result
@@ -327,14 +325,12 @@ end
     for (i, lon_val) in enumerate(lon_grid)
         for (j, lat_val) in enumerate(lat_grid)
             eq = D(NO) ~ emis.NO / uc
-            sys = compose(ODESystem([eq], t, [NO], [uc]; name = Symbol("NO_sys_$(i)_$(j)")), emis)
-            sys = structural_simplify(sys)
+            sys = compose(System([eq], t, [NO], [uc]; name = Symbol("NO_sys_$(i)_$(j)")), emis)
+            sys = mtkcompile(sys)
 
-            prob = ODEProblem(sys, zeros(1), tspan, [
-                lat => lat_val,
-                lon => lon_val,
-                lev => 1.0
-            ])
+            prob = ODEProblem(sys,
+                [lat => lat_val, lon => lon_val, lev => 1.0],
+                tspan)
 
             sol = solve(prob, Tsit5(), saveat=saveat)
             NO_map[i, j, :] = getindex.(sol.u, 1)
@@ -376,14 +372,12 @@ end
     for (i, lon_val) in enumerate(lon_grid)
         for (j, lat_val) in enumerate(lat_grid)
             eq = D(ACET) ~ emis.ACET / uc
-            sys = compose(ODESystem([eq], t, [ACET], [uc]; name = Symbol("ACET_sys_$(i)_$(j)")), emis)
-            sys = structural_simplify(sys)
+            sys = compose(System([eq], t, [ACET], [uc]; name = Symbol("ACET_sys_$(i)_$(j)")), emis)
+            sys = mtkcompile(sys)
 
-            prob = ODEProblem(sys, zeros(1), tspan, [
-                lat => lat_val,
-                lon => lon_val,
-                lev => 1.0
-            ])
+            prob = ODEProblem(sys,
+                [lat => lat_val, lon => lon_val, lev => 1.0],
+                tspan)
 
             sol = solve(prob, Tsit5(), saveat=saveat)
             ACET_map[i, j, :] = getindex.(sol.u, 1)
