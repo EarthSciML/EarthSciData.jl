@@ -8,7 +8,7 @@ using ModelingToolkit: t
 using EarthSciMLBase, DiffEqCallbacks
 using DynamicQuantities, Latexify, ProgressMeter
 using Scratch
-using SparseArrays, JLD2
+using JLD2
 using ConservativeRegridding
 
 # General utilities
