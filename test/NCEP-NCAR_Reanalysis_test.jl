@@ -21,6 +21,10 @@
     fs = EarthSciData.NCEPNCARReanalysisFileSet(mirror, domain)
 end
 
+@testitem "verify_fileset_interface" begin
+    @test EarthSciData.verify_fileset_interface(EarthSciData.NCEPNCARReanalysisFileSet)
+end
+
 @testitem "coordinates" setup=[NCEPSetup] begin
     mdU = EarthSciData.loadmetadata(fs, "uwnd")
     @test mdU.staggering == (true, false, false)

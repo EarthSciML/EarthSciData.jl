@@ -11,9 +11,9 @@ An interface for types describing a dataset, potentially comprised of multiple f
 To satisfy this interface, a type must implement the following methods:
 
   - `mirror(::FileSet)` (Return the base URL or path for the dataset)
-  - `relpath(::FileSet, ::DateTime)`
-  - `url(::FileSet, ::DateTime)`
-  - `localpath(::FileSet, t::DateTime)`
+  - `relpath(::FileSet, ::DateTime, [varname])` (varname is optional, for per-variable file datasets)
+  - `url(::FileSet, ::DateTime, [varname])`
+  - `localpath(::FileSet, t::DateTime, [varname])`
   - `DataFrequencyInfo(::FileSet)::DataFrequencyInfo`
   - `loadmetadata(::FileSet, varname)::MetaData`
   - `loadslice!(cache::AbstractArray, ::FileSet, ::DateTime, varname)`
@@ -28,6 +28,12 @@ $(SIGNATURES)
 Return the base URL or path for the dataset.
 """
 mirror(fs::FileSet) = fs.mirror
+
+"""
+Default 3-argument `relpath` falls back to the 2-argument version, ignoring `varname`.
+Subtypes with per-variable files should override this.
+"""
+relpath(fs::FileSet, t::DateTime, ::Nothing) = relpath(fs, t)
 
 struct FileSetWithRegridder{FS,RF}
     fs::FS
@@ -71,7 +77,6 @@ EarthSciData.verify_fileset_interface(MyFileSet)
 """
 function verify_fileset_interface(::Type{T}) where {T <: FileSet}
     required = [
-        (relpath, Tuple{T, DateTime}, "relpath(::$T, ::DateTime)"),
         (DataFrequencyInfo, Tuple{T}, "DataFrequencyInfo(::$T)"),
         (loadmetadata, Tuple{T, String}, "loadmetadata(::$T, varname::String)"),
         (loadslice!, Tuple{AbstractArray, T, DateTime, String},
@@ -79,6 +84,12 @@ function verify_fileset_interface(::Type{T}) where {T <: FileSet}
         (varnames, Tuple{T}, "varnames(::$T)"),
     ]
     missing_methods = String[]
+    # relpath must have either a 2-arg or 3-arg method.
+    has_relpath_2 = hasmethod(relpath, Tuple{T, DateTime})
+    has_relpath_3 = hasmethod(relpath, Tuple{T, DateTime, String})
+    if !has_relpath_2 && !has_relpath_3
+        push!(missing_methods, "relpath(::$T, ::DateTime) or relpath(::$T, ::DateTime, varname)")
+    end
     for (f, argtypes, desc) in required
         if !hasmethod(f, argtypes)
             push!(missing_methods, desc)
@@ -95,16 +106,18 @@ end
 $(SIGNATURES)
 
 Return the URL for the file for the given `DateTime`.
+An optional `varname` can be provided for datasets with per-variable files.
 """
-url(fs::FileSet, t::DateTime) = join([mirror(fs), relpath(fs, t)], "/")
+url(fs::FileSet, t::DateTime, varname=nothing) = join([mirror(fs), relpath(fs, t, varname)], "/")
 
 """
 $(SIGNATURES)
 
 Return the local path for the file for the given `DateTime`.
+An optional `varname` can be provided for datasets with per-variable files.
 """
-function localpath(fs::FileSet, t::DateTime)
-    file = relpath(fs, t)
+function localpath(fs::FileSet, t::DateTime, varname=nothing)
+    file = relpath(fs, t, varname)
     file = replace(file, ':' => '_')
     joinpath(download_cache(), replace(mirror(fs), "://" => "_"), file)
 end
@@ -113,9 +126,10 @@ end
 $(SIGNATURES)
 
 Check if the specified file exists locally. If not, download it.
+An optional `varname` can be provided for datasets with per-variable files.
 """
-function maybedownload(fs::FileSet, t::DateTime)
-    p = localpath(fs, t)
+function maybedownload(fs::FileSet, t::DateTime, varname=nothing)
+    p = localpath(fs, t, varname)
     if isfile(p)
         return p
     end
@@ -123,7 +137,7 @@ function maybedownload(fs::FileSet, t::DateTime)
         @info "Creating directory $(dirname(p))"
         mkpath(dirname(p))
     end
-    u = url(fs, t)
+    u = url(fs, t, varname)
     try
         prog = Progress(100; desc = "Downloading $(basename(u)):", dt = 0.1)
         Downloads.download(u, p,

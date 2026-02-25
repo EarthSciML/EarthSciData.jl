@@ -69,29 +69,13 @@ function var_name(varname::AbstractString)
     occursin("_sfc", varname) ? split(varname, "_")[1] : varname
 end
 
-function relpath(::NCEPNCARReanalysisFileSet, time::DateTime, var::String)
+function relpath(::NCEPNCARReanalysisFileSet, time::DateTime, var::AbstractString)
     if occursin("sfc", var)
         base = split(var, "_")[1]
         return "surface/$(base).sfc.nc"
     else
         return "pressure/$(var).$(year(time)).nc"
     end
-end
-
-function maybedownload(fs::NCEPNCARReanalysisFileSet, time::DateTime, var::String)
-    filename = relpath(fs, time, var)
-
-    local_file = joinpath("data", "NCEP-NCAR Reanalysis", filename)
-
-    mkpath(dirname(local_file))
-
-    if !isfile(local_file)
-        @info "Downloading $filename..."
-        full_url = string(mirror(fs), filename)
-        Downloads.download(full_url, local_file)
-    end
-
-    return local_file
 end
 
 DataFrequencyInfo(fs::NCEPNCARReanalysisFileSet)::DataFrequencyInfo = fs.freq_info
@@ -188,6 +172,29 @@ end
 
 function varnames(fs::NCEPNCARReanalysisFileSet)
     return collect(keys(fs.ds))
+end
+
+function get_geometry(::NCEPNCARReanalysisFileSet, m::MetaData)
+    # Coordinates are stored in radians; convert to degrees for the native longlat CRS.
+    lon = rad2deg.(m.coords[m.xdim])
+    lat = rad2deg.(m.coords[m.ydim])
+    # Compute cell edges from cell centers.
+    dlon = (lon[2] - lon[1]) / 2
+    dlat = (lat[2] - lat[1]) / 2
+    lon_edges = [lon[1] - dlon; [lon[i] + dlon for i in 1:length(lon)]]
+    lat_edges = [lat[1] - dlat; [lat[j] + dlat for j in 1:length(lat)]]
+    nx, ny = length(lon), length(lat)
+    polys = Vector{Vector{NTuple{2, Float64}}}(undef, nx * ny)
+    for j in 1:ny, i in 1:nx
+        polys[(j - 1) * nx + i] = [
+            (lon_edges[i], lat_edges[j]),
+            (lon_edges[i + 1], lat_edges[j]),
+            (lon_edges[i + 1], lat_edges[j + 1]),
+            (lon_edges[i], lat_edges[j + 1]),
+            (lon_edges[i], lat_edges[j]),
+        ]
+    end
+    return polys
 end
 
 function Base.close(fs::NCEPNCARReanalysisFileSet)
