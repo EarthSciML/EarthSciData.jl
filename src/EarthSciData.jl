@@ -13,6 +13,7 @@ using ConservativeRegridding
 
 # General utilities
 include("load.jl")
+include("mtk_integration.jl")
 include("utils.jl")
 
 # Specific data sets

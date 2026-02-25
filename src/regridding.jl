@@ -49,7 +49,7 @@ function regrid_horizontal!(dst_field, regridder::ConservativeRegridding.Regridd
 end
 
 function interpolate_from!(dst::AbstractArray{T, N},
-        src::AbstractArray{T, N}, mta::MetaData, model_grid, domain::DomainInfo;
+        src::AbstractArray{T, N}, mta::MetaData, model_grid, domain;
         extrapolate_type = Flat()) where {T, N}
     data_grid = Tuple(knots2range.(mta.coords))
     itp = interpolate!(src, BSpline(Linear()))

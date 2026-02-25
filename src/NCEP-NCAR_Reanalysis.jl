@@ -87,7 +87,7 @@ function maybedownload(fs::NCEPNCARReanalysisFileSet, time::DateTime, var::Strin
 
     if !isfile(local_file)
         @info "Downloading $filename..."
-        full_url = string(fs.mirror, filename)
+        full_url = string(mirror(fs), filename)
         Downloads.download(full_url, local_file)
     end
 
@@ -188,6 +188,14 @@ end
 
 function varnames(fs::NCEPNCARReanalysisFileSet)
     return collect(keys(fs.ds))
+end
+
+function Base.close(fs::NCEPNCARReanalysisFileSet)
+    lock(nclock) do
+        for ds in values(fs.ds)
+            close(ds)
+        end
+    end
 end
 
 struct NCEPNCARReanalysisCoupler

@@ -185,8 +185,8 @@ end
     @test uvals ≈ answers
 
     interp!(itp, times[end], xs[end], xs[end])
-    @test length(itp.times) == 2
-    @test itp.times == [DateTime("2022-05-02T22:30:00"), DateTime("2022-05-03T01:30:00")]
+    @test length(itp.cache.times) == 2
+    @test itp.cache.times == [DateTime("2022-05-02T22:30:00"), DateTime("2022-05-03T01:30:00")]
 
     uvals = zeros(Float32, length(times), length(xs))
     answers = zeros(Float32, length(times), length(xs))

@@ -1,4 +1,4 @@
-export interp!
+export interp, interp!, GridSpec
 
 function download_cache()
     ("EARTHSCIDATADIR" ∈ keys(ENV)) ? ENV["EARTHSCIDATADIR"] :
@@ -10,6 +10,7 @@ An interface for types describing a dataset, potentially comprised of multiple f
 
 To satisfy this interface, a type must implement the following methods:
 
+  - `mirror(::FileSet)` (Return the base URL or path for the dataset)
   - `relpath(::FileSet, ::DateTime)`
   - `url(::FileSet, ::DateTime)`
   - `localpath(::FileSet, t::DateTime)`
@@ -21,9 +22,73 @@ To satisfy this interface, a type must implement the following methods:
 """
 abstract type FileSet end
 
+"""
+$(SIGNATURES)
+
+Return the base URL or path for the dataset.
+"""
+mirror(fs::FileSet) = fs.mirror
+
 struct FileSetWithRegridder{FS,RF}
     fs::FS
     regridder::RF
+end
+
+"""
+A lightweight specification of a model grid, providing an alternative to
+`EarthSciMLBase.DomainInfo` for use cases that don't require ModelingToolkit integration.
+
+$(FIELDS)
+"""
+struct GridSpec
+    "Coordinate ranges for each spatial dimension, ordered (x, y, [z])."
+    coords::Vector
+    "The spatial reference system, e.g. \"+proj=longlat +datum=WGS84 +no_defs\"."
+    spatial_ref::String
+end
+
+# Internal dispatch: compute the model grid for the given domain/gridspec and staggering.
+_compute_grid(domain::DomainInfo, staggering) = EarthSciMLBase.grid(domain, staggering)
+_compute_grid(gs::GridSpec, _staggering) = gs.coords
+
+# Internal dispatch: get the spatial reference string.
+_spatial_ref(domain::DomainInfo) = domain.spatial_ref
+_spatial_ref(gs::GridSpec) = gs.spatial_ref
+
+"""
+$(SIGNATURES)
+
+Check that type `T` implements all required `FileSet` interface methods.
+Throws an error listing any missing methods. This is an opt-in check
+intended for use when implementing a new `FileSet` subtype.
+
+# Example
+```julia
+struct MyFileSet <: EarthSciData.FileSet ... end
+# After defining all methods:
+EarthSciData.verify_fileset_interface(MyFileSet)
+```
+"""
+function verify_fileset_interface(::Type{T}) where {T <: FileSet}
+    required = [
+        (relpath, Tuple{T, DateTime}, "relpath(::$T, ::DateTime)"),
+        (DataFrequencyInfo, Tuple{T}, "DataFrequencyInfo(::$T)"),
+        (loadmetadata, Tuple{T, String}, "loadmetadata(::$T, varname::String)"),
+        (loadslice!, Tuple{AbstractArray, T, DateTime, String},
+            "loadslice!(cache, ::$T, ::DateTime, varname)"),
+        (varnames, Tuple{T}, "varnames(::$T)"),
+    ]
+    missing_methods = String[]
+    for (f, argtypes, desc) in required
+        if !hasmethod(f, argtypes)
+            push!(missing_methods, desc)
+        end
+    end
+    if !isempty(missing_methods)
+        error("Type $T is missing required FileSet interface methods:\n  " *
+              join(missing_methods, "\n  "))
+    end
+    return true
 end
 
 """
@@ -31,7 +96,7 @@ $(SIGNATURES)
 
 Return the URL for the file for the given `DateTime`.
 """
-url(fs::FileSet, t::DateTime) = join([fs.mirror, relpath(fs, t)], "/")
+url(fs::FileSet, t::DateTime) = join([mirror(fs), relpath(fs, t)], "/")
 
 """
 $(SIGNATURES)
@@ -41,7 +106,7 @@ Return the local path for the file for the given `DateTime`.
 function localpath(fs::FileSet, t::DateTime)
     file = relpath(fs, t)
     file = replace(file, ':' => '_')
-    joinpath(download_cache(), replace(fs.mirror, "://" => "_"), file)
+    joinpath(download_cache(), replace(mirror(fs), "://" => "_"), file)
 end
 
 """
@@ -84,15 +149,15 @@ struct MetaData
     "The locations associated with each data point in the array."
     coords::Vector{Vector{Float64}}
     "Physical units of the data, e.g. m s⁻¹."
-    unit_str::AbstractString
+    unit_str::String
     "Description of the data."
-    description::AbstractString
+    description::String
     "Dimensions of the data, e.g. (lat, lon, layer)."
-    dimnames::AbstractVector
+    dimnames::Vector{String}
     "Dimension sizes of the data, e.g. (180, 360, 30)."
-    varsize::AbstractVector
+    varsize::Vector{Int}
     "The spatial reference system of the data, e.g. \"+proj=longlat +datum=WGS84 +no_defs\" for lat-lon data."
-    native_sr::AbstractString
+    native_sr::String
     "The index number of the x-dimension (e.g. longitude)"
     xdim::Int
     "The index number of the y-dimension (e.g. latitude)"
@@ -103,17 +168,17 @@ struct MetaData
     staggering::NTuple{3, Bool}
 end
 
-function proj_trans(metadata::MetaData, domain::DomainInfo)
+function proj_trans(metadata::MetaData, domain)
     Proj.Transformation(
         "+proj=pipeline +step " *
-        domain.spatial_ref *
+        _spatial_ref(domain) *
         " +step " *
         metadata.native_sr,
     )
 end
 
-function coord_trans(metadata::MetaData, domain::DomainInfo)
-    if domain.spatial_ref == metadata.native_sr
+function coord_trans(metadata::MetaData, domain)
+    if _spatial_ref(domain) == metadata.native_sr
         coord_trns = (x) -> x # No transformation needed.
     else
         t = proj_trans(metadata, domain)
@@ -136,7 +201,7 @@ struct DataFrequencyInfo
     "Interval between each record."
     frequency::Union{Dates.Period, Dates.CompoundPeriod}
     "Time representing the temporal center of each record."
-    centerpoints::AbstractVector
+    centerpoints::Vector{DateTime}
 end
 
 """
@@ -164,6 +229,30 @@ function centerpoint_index(t_info::DataFrequencyInfo, t::DateTime)
 end
 
 """
+Cache for time-varying interpolation state within a `DataSetInterpolator`.
+
+$(FIELDS)
+"""
+mutable struct TemporalCache{To, N, N2, ITPT}
+    "The actual data array, with the last dimension being time."
+    data::Array{To, N}
+    "Buffer used for interpolation."
+    interp_cache::Array{To, N}
+    "Buffer that data is read into from file (separate from `data` for async loading)."
+    load_cache::Array{To, N2}
+    "The interpolation object."
+    itp::ITPT
+    "Timestamps corresponding to each time index in `data`."
+    times::Vector{DateTime}
+    "The current time that the interpolator has been loaded for."
+    currenttime::DateTime
+    "Async task for loading the next time step."
+    loadtask::Task
+    "Whether the cache has been initialized with real data."
+    initialized::Bool
+end
+
+"""
 $(SIGNATURES)
 
 DataSetInterpolators are used to interpolate data from a `FileSet` to represent a given time and location.
@@ -180,29 +269,18 @@ the interpolator. `spatial_ref` is the spatial reference system that the simulat
 """
 mutable struct DataSetInterpolator{To, N, N2, FT, ITPT, DomT, ET, FSRG}
     fs::FSRG
-    varname::AbstractString
-    # This is the actual data.
-    data::Array{To, N}
-    # This is buffer that is used to interpolate from.
-    interp_cache::Array{To, N}
-    itp::ITPT # The interpolator.
-    # The buffer that the data is read into from the file.
-    # It is separate from `data` so that we can load it asynchronously.
-    load_cache::Array{To, N2}
+    varname::String
+    cache::TemporalCache{To, N, N2, ITPT}
     metadata::MetaData
     domain::DomT
-    times::Vector{DateTime}
-    currenttime::DateTime
     extrapolate_type::ET
-    loadtask::Task
     lock::ReentrantLock
-    initialized::Bool
 
     function DataSetInterpolator{To}(fs::FileSet, varname::AbstractString,
-            starttime::DateTime, endtime::DateTime, domain::DomainInfo;
+            starttime::DateTime, endtime::DateTime, domain;
             stream = true, extrapolate_type = Flat()) where {To <: Real}
         metadata = loadmetadata(fs, varname)
-        model_grid = EarthSciMLBase.grid(domain, metadata.staggering)
+        model_grid = _compute_grid(domain, metadata.staggering)
         regrid_f = (dst::AbstractArray, src::AbstractArray; extrapolate_type = extrapolate_type) -> begin
             interpolate_from!(dst, src, metadata, model_grid, domain;
                 extrapolate_type = extrapolate_type)
@@ -213,7 +291,7 @@ mutable struct DataSetInterpolator{To, N, N2, FT, ITPT, DomT, ET, FSRG}
     end
 
     function DataSetInterpolator{To}(fs::FileSetWithRegridder, varname::AbstractString,
-            starttime::DateTime, endtime::DateTime, domain::DomainInfo;
+            starttime::DateTime, endtime::DateTime, domain;
             stream = true, extrapolate_type = Flat()) where {To <: Real}
         metadata = loadmetadata(fs.fs, varname)
 
@@ -247,21 +325,18 @@ mutable struct DataSetInterpolator{To, N, N2, FT, ITPT, DomT, ET, FSRG}
         FT = typeof(coord_trns)
 
         td = Threads.@spawn (() -> DateTime(0, 1, 10))() # Placeholder for async loading task.
+        tc = TemporalCache{To, N, N2, ITPT}(
+            data, interp_cache, load_cache, itp2, times,
+            DateTime(1, 1, 1), td, false
+        )
         itp = new{To, N, N2, FT, ITPT, typeof(domain), typeof(extrapolate_type), typeof(fs)}(
             fs,
-            varname,
-            data,
-            interp_cache,
-            itp2,
-            load_cache,
+            String(varname),
+            tc,
             metadata,
             domain,
-            times,
-            DateTime(1, 1, 1),
             extrapolate_type,
-            td,
             ReentrantLock(),
-            false
         )
         itp
     end
@@ -291,11 +366,6 @@ function Base.show(io::IO, itp::DataSetInterpolator)
 end
 
 """
-Return the units of the data.
-"""
-ModelingToolkit.get_unit(itp::DataSetInterpolator) = units(itp)
-
-"""
 Convert a vector of evenly spaced grid points to a range.
 The `reltol` parameter specifies the relative tolerance for the grid spacing,
 which is necessary to account for different numbers of days in each month
@@ -322,13 +392,14 @@ function create_interpolator!(interp_cache, data, coords, times)
 end
 
 function update_interpolator!(itp::DataSetInterpolator{To}) where {To}
-    if size(itp.interp_cache) != size(itp.data)
-        itp.interp_cache = similar(itp.data)
+    tc = itp.cache
+    if size(tc.interp_cache) != size(tc.data)
+        tc.interp_cache = similar(tc.data)
     end
     coords = _model_grid(itp)
-    grid, itp2 = create_interpolator!(itp.interp_cache, itp.data, coords, itp.times)
-    @assert all([length(g) for g in grid] .== size(itp.data)) "invalid data size: $([length(g) for g in grid]) != $(size(itp.data))"
-    itp.itp = itp2
+    grid, itp2 = create_interpolator!(tc.interp_cache, tc.data, coords, tc.times)
+    @assert all([length(g) for g in grid] .== size(tc.data)) "invalid data size: $([length(g) for g in grid]) != $(size(tc.data))"
+    tc.itp = itp2
 end
 
 """
@@ -362,7 +433,7 @@ end
 Load the time points that should be cached in this interpolator.
 """
 function interp_cache_times!(itp::DataSetInterpolator, t::DateTime)
-    cache_size = length(itp.times)
+    cache_size = length(itp.cache.times)
     dfi = DataFrequencyInfo(itp.fs.fs)
     ti = centerpoint_index(dfi, t)
     # Currently assuming we're going forwards in time.
@@ -385,7 +456,7 @@ end
 
 # Get the model grid for this interpolator.
 function _model_grid(itp::DataSetInterpolator)
-    grid = EarthSciMLBase.grid(itp.domain, itp.metadata.staggering)
+    grid = _compute_grid(itp.domain, itp.metadata.staggering)
     if length(itp.metadata.varsize) == 2 && itp.metadata.zdim <= 0
         grid_size = tuple_from_vals(itp.metadata.xdim, grid[1], itp.metadata.ydim, grid[2])
     elseif length(itp.metadata.varsize) == 3
@@ -403,39 +474,41 @@ function _model_grid(itp::DataSetInterpolator)
 end
 
 function initialize!(itp::DataSetInterpolator, t::DateTime)
-    itp.load_cache = zeros(eltype(itp.load_cache), itp.metadata.varsize...)
+    tc = itp.cache
+    tc.load_cache = zeros(eltype(tc.load_cache), itp.metadata.varsize...)
     grid_size = length.(_model_grid(itp))
-    itp.data = zeros(eltype(itp.data), grid_size..., size(itp.data, length(size(itp.data)))) # Add a dimension for time.
-    itp.initialized = true
+    tc.data = zeros(eltype(tc.data), grid_size..., size(tc.data, length(size(tc.data)))) # Add a dimension for time.
+    tc.initialized = true
 end
 
 function load_data_for_time!(itp::DataSetInterpolator, t::DateTime)
-    loadslice!(itp.load_cache, itp.fs.fs, t, itp.varname)
+    loadslice!(itp.cache.load_cache, itp.fs.fs, t, itp.varname)
     return t
 end
 
 function update!(itp::DataSetInterpolator, t::DateTime)
-    @assert itp.initialized "Interpolator has not been initialized"
+    tc = itp.cache
+    @assert tc.initialized "Interpolator has not been initialized"
     times = interp_cache_times!(itp, t) # Figure out which times we need.
 
     # Figure out the overlap between the times we have and the times we need.
-    times_in_cache = intersect(times, itp.times)
-    idxs_in_cache = [findfirst(x -> x == times_in_cache[i], itp.times)
+    times_in_cache = intersect(times, tc.times)
+    idxs_in_cache = [findfirst(x -> x == times_in_cache[i], tc.times)
                      for i in eachindex(times_in_cache)]
     idxs_in_times = [findfirst(x -> x == times_in_cache[i], times)
                      for i in eachindex(times_in_cache)]
     idxs_not_in_times = setdiff(eachindex(times), idxs_in_times)
 
     # Move data we already have to where it should be.
-    N = ndims(itp.data)
+    N = ndims(tc.data)
     if all(idxs_in_cache .> idxs_in_times) && all(issorted.((idxs_in_cache, idxs_in_times)))
         for (new, old) in zip(idxs_in_times, idxs_in_cache)
-            selectdim(itp.data, N, new) .= selectdim(itp.data, N, old)
+            selectdim(tc.data, N, new) .= selectdim(tc.data, N, old)
         end
     elseif all(idxs_in_cache .< idxs_in_times) &&
            all(issorted.((idxs_in_cache, idxs_in_times)))
         for (new, old) in zip(reverse(idxs_in_times), reverse(idxs_in_cache))
-            selectdim(itp.data, N, new) .= selectdim(itp.data, N, old)
+            selectdim(tc.data, N, new) .= selectdim(tc.data, N, old)
         end
     elseif !all(idxs_in_cache .== idxs_in_times)
         error(
@@ -445,33 +518,34 @@ function update!(itp::DataSetInterpolator, t::DateTime)
 
     # Load the additional times we need
     for idx in idxs_not_in_times
-        d = selectdim(itp.data, N, idx)
-        if fetch(itp.loadtask) != times[idx] # Check if correct time is already loaded.
+        d = selectdim(tc.data, N, idx)
+        if fetch(tc.loadtask) != times[idx] # Check if correct time is already loaded.
             load_data_for_time!(itp, times[idx]) # Load data if not already loaded.
         end
         # Regrid results into the data array.
-        itp.fs.regridder(d, itp.load_cache; extrapolate_type=itp.extrapolate_type)
+        itp.fs.regridder(d, tc.load_cache; extrapolate_type=itp.extrapolate_type)
         # Start loading the next time point asynchronously.
-        itp.loadtask = Threads.@spawn load_data_for_time!(
+        tc.loadtask = Threads.@spawn load_data_for_time!(
             itp, nexttimepoint(itp, times[idx]))
     end
-    itp.times = times
-    itp.currenttime = t
-    @assert issorted(itp.times) "Interpolator times are in wrong order"
+    tc.times = times
+    tc.currenttime = t
+    @assert issorted(tc.times) "Interpolator times are in wrong order"
     update_interpolator!(itp)
 end
 
 function lazyload!(itp::DataSetInterpolator, t::DateTime)
     lock(itp.lock) do
-        if itp.currenttime == t
+        tc = itp.cache
+        if tc.currenttime == t
             return
         end
-        if !itp.initialized # Initialize new interpolator.
+        if !tc.initialized # Initialize new interpolator.
             initialize!(itp, t)
             update!(itp, t)
             return
         end
-        if t < itp.times[begin] || t >= itp.times[end]
+        if t < tc.times[begin] || t >= tc.times[end]
             update!(itp, t)
         end
     end
@@ -507,7 +581,7 @@ $(SIGNATURES)
 
 Return the value of the given variable from the given dataset at the given time and location.
 """
-function interp!(
+function interp(
         itp::DataSetInterpolator{T, N, N2},
         t::DateTime,
         locs::Vararg{T, N2}
@@ -526,16 +600,15 @@ Interpolate without checking if the data has been correctly loaded for the given
 ) where {T1, T2, N, N2}
     if N2 == N - 1 # Number of locs has to be one less than the number of data dimensions so we can add the time in.
         quote
-            #locs = itp.coord_trans(locs)
             try
-                itp.itp(locs..., datetime2unix(t))
+                itp.cache.itp(locs..., datetime2unix(t))
             catch err
                 # FIXME(CT): This is needed because ModelingToolkit sometimes
                 # calls the interpolator for the beginning of the simulation time period,
                 # and we don't have a way to update for that proactively.
                 @warn "Interpolation for $(itp.varname) failed at t=$(t), locs=$(locs); trying to update interpolator."
                 lazyload!(itp, t)
-                itp.itp(locs..., datetime2unix(t))
+                itp.cache.itp(locs..., datetime2unix(t))
             end
         end
     else
@@ -543,147 +616,46 @@ Interpolate without checking if the data has been correctly loaded for the given
     end
 end
 
-mutable struct ITPWrapper{ITP}
-    itp::ITP
-    ITPWrapper(itp::ITP) where {ITP} = new{ITP}(itp)
-end
-
-(itp::ITPWrapper)(t, locs::Vararg{T, N}) where {T, N} = interp_unsafe(itp.itp, t, locs...)
-
 """
 Interpolation with a unix timestamp.
 """
-function interp!(itp::DataSetInterpolator, t::Real, locs::Vararg{T, N})::T where {T, N}
-    interp!(itp, Dates.unix2datetime(t), locs...)
+function interp(itp::DataSetInterpolator, t::Real, locs::Vararg{T, N})::T where {T, N}
+    interp(itp, Dates.unix2datetime(t), locs...)
 end
 function interp_unsafe(
         itp::DataSetInterpolator, t::Real, locs::Vararg{T, N})::T where {T, N}
     interp_unsafe(itp, Dates.unix2datetime(t), locs...)
 end
 
-# Dummy functions for unit validation. Basically ModelingToolkit
-# will call the function with a DynamicQuantities.Quantity or an integer to
-# get information about the type and units of the output.
-interp!(itp::Union{DynamicQuantities.AbstractQuantity, Real}, t, locs...) = itp
-interp_unsafe(itp::Union{DynamicQuantities.AbstractQuantity, Real}, t, locs...) = itp
+# Deprecated: use `interp` instead of `interp!`.
+function interp!(
+        itp::DataSetInterpolator{T, N, N2},
+        t::DateTime,
+        locs::Vararg{T, N2}
+)::T where {T, N, N2}
+    Base.depwarn("`interp!` is deprecated, use `interp` instead.", :interp!)
+    interp(itp, t, locs...)
+end
+function interp!(itp::DataSetInterpolator, t::Real, locs::Vararg{T, N})::T where {T, N}
+    Base.depwarn("`interp!` is deprecated, use `interp` instead.", :interp!)
+    interp(itp, t, locs...)
+end
+# Generic fallback for unit validation (DynamicQuantities.Quantity arguments).
+function interp!(args...)
+    Base.depwarn("`interp!` is deprecated, use `interp` instead.", :interp!)
+    interp(args...)
+end
 
-# Symbolic tracing, for different numbers of dimensions (up to three dimensions).
-@register_symbolic interp!(itp::DataSetInterpolator, t, loc1, loc2, loc3)
-@register_symbolic interp!(itp::DataSetInterpolator, t, loc1, loc2) false
-@register_symbolic interp!(itp::DataSetInterpolator, t, loc1) false
-@register_symbolic interp_unsafe(itp::DataSetInterpolator, t, loc1, loc2, loc3)
-@register_symbolic interp_unsafe(itp::DataSetInterpolator, t, loc1, loc2) false
-@register_symbolic interp_unsafe(itp::DataSetInterpolator, t, loc1) false
 
 """
-$(SIGNATURES)
-
-Create an equation that interpolates the given dataset at the given time and location.
-`filename` is an identifier for the dataset, and `t` is the time variable.
-`wrapper_f` can specify a function to wrap the interpolated value, for example `eq -> eq / 2`
-to divide the interpolated value by 2.
+Close resources associated with a FileSet. Default is a no-op.
+Concrete subtypes with open file handles should override this.
 """
-function create_interp_equation(itp::DataSetInterpolator, filename, t, t_ref, coords;
-        wrapper_f = v -> v)
-    n = length(filename) > 0 ? Symbol("$(filename)₊$(itp.varname)") :
-        Symbol("$(itp.varname)")
-    n_p = Symbol(n, "_itp")
+Base.close(::FileSet) = nothing
 
-    itp = ITPWrapper(itp)
-    t_itp = typeof(itp)
-    p_itp = only(
-        @parameters ($n_p::t_itp)(..)=itp [
-        unit = units(itp.itp),
-        description = "Interpolated $(n)"
-    ]
-    )
+"""
+Close resources associated with a DataSetInterpolator,
+including the underlying FileSet.
+"""
+Base.close(itp::DataSetInterpolator) = close(itp.fs.fs)
 
-    # Create right hand side of equation.
-    rhs = wrapper_f(p_itp(t_ref + t, coords...))
-
-    # Create left hand side of equation.
-    desc = description(itp.itp)
-    uu = ModelingToolkit.get_unit(rhs)
-    lhs = only(
-        @variables $n(t) [
-        unit = uu,
-        description = desc,
-        misc = Dict(:staggering => itp.itp.metadata.staggering)
-    ]
-    )
-
-    eq = lhs ~ rhs
-
-    return eq, p_itp
-end
-
-# In MTK v11, parameter defaults set via `@parameters x = val` are stored as
-# metadata on the symbolic variable but are NOT included in `initial_conditions(sys)`.
-# This function extracts ITPWrapper defaults from a list of parameters so they
-# can be passed to the System constructor via the `initial_conditions` kwarg.
-function _itp_defaults(params)
-    dflts = Pair[]
-    for p in params
-        if ModelingToolkit.hasdefault(p) && ModelingToolkit.getdefault(p) isa ITPWrapper
-            push!(dflts, p => ModelingToolkit.getdefault(p))
-        end
-    end
-    return dflts
-end
-
-# Utility function to get the variables that are needed to solve a
-# system.
-function needed_vars(sys)
-    exprs = [eq.rhs for eq in equations(sys)]
-    needed_eqs = vcat(equations(sys),
-        observed(sys)[ModelingToolkit.observed_equations_used_by(sys, exprs)])
-    needed_vars = unique(vcat(get_variables.(needed_eqs)...))
-    EarthSciMLBase.var2symbol.(needed_vars)
-end
-
-# Create a "system event" (https://base.earthsci.dev/dev/system_events/)
-# to update the interpolators associated with the given parameters.
-function create_updater_sys_event(name, params, starttime::DateTime)
-    pnames = Symbol.((name,), (:₊,), EarthSciMLBase.var2symbol.(params))
-    t_ref = datetime2unix(starttime)
-    function sys_event(sys::ModelingToolkit.AbstractSystem)
-        needed = needed_vars(sys)
-        psyms = []
-        params_to_update = []
-        for p in parameters(sys) # Figure out which parameters need to be updated.
-            psym = EarthSciMLBase.var2symbol(p)
-            if (psym in pnames) && (psym in needed) && ModelingToolkit.hasdefault(p) && ModelingToolkit.getdefault(p) isa ITPWrapper
-                push!(psyms, psym)
-                push!(params_to_update, p)
-            end
-        end
-        params_to_update = NamedTuple{Tuple(psyms)}(params_to_update)
-        all_tstops = []
-        for p_itp in params_to_update
-            itp = ModelingToolkit.getdefault(p_itp).itp
-            push!(all_tstops, get_tstops(itp, starttime)...)
-        end
-        all_tstops = unique(all_tstops) .- t_ref
-        function update_itps!(modified, observed, ctx, integ)
-            function loadf(p_itp)
-                p_itp.itp = lazyload!(p_itp.itp, integ.t + t_ref)
-                return p_itp
-            end
-            NamedTuple((k => loadf(v) for (k, v) in pairs(modified)))
-        end
-        if length(params_to_update) == 0
-            return nothing
-        end
-        all_tstops => (update_itps!, params_to_update, NamedTuple())
-    end
-end
-
-Latexify.@latexrecipe function f(itp::EarthSciData.DataSetInterpolator)
-    return "$(split(string(typeof(itp.fs.fs)), ".")[end]).$(itp.varname)"
-end
-
-function _get_staggering(var)
-    misc = getmisc(var)
-    @assert :staggering in keys(misc) "Staggering is not specified for variable $(var)."
-    return misc[:staggering]
-end
