@@ -303,6 +303,8 @@ function varnames(fs::NEI2016MonthlyEmisFileSet)
     end
 end
 
+Base.close(fs::NEI2016MonthlyEmisFileSet) = lock(nclock) do; close(fs.ds); end
+
 struct NEI2016MonthlyEmisCoupler
     sys::Any
 end

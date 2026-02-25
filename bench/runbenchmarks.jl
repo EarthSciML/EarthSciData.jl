@@ -20,10 +20,10 @@ function EarthSciMLBase.couple2(
 end
 
 @parameters lat=deg2rad(40.0) lon=deg2rad(-97.0) lev=1.0
-@variables ACET(t) = 0.0 [unit = u"kg*m^-3"]
+@variables ACET(t) = 0.0
 @constants c = 1000 [unit = u"s"]
 
-@named sys = System([D(ACET) ~ 0], t, metadata = Dict(:coupletype => SysCoupler))
+@named sys = System([D(ACET) ~ ACET/c], t, metadata = Dict(CoupleType => SysCoupler))
 
 domain = DomainInfo(
     DateTime(2016, 5, 1), DateTime(2016, 5, 2),
@@ -52,7 +52,7 @@ suite["NEI Simulator"]["Serial"] = @benchmarkable solve(
 st = SolverStrangThreads(Tsit5(), 100.0)
 prob_threads = ODEProblem(csys, st)
 suite["NEI Simulator"]["Threads"] = @benchmarkable solve(
-    $prob_serial,
+    $prob_threads,
     Euler(),
     dt = 100.0,
     save_on = false,

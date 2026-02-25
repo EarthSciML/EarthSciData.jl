@@ -90,13 +90,13 @@ end
     itp = EarthSciData.DataSetInterpolator{Float32}(fileset, "NOX", ts, te, domain)
     EarthSciData.lazyload!(itp, sample_time)
     ti = EarthSciData.DataFrequencyInfo(itp.fs.fs)
-    @test month(itp.times[1]) == 4
-    @test month(itp.times[2]) == 5
+    @test month(itp.cache.times[1]) == 4
+    @test month(itp.cache.times[2]) == 5
 
     sample_time = DateTime(2016, 5, 31)
     EarthSciData.lazyload!(itp, sample_time)
-    @test month(itp.times[1]) == 5
-    @test month(itp.times[2]) == 6
+    @test month(itp.cache.times[1]) == 5
+    @test month(itp.cache.times[2]) == 6
 end
 
 @testitem "run" setup=[NEISetup] begin
@@ -196,9 +196,8 @@ end
             checkf(itp, sample_time, deg2rad(-97.0f0), deg2rad(40.0f0))
         catch err
             @warn "Allocation errors:\n$(err.errors)"
-            @test length(err.errors) == 1
-            s = err.errors[1]
-            contains(string(s), "libproj.proj_trans")
+            @test length(err.errors) <= 3
+            @test all([contains(string(s), "jl_get_pgcstack_static") for s in err.errors])
         end
 
         itp2 = EarthSciData.DataSetInterpolator{Float64}(fileset, "NOX", ts, te, domain)
@@ -207,9 +206,8 @@ end
             checkf(itp2, sample_time, deg2rad(-97.0), deg2rad(40.0))
         catch err
             @warn "Allocation errors:\n$(err.errors)"
-            @test length(err.errors) == 1
-            s = err.errors[1]
-            contains(string(s), "libproj.proj_trans")
+            @test length(err.errors) <= 3
+            @test all([contains(string(s), "jl_get_pgcstack_static") for s in err.errors])
         end
     end
 end

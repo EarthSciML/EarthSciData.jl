@@ -189,6 +189,8 @@ function varnames(fs::GEOSFPFileSet)
     end
 end
 
+Base.close(fs::GEOSFPFileSet) = lock(nclock) do; close(fs.ds); end
+
 # Hybrid grid parameters from https://wiki.seas.harvard.edu/geos-chem/index.php/GEOS-Chem_vertical_grids
 const Ap = DataInterpolations.LinearInterpolation(
     [
