@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1751514338678,
+  "lastUpdate": 1772025034296,
   "repoUrl": "https://github.com/EarthSciML/EarthSciData.jl",
   "entries": {
     "Julia benchmark result": [
@@ -2879,6 +2879,42 @@ window.BENCHMARK_DATA = {
             "value": 75706886154,
             "unit": "ns",
             "extra": "gctime=3234315619\nmemory=40333685688\nallocs=1365555578\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "ctessum@gmail.com",
+            "name": "Christopher Tessum",
+            "username": "ctessum"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "33f4efbcad2ef0a39cd7991328a8b56d302d0b9d",
+          "message": "Merge pull request #162 from EarthSciML/interface\n\nupdate Interface",
+          "timestamp": "2026-02-25T20:45:19+08:00",
+          "tree_id": "c21e545e0687ba77837331db1291e66d8b339260",
+          "url": "https://github.com/EarthSciML/EarthSciData.jl/commit/33f4efbcad2ef0a39cd7991328a8b56d302d0b9d"
+        },
+        "date": 1772025033600,
+        "tool": "julia",
+        "benches": [
+          {
+            "name": "NEI Simulator/Serial",
+            "value": 52927173852,
+            "unit": "ns",
+            "extra": "gctime=2213231968\nmemory=36817436536\nallocs=1179395601\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
+          },
+          {
+            "name": "NEI Simulator/Threads",
+            "value": 29397860263,
+            "unit": "ns",
+            "extra": "gctime=3019252850\nmemory=36826620568\nallocs=1179663753\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
           }
         ]
       }
