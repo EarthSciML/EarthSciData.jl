@@ -76,12 +76,16 @@ end
 
 # In MTK v11, parameter defaults set via `@parameters x = val` are stored as
 # metadata on the symbolic variable but are NOT included in `initial_conditions(sys)`.
-# This function extracts ITPWrapper defaults from a list of parameters so they
-# can be passed to the System constructor via the `initial_conditions` kwarg.
+# This function extracts all parameter defaults so they can be passed to the
+# System constructor via the `initial_conditions` kwarg.
+# This is critical for parameters like `t_ref` (the reference time) which must
+# have their default values correctly propagated through system composition and
+# compilation, particularly for the SolverIMEX path which constructs
+# MTKParameters directly from `initial_conditions(sys)`.
 function _itp_defaults(params)
     dflts = Pair[]
     for p in params
-        if ModelingToolkit.hasdefault(p) && ModelingToolkit.getdefault(p) isa ITPWrapper
+        if ModelingToolkit.hasdefault(p)
             push!(dflts, p => ModelingToolkit.getdefault(p))
         end
     end
