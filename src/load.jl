@@ -1,4 +1,4 @@
-export interp, interp!, GridSpec
+export interp_unsafe, interp!, GridSpec
 
 function download_cache()
     ("EARTHSCIDATADIR" ∈ keys(ENV)) ? ENV["EARTHSCIDATADIR"] :
@@ -247,16 +247,12 @@ Cache for time-varying interpolation state within a `DataSetInterpolator`.
 
 $(FIELDS)
 """
-mutable struct TemporalCache{To, N, N2, ITPT}
-    "The actual data array, with the last dimension being time."
-    data::Array{To, N}
-    "Buffer used for interpolation."
-    interp_cache::Array{To, N}
-    "Buffer that data is read into from file (separate from `data` for async loading)."
+mutable struct TemporalCache{To, N, N2}
+    "Internal buffer holding loaded/regridded data (spatial dims + time). After loading, this is copied to the discrete parameter."
+    data_buffer::Array{To, N}
+    "Buffer that data is read into from file (separate from `data_buffer` for async loading)."
     load_cache::Array{To, N2}
-    "The interpolation object."
-    itp::ITPT
-    "Timestamps corresponding to each time index in `data`."
+    "Timestamps corresponding to each time index in `data_buffer`."
     times::Vector{DateTime}
     "The current time that the interpolator has been loaded for."
     currenttime::DateTime
@@ -281,10 +277,10 @@ data records for the times immediately before and after the current time step.
 the interpolator. `spatial_ref` is the spatial reference system that the simulation will be using.
 `stream` specifies whether the data should be streamed in as needed or loaded all at once.
 """
-mutable struct DataSetInterpolator{To, N, N2, FT, ITPT, DomT, ET, FSRG}
+mutable struct DataSetInterpolator{To, N, N2, FT, DomT, ET, FSRG}
     fs::FSRG
     varname::String
-    cache::TemporalCache{To, N, N2, ITPT}
+    cache::TemporalCache{To, N, N2}
     metadata::MetaData
     domain::DomT
     extrapolate_type::ET
@@ -321,29 +317,20 @@ mutable struct DataSetInterpolator{To, N, N2, FT, ITPT, DomT, ET, FSRG}
         end
 
         load_cache = zeros(To, repeat([1], length(metadata.varsize))...)
-        data = zeros(To, repeat([2], length(metadata.varsize))..., cache_size) # Add a dimension for time.
-        interp_cache = similar(data)
-        N = ndims(data)
+        data_buffer = zeros(To, repeat([2], length(metadata.varsize))..., cache_size) # Add a dimension for time.
+        N = ndims(data_buffer)
         N2 = N - 1
         times = [DateTime(0, 1, 1) + Hour(i) for i in 1:cache_size]
-        _,
-        itp2 = create_interpolator!(
-            interp_cache,
-            data,
-            repeat([0:0.1:0.1], length(metadata.varsize)),
-            times
-        )
-        ITPT = typeof(itp2)
 
         coord_trns = coord_trans(metadata, domain)
         FT = typeof(coord_trns)
 
         td = Threads.@spawn (() -> DateTime(0, 1, 10))() # Placeholder for async loading task.
-        tc = TemporalCache{To, N, N2, ITPT}(
-            data, interp_cache, load_cache, itp2, times,
+        tc = TemporalCache{To, N, N2}(
+            data_buffer, load_cache, times,
             DateTime(1, 1, 1), td, false
         )
-        itp = new{To, N, N2, FT, ITPT, typeof(domain), typeof(extrapolate_type), typeof(fs)}(
+        itp = new{To, N, N2, FT, typeof(domain), typeof(extrapolate_type), typeof(fs)}(
             fs,
             String(varname),
             tc,
@@ -394,27 +381,8 @@ function knots2range(knots, reltol = 0.05)
     return knots[begin]:dx:(knots[begin] + dx * (length(knots) - 1))
 end
 
-"""
-Create a new interpolator, overwriting `interp_cache`.
-"""
-function create_interpolator!(interp_cache, data, coords, times)
-    grid = tuple(coords..., knots2range(datetime2unix.(times)))
-    copyto!(interp_cache, data)
-    itp = interpolate!(interp_cache, BSpline(Linear()))
-    itp = scale(itp, grid)
-    return grid, itp
-end
-
-function update_interpolator!(itp::DataSetInterpolator{To}) where {To}
-    tc = itp.cache
-    if size(tc.interp_cache) != size(tc.data)
-        tc.interp_cache = similar(tc.data)
-    end
-    coords = _model_grid(itp)
-    grid, itp2 = create_interpolator!(tc.interp_cache, tc.data, coords, tc.times)
-    @assert all([length(g) for g in grid] .== size(tc.data)) "invalid data size: $([length(g) for g in grid]) != $(size(tc.data))"
-    tc.itp = itp2
-end
+# create_interpolator! and update_interpolator! have been removed.
+# Interpolation is now done by the array-based interp_unsafe functions.
 
 """
 Return the next interpolation time point for this interpolator.
@@ -491,7 +459,7 @@ function initialize!(itp::DataSetInterpolator, t::DateTime)
     tc = itp.cache
     tc.load_cache = zeros(eltype(tc.load_cache), itp.metadata.varsize...)
     grid_size = length.(_model_grid(itp))
-    tc.data = zeros(eltype(tc.data), grid_size..., size(tc.data, length(size(tc.data)))) # Add a dimension for time.
+    tc.data_buffer = zeros(eltype(tc.data_buffer), grid_size..., size(tc.data_buffer, ndims(tc.data_buffer))) # Add a dimension for time.
     tc.initialized = true
 end
 
@@ -514,15 +482,15 @@ function update!(itp::DataSetInterpolator, t::DateTime)
     idxs_not_in_times = setdiff(eachindex(times), idxs_in_times)
 
     # Move data we already have to where it should be.
-    N = ndims(tc.data)
+    N = ndims(tc.data_buffer)
     if all(idxs_in_cache .> idxs_in_times) && all(issorted.((idxs_in_cache, idxs_in_times)))
         for (new, old) in zip(idxs_in_times, idxs_in_cache)
-            selectdim(tc.data, N, new) .= selectdim(tc.data, N, old)
+            selectdim(tc.data_buffer, N, new) .= selectdim(tc.data_buffer, N, old)
         end
     elseif all(idxs_in_cache .< idxs_in_times) &&
            all(issorted.((idxs_in_cache, idxs_in_times)))
         for (new, old) in zip(reverse(idxs_in_times), reverse(idxs_in_cache))
-            selectdim(tc.data, N, new) .= selectdim(tc.data, N, old)
+            selectdim(tc.data_buffer, N, new) .= selectdim(tc.data_buffer, N, old)
         end
     elseif !all(idxs_in_cache .== idxs_in_times)
         error(
@@ -532,11 +500,11 @@ function update!(itp::DataSetInterpolator, t::DateTime)
 
     # Load the additional times we need
     for idx in idxs_not_in_times
-        d = selectdim(tc.data, N, idx)
+        d = selectdim(tc.data_buffer, N, idx)
         if fetch(tc.loadtask) != times[idx] # Check if correct time is already loaded.
             load_data_for_time!(itp, times[idx]) # Load data if not already loaded.
         end
-        # Regrid results into the data array.
+        # Regrid results into the data buffer.
         itp.fs.regridder(d, tc.load_cache; extrapolate_type=itp.extrapolate_type)
         # Start loading the next time point asynchronously.
         tc.loadtask = Threads.@spawn load_data_for_time!(
@@ -545,7 +513,6 @@ function update!(itp::DataSetInterpolator, t::DateTime)
     tc.times = times
     tc.currenttime = t
     @assert issorted(tc.times) "Interpolator times are in wrong order"
-    update_interpolator!(itp)
 end
 
 function lazyload!(itp::DataSetInterpolator, t::DateTime)
@@ -593,73 +560,224 @@ description(itp::DataSetInterpolator) = itp.metadata.description
 """
 $(SIGNATURES)
 
-Return the value of the given variable from the given dataset at the given time and location.
-"""
-function interp(
-        itp::DataSetInterpolator{T, N, N2},
-        t::DateTime,
-        locs::Vararg{T, N2}
-)::T where {T, N, N2}
-    lazyload!(itp, t)
-    interp_unsafe(itp, t, locs...)
-end
-
-"""
 Interpolate without checking if the data has been correctly loaded for the given time.
+This convenience method on `DataSetInterpolator` delegates to the array-based `interp_unsafe`.
 """
-@generated function interp_unsafe(
+function interp_unsafe(
         itp::DataSetInterpolator{T1, N, N2},
         t::DateTime,
         locs::Vararg{T2, N2}
 ) where {T1, T2, N, N2}
-    if N2 == N - 1 # Number of locs has to be one less than the number of data dimensions so we can add the time in.
-        quote
-            try
-                itp.cache.itp(locs..., datetime2unix(t))
-            catch err
-                # FIXME(CT): This is needed because ModelingToolkit sometimes
-                # calls the interpolator for the beginning of the simulation time period,
-                # and we don't have a way to update for that proactively.
-                @warn "Interpolation for $(itp.varname) failed at t=$(t), locs=$(locs); trying to update interpolator."
-                lazyload!(itp, t)
-                itp.cache.itp(locs..., datetime2unix(t))
-            end
-        end
-    else
-        throw(ArgumentError("N2 must be equal to N-1"))
-    end
+    tc = itp.cache
+    t_unix = datetime2unix(t)
+    t_start, t_step = get_time_grid_params(itp)
+    grid_ranges = _model_grid(itp)
+    # Compute fractional 1-based indices
+    fit = one(T1) + T1((t_unix - t_start) / t_step)
+    fis = ntuple(i -> one(T1) + T1((locs[i] - first(grid_ranges[i])) / step(grid_ranges[i])), Val(N2))
+    extrap = itp.extrapolate_type isa Real ? zero(T1) : one(T1)
+    interp_unsafe(tc.data_buffer, fit, fis..., extrap)
 end
 
 """
 Interpolation with a unix timestamp.
 """
-function interp(itp::DataSetInterpolator, t::Real, locs::Vararg{T, N})::T where {T, N}
-    interp(itp, Dates.unix2datetime(t), locs...)
-end
 function interp_unsafe(
         itp::DataSetInterpolator, t::Real, locs::Vararg{T, N})::T where {T, N}
     interp_unsafe(itp, Dates.unix2datetime(t), locs...)
 end
 
-# Deprecated: use `interp` instead of `interp!`.
+# Deprecated: use `interp_unsafe` directly.
 function interp!(
         itp::DataSetInterpolator{T, N, N2},
         t::DateTime,
         locs::Vararg{T, N2}
 )::T where {T, N, N2}
-    Base.depwarn("`interp!` is deprecated, use `interp` instead.", :interp!)
-    interp(itp, t, locs...)
+    Base.depwarn("`interp!` is deprecated, use `interp_unsafe` instead.", :interp!)
+    lazyload!(itp, t)
+    interp_unsafe(itp, t, locs...)
 end
 function interp!(itp::DataSetInterpolator, t::Real, locs::Vararg{T, N})::T where {T, N}
-    Base.depwarn("`interp!` is deprecated, use `interp` instead.", :interp!)
-    interp(itp, t, locs...)
-end
-# Generic fallback for unit validation (DynamicQuantities.Quantity arguments).
-function interp!(args...)
-    Base.depwarn("`interp!` is deprecated, use `interp` instead.", :interp!)
-    interp(args...)
+    Base.depwarn("`interp!` is deprecated, use `interp_unsafe` instead.", :interp!)
+    lazyload!(itp, Dates.unix2datetime(t))
+    interp_unsafe(itp, t, locs...)
 end
 
+
+"""
+Return the time grid parameters `(t_start, t_step)` from the current cache times
+as Unix timestamps.
+"""
+function get_time_grid_params(itp::DataSetInterpolator)
+    tc = itp.cache
+    t_start = datetime2unix(tc.times[1])
+    if length(tc.times) > 1
+        t_end = datetime2unix(tc.times[end])
+        t_step = (t_end - t_start) / (length(tc.times) - 1)
+    else
+        t_step = one(t_start)
+    end
+    return (t_start, t_step)
+end
+
+"""
+Return the spatial grid parameters as a flat tuple `(s1_start, s1_step, s2_start, s2_step, ...)`.
+"""
+function get_spatial_grid_params(itp::DataSetInterpolator)
+    ranges = _model_grid(itp)
+    params = Float64[]
+    for r in ranges
+        push!(params, first(r))
+        push!(params, step(r))
+    end
+    return Tuple(params)
+end
+
+# --------------------------------------------------------------------------
+# Array-based multilinear interpolation functions.
+# These operate on plain arrays + fractional 1-based indices and are
+# GPU-compatible (pure arithmetic + array indexing, zero allocations).
+#
+# The `extrap` parameter controls extrapolation:
+#   extrap >= 1.0 → Flat (clamp to boundary values)
+#   extrap < 1.0  → return zero for out-of-bounds
+#
+# The data array has spatial dimensions first, time dimension last.
+# All index arguments (fit, fi1, ...) are fractional 1-based indices,
+# computed as: fi = 1 + (coord - grid_start) / grid_step
+# --------------------------------------------------------------------------
+
+"""
+Multilinear interpolation on a 2D array (1 spatial dim + time).
+`fit` and `fi1` are fractional 1-based indices.
+"""
+function interp_unsafe(data::AbstractArray{T, 2}, fit, fi1, extrap) where {T}
+    n1, nt = size(data)
+
+    # Extrapolation check
+    if extrap < one(T)
+        if fi1 < one(T) || fi1 > T(n1) || fit < one(T) || fit > T(nt)
+            return zero(T)
+        end
+    end
+
+    # Clamp to valid range
+    fi1 = clamp(fi1, one(T), T(n1))
+    fit = clamp(fit, one(T), T(nt))
+
+    # Floor indices and weights
+    i1 = clamp(unsafe_trunc(Int, fi1), 1, n1)
+    it = clamp(unsafe_trunc(Int, fit), 1, nt)
+    w1 = fi1 - T(i1)
+    wt = fit - T(it)
+
+    # Upper indices (clamped)
+    j1 = min(i1 + 1, n1)
+    jt = min(it + 1, nt)
+
+    # Bilinear interpolation (2D: 4 corners)
+    result = (one(T) - w1) * (one(T) - wt) * data[i1, it] +
+             w1 * (one(T) - wt) * data[j1, it] +
+             (one(T) - w1) * wt * data[i1, jt] +
+             w1 * wt * data[j1, jt]
+    return result
+end
+
+"""
+Multilinear interpolation on a 3D array (2 spatial dims + time).
+`fit`, `fi1`, `fi2` are fractional 1-based indices.
+"""
+function interp_unsafe(data::AbstractArray{T, 3}, fit, fi1, fi2, extrap) where {T}
+    n1, n2, nt = size(data)
+
+    # Extrapolation check
+    if extrap < one(T)
+        if fi1 < one(T) || fi1 > T(n1) || fi2 < one(T) || fi2 > T(n2) ||
+           fit < one(T) || fit > T(nt)
+            return zero(T)
+        end
+    end
+
+    # Clamp to valid range
+    fi1 = clamp(fi1, one(T), T(n1))
+    fi2 = clamp(fi2, one(T), T(n2))
+    fit = clamp(fit, one(T), T(nt))
+
+    # Floor indices and weights
+    i1 = clamp(unsafe_trunc(Int, fi1), 1, n1)
+    i2 = clamp(unsafe_trunc(Int, fi2), 1, n2)
+    it = clamp(unsafe_trunc(Int, fit), 1, nt)
+    w1 = fi1 - T(i1)
+    w2 = fi2 - T(i2)
+    wt = fit - T(it)
+
+    # Upper indices (clamped)
+    j1 = min(i1 + 1, n1)
+    j2 = min(i2 + 1, n2)
+    jt = min(it + 1, nt)
+
+    # Trilinear interpolation (3D: 8 corners)
+    result = zero(T)
+    for (ii1, ww1) in ((i1, one(T) - w1), (j1, w1))
+        for (ii2, ww2) in ((i2, one(T) - w2), (j2, w2))
+            for (iit, wwt) in ((it, one(T) - wt), (jt, wt))
+                result += ww1 * ww2 * wwt * data[ii1, ii2, iit]
+            end
+        end
+    end
+    return result
+end
+
+"""
+Multilinear interpolation on a 4D array (3 spatial dims + time).
+`fit`, `fi1`, `fi2`, `fi3` are fractional 1-based indices.
+"""
+function interp_unsafe(data::AbstractArray{T, 4}, fit, fi1, fi2, fi3, extrap) where {T}
+    n1, n2, n3, nt = size(data)
+
+    # Extrapolation check
+    if extrap < one(T)
+        if fi1 < one(T) || fi1 > T(n1) || fi2 < one(T) || fi2 > T(n2) ||
+           fi3 < one(T) || fi3 > T(n3) || fit < one(T) || fit > T(nt)
+            return zero(T)
+        end
+    end
+
+    # Clamp to valid range
+    fi1 = clamp(fi1, one(T), T(n1))
+    fi2 = clamp(fi2, one(T), T(n2))
+    fi3 = clamp(fi3, one(T), T(n3))
+    fit = clamp(fit, one(T), T(nt))
+
+    # Floor indices and weights
+    i1 = clamp(unsafe_trunc(Int, fi1), 1, n1)
+    i2 = clamp(unsafe_trunc(Int, fi2), 1, n2)
+    i3 = clamp(unsafe_trunc(Int, fi3), 1, n3)
+    it = clamp(unsafe_trunc(Int, fit), 1, nt)
+    w1 = fi1 - T(i1)
+    w2 = fi2 - T(i2)
+    w3 = fi3 - T(i3)
+    wt = fit - T(it)
+
+    # Upper indices (clamped)
+    j1 = min(i1 + 1, n1)
+    j2 = min(i2 + 1, n2)
+    j3 = min(i3 + 1, n3)
+    jt = min(it + 1, nt)
+
+    # Quadrilinear interpolation (4D: 16 corners)
+    result = zero(T)
+    for (ii1, ww1) in ((i1, one(T) - w1), (j1, w1))
+        for (ii2, ww2) in ((i2, one(T) - w2), (j2, w2))
+            for (ii3, ww3) in ((i3, one(T) - w3), (j3, w3))
+                for (iit, wwt) in ((it, one(T) - wt), (jt, wt))
+                    result += ww1 * ww2 * ww3 * wwt * data[ii1, ii2, ii3, iit]
+                end
+            end
+        end
+    end
+    return result
+end
 
 """
 Close resources associated with a FileSet. Default is a no-op.
