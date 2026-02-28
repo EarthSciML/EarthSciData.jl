@@ -162,6 +162,9 @@ function WRF(domaininfo::DomainInfo; name = :WRF, stream = true)
     @parameters t_ref=get_tref(domaininfo) [unit = u"s", description = "Reference time"]
     eqs = Equation[]
     params = Any[t_ref]
+    all_discretes = Any[]
+    all_constants = Any[]
+    interp_infos = []
     vars = Num[]
 
     xdim = :x in keys(pvdict) ? :x : :lon
@@ -198,14 +201,16 @@ function WRF(domaininfo::DomainInfo; name = :WRF, stream = true)
             @assert translated_dim ∈ keys(pvdict) "Dimension $d (translated to $translated_dim) is not in the domaininfo coordinates ($(pvs))."
             push!(coords, pvdict[translated_dim])
         end
-        eq, param = create_interp_equation(itp, "", t, t_ref, coords)
+        eq, discretes, constants, info = create_interp_equation(itp, "", t, t_ref, coords)
         push!(eqs, eq)
-        push!(params, param)
+        append!(all_discretes, discretes)
+        append!(all_constants, constants)
+        push!(interp_infos, info)
         push!(vars, eq.lhs)
         if varname ∈ ["PH", "PHB"]
             # Special handling for PH and PHB to calculate the total pressure
             # as they are needed for geopotential height calculation.
-            z_params[varname] = param
+            z_params[varname] = info
             z_params[varname * "_coords"] = coords
         end
     end
@@ -252,22 +257,24 @@ function WRF(domaininfo::DomainInfo; name = :WRF, stream = true)
         unit = u"m",
         description = "Height derivative with respect to vertical level"
     ]
-    ph = z_params["PH"]
-    phb = z_params["PHB"]
+    ph_info = z_params["PH"]
+    phb_info = z_params["PHB"]
     phc = z_params["PH_coords"]
     phbc = z_params["PHB_coords"]
-    Δph = ph(t + t_ref, phc[1], phc[2], phc[3] + 1) - ph(t + t_ref, phc...)
-    Δphb = phb(t + t_ref, phbc[1], phbc[2], phbc[3] + 1) - phb(t + t_ref, phbc...)
+    Δph = build_interp_expr(ph_info, t + t_ref, [phc[1], phc[2], phc[3] + 1]) -
+          build_interp_expr(ph_info, t + t_ref, phc)
+    Δphb = build_interp_expr(phb_info, t + t_ref, [phbc[1], phbc[2], phbc[3] + 1]) -
+           build_interp_expr(phb_info, t + t_ref, phbc)
     lev_trans = δzδlev ~ (Δph + Δphb) / g
     push!(eqs, lev_trans)
     push!(vars, δzδlev)
 
-    all_params = [pvdict[xdim], pvdict[ydim], pvdict[:lev], params...]
+    all_params = [pvdict[xdim], pvdict[ydim], pvdict[:lev],
+        all_constants..., all_discretes..., params...]
     sys = System(eqs, t, vars, all_params;
         name = name,
-        initial_conditions = _itp_defaults(all_params),
         metadata = Dict(CoupleType => WRFCoupler,
-            SysDiscreteEvent => create_updater_sys_event(name, params, starttime))
+            SysDiscreteEvent => create_updater_sys_event(name, interp_infos, starttime))
     )
     return sys
 end

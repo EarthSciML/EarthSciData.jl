@@ -224,6 +224,9 @@ function NCEPNCARReanalysis(
     @parameters t_ref=get_tref(domaininfo) [unit = u"s", description = "Reference time"]
     eqs = Equation[]
     params = Any[t_ref]
+    all_discretes = Any[]
+    all_constants = Any[]
+    interp_infos = []
     vars = Num[]
 
     xdim = :x in keys(pvdict) ? :x : :lon
@@ -252,13 +255,15 @@ function NCEPNCARReanalysis(
             @assert translated_dim ∈ keys(pvdict) "Dimension $d (translated to $translated_dim) is not in the domaininfo coordinates ($(pvs))."
             push!(coords, pvdict[translated_dim])
         end
-        eq, param = create_interp_equation(itp, "", t, t_ref, coords)
+        eq, discretes, constants, info = create_interp_equation(itp, "", t, t_ref, coords)
         push!(eqs, eq)
-        push!(params, param)
+        append!(all_discretes, discretes)
+        append!(all_constants, constants)
+        push!(interp_infos, info)
         push!(vars, eq.lhs)
 
         if varname == :hgt
-            z_params["hgt"] = param
+            z_params["hgt"] = info
             z_params["hgt_coords"] = coords
         end
     end
@@ -304,10 +309,11 @@ function NCEPNCARReanalysis(
             unit = u"m",
             description = "Height derivative with respect to vertical level"
         ]
-        hgt = z_params["hgt"]
+        hgt_info = z_params["hgt"]
         hgtc = z_params["hgt_coords"]
 
-        Δhgt = hgt(t + t_ref, hgtc[1], hgtc[2], hgtc[3] + 1) - hgt(t + t_ref, hgtc...)
+        Δhgt = build_interp_expr(hgt_info, t + t_ref, [hgtc[1], hgtc[2], hgtc[3] + 1]) -
+               build_interp_expr(hgt_info, t + t_ref, hgtc)
 
         lev_trans = δzδlev ~ Δhgt
         push!(eqs, lev_trans)
@@ -315,16 +321,15 @@ function NCEPNCARReanalysis(
     end
 
     all_params = [pvdict[xdim], pvdict[ydim], pvdict[:lev], lat2meters, lon2m, hPa2Pa, Rd, g,
-        params...]
+        all_constants..., all_discretes..., params...]
     sys = System(
         eqs,
         t,
         vars,
         all_params;
         name = name,
-        initial_conditions = _itp_defaults(all_params),
         metadata = Dict(CoupleType => NCEPNCARReanalysisCoupler,
-            SysDiscreteEvent => create_updater_sys_event(name, params, starttime))
+            SysDiscreteEvent => create_updater_sys_event(name, interp_infos, starttime))
     )
     return sys
 end
