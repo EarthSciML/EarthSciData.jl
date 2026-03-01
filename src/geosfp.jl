@@ -268,7 +268,8 @@ const Ap = DataInterpolations.LinearInterpolation(
         2.000000e-02,
         1.000000e-02
     ] .* 100,
-    1:73
+    1:73;
+    extrapolation = DataInterpolations.ExtrapolationType.Constant
 ) # Pa
 
 # Handle units
@@ -354,7 +355,8 @@ const Bp = DataInterpolations.LinearInterpolation(
         0.000000e+00,
         0.000000e+00
     ],
-    1:73
+    1:73;
+    extrapolation = DataInterpolations.ExtrapolationType.Constant
 )
 
 struct GEOSFPCoupler
