@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1772025034296,
+  "lastUpdate": 1772327106733,
   "repoUrl": "https://github.com/EarthSciML/EarthSciData.jl",
   "entries": {
     "Julia benchmark result": [
@@ -2915,6 +2915,42 @@ window.BENCHMARK_DATA = {
             "value": 29397860263,
             "unit": "ns",
             "extra": "gctime=3019252850\nmemory=36826620568\nallocs=1179663753\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "ctessum@gmail.com",
+            "name": "Christopher Tessum",
+            "username": "ctessum"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "d0e0f120f9ec5eec438d7234a76ae78e54999f96",
+          "message": "Merge pull request #164 from ctessum-claude/fix-t_ref-initial-conditions\n\nFix _itp_defaults to include all parameter defaults for SolverIMEX",
+          "timestamp": "2026-03-01T08:41:27+08:00",
+          "tree_id": "3e22139ba439beeb7c61623feb496be960b8b0ca",
+          "url": "https://github.com/EarthSciML/EarthSciData.jl/commit/d0e0f120f9ec5eec438d7234a76ae78e54999f96"
+        },
+        "date": 1772327105714,
+        "tool": "julia",
+        "benches": [
+          {
+            "name": "NEI Simulator/Serial",
+            "value": 39053672063,
+            "unit": "ns",
+            "extra": "gctime=1544276752\nmemory=24938417176\nallocs=798657801\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
+          },
+          {
+            "name": "NEI Simulator/Threads",
+            "value": 21149640976,
+            "unit": "ns",
+            "extra": "gctime=2215662957\nmemory=24939663928\nallocs=798671553\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
           }
         ]
       }
