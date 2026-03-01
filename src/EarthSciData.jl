@@ -29,4 +29,8 @@ include("NCEP-NCAR_Reanalysis.jl")
 # Coupling
 include("coupling.jl")
 
+function __init__()
+    _fix_conservative_regridding_bugs()
+end
+
 end
