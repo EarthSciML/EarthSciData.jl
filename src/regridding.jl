@@ -28,6 +28,14 @@ function data2vecormat(d::AbstractArray{T, 2}, xdim, ydim) where {T}
     reshape(d, :)
 end
 
+"""
+Convert a vector of polygon vertex vectors (Vector{Vector{NTuple{2,T}}}) to
+a vector of GeoInterface.Polygon objects for ConservativeRegridding v0.2 compatibility.
+"""
+function _to_gi_polygons(polys)
+    GeoInterface.Polygon.(GeoInterface.LinearRing.(polys))
+end
+
 function horizontal_regridder(fs::FileSet, metadata::MetaData, domain::DomainInfo)
     model_grid = get_polygons(domain)
     ct = proj_trans(metadata, domain)
@@ -37,7 +45,7 @@ function horizontal_regridder(fs::FileSet, metadata::MetaData, domain::DomainInf
         model_grid[i] = ct.(poly)
     end
     data_grid = get_geometry(fs, metadata)
-    ConservativeRegridding.Regridder(model_grid, data_grid)
+    ConservativeRegridding.Regridder(GeometryOpsCore.Planar(), _to_gi_polygons(model_grid), _to_gi_polygons(data_grid))
 end
 
 function regrid_horizontal!(dst_field, regridder::ConservativeRegridding.Regridder, src_field, mta::MetaData)
