@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1772327106733,
+  "lastUpdate": 1772327176823,
   "repoUrl": "https://github.com/EarthSciML/EarthSciData.jl",
   "entries": {
     "Julia benchmark result": [
@@ -2951,6 +2951,42 @@ window.BENCHMARK_DATA = {
             "value": 21149640976,
             "unit": "ns",
             "extra": "gctime=2215662957\nmemory=24939663928\nallocs=798671553\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "ctessum@gmail.com",
+            "name": "Christopher Tessum",
+            "username": "ctessum"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "526af764fa75bf333363ead899256b37f962bce0",
+          "message": "Merge pull request #159 from EarthSciML/dependabot/github_actions/crate-ci/typos-1.43.5\n\nBump crate-ci/typos from 1.43.4 to 1.43.5",
+          "timestamp": "2026-03-01T08:42:21+08:00",
+          "tree_id": "4406f0ca37ecd0af9ce3c94989c9b4c1fdb6a571",
+          "url": "https://github.com/EarthSciML/EarthSciData.jl/commit/526af764fa75bf333363ead899256b37f962bce0"
+        },
+        "date": 1772327175589,
+        "tool": "julia",
+        "benches": [
+          {
+            "name": "NEI Simulator/Serial",
+            "value": 40795411165,
+            "unit": "ns",
+            "extra": "gctime=1522685768\nmemory=24938417176\nallocs=798657801\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
+          },
+          {
+            "name": "NEI Simulator/Threads",
+            "value": 21296474968,
+            "unit": "ns",
+            "extra": "gctime=1898122791\nmemory=24939663928\nallocs=798671553\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
           }
         ]
       }
