@@ -28,6 +28,32 @@ function data2vecormat(d::AbstractArray{T, 2}, xdim, ydim) where {T}
     reshape(d, :)
 end
 
+"""
+Convert a vector of polygon vertex vectors (Vector{Vector{NTuple{2,T}}}) to
+a vector of GeoInterface.Polygon objects for ConservativeRegridding v0.2 compatibility.
+"""
+function _to_gi_polygons(polys)
+    GeoInterface.Polygon.(GeoInterface.LinearRing.(polys))
+end
+
+# Workaround for ConservativeRegridding v0.2.0 bug: mapreduce arguments are swapped
+# in cell_range_extent for ExplicitPolygonGrid{Planar}. The original code has
+# mapreduce(Extents.union, GI.extent, ...) but it should be mapreduce(GI.extent, Extents.union, ...).
+# This can be removed once the upstream bug is fixed.
+# Must be applied at runtime via __init__ because method overwriting is not permitted
+# during precompilation.
+function _fix_conservative_regridding_bugs()
+    @eval function ConservativeRegridding.Trees.cell_range_extent(
+        q::ConservativeRegridding.Trees.ExplicitPolygonGrid{<:GeometryOpsCore.Planar},
+        irange::UnitRange{Int}, jrange::UnitRange{Int},
+    )
+        return mapreduce(
+            GeoInterface.extent, GeoInterface.Extents.union,
+            (ConservativeRegridding.Trees.getcell(q, i, j) for i in irange, j in jrange),
+        )
+    end
+end
+
 function horizontal_regridder(fs::FileSet, metadata::MetaData, domain::DomainInfo)
     model_grid = get_polygons(domain)
     ct = proj_trans(metadata, domain)
@@ -37,15 +63,36 @@ function horizontal_regridder(fs::FileSet, metadata::MetaData, domain::DomainInf
         model_grid[i] = ct.(poly)
     end
     data_grid = get_geometry(fs, metadata)
-    ConservativeRegridding.Regridder(model_grid, data_grid)
+
+    # ConservativeRegridding v0.2 requires GeoInterface-compatible polygon objects
+    # passed as matrices (the treeify function handles AbstractMatrix via ExplicitPolygonGrid).
+    x, y = EarthSciMLBase.grid(domain, (true, true, true))[1:2]
+    model_nx, model_ny = length(x) - 1, length(y) - 1
+    data_nx = metadata.varsize[metadata.xdim]
+    data_ny = metadata.varsize[metadata.ydim]
+    model_polys = reshape(_to_gi_polygons(model_grid), model_nx, model_ny)
+    data_polys = reshape(_to_gi_polygons(data_grid), data_nx, data_ny)
+    # Use threaded=false to work around ConservativeRegridding v0.2.0 bug where
+    # _area_criterion is not implemented for 2D planar extents.
+    ConservativeRegridding.Regridder(GeometryOpsCore.Planar(), model_polys, data_polys;
+        threaded=false)
 end
 
 function regrid_horizontal!(dst_field, regridder::ConservativeRegridding.Regridder, src_field, mta::MetaData)
     sz = size(dst_field)
-    dst_field = reshape(dst_field, sz[1] * sz[2], :)
     src_2d = data2vecormat(src_field, mta.xdim, mta.ydim)
-    ConservativeRegridding.regrid!(dst_field, regridder, src_2d)
-    reshape(dst_field, sz...)
+    if ndims(src_2d) == 1
+        # 2D case: both dst and src are flattened to vectors
+        dst_vec = vec(dst_field)
+        ConservativeRegridding.regrid!(dst_vec, regridder, src_2d)
+    else
+        # 3D case: regrid each vertical column separately
+        dst_mat = reshape(dst_field, sz[1] * sz[2], :)
+        for col in axes(src_2d, 2)
+            ConservativeRegridding.regrid!(view(dst_mat, :, col), regridder, view(src_2d, :, col))
+        end
+    end
+    dst_field
 end
 
 function interpolate_from!(dst::AbstractArray{T, N},
