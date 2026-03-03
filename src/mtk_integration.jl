@@ -217,13 +217,10 @@ function _itp_defaults(params)
     for p in params
         if ModelingToolkit.hasdefault(p)
             val = ModelingToolkit.getdefault(p)
-            # Wrap array defaults in DataBufferType so they route to the
-            # nonnumeric parameter buffer (matching the DataBufferType symtype).
-            if val isa AbstractArray
-                push!(dflts, p => DataBufferType(Float64.(val)))
-            else
-                push!(dflts, p => val)
-            end
+            # Skip array-valued defaults (from @discretes) — they are handled
+            # separately by the sys_event initial conditions mechanism.
+            val isa AbstractArray && continue
+            push!(dflts, p => val)
         end
     end
     return dflts
@@ -318,7 +315,7 @@ function create_updater_sys_event(name, interp_infos, starttime::DateTime)
         # Unused variables have their defaults from the @discretes declaration.
         ics = Dict{Any, Any}()
         for info in active
-            ics[info.data_sym] = DataBufferType(zeros(info.data_eltype, info.data_dims...))
+            ics[info.data_sym] = zeros(info.data_eltype, info.data_dims...)
             ts, tstep = get_time_grid_params(info.itp)
             ics[info.tstart_sym] = ts
             ics[info.tstep_sym] = tstep
