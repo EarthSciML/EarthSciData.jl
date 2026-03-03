@@ -328,6 +328,7 @@ function NCEPNCARReanalysis(
         vars,
         all_params;
         name = name,
+        initial_conditions = _itp_defaults(all_params),
         metadata = Dict(CoupleType => NCEPNCARReanalysisCoupler,
             SysDiscreteEvent => create_updater_sys_event(name, interp_infos, starttime))
     )

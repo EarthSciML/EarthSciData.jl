@@ -273,6 +273,7 @@ function WRF(domaininfo::DomainInfo; name = :WRF, stream = true)
         all_constants..., all_discretes..., params...]
     sys = System(eqs, t, vars, all_params;
         name = name,
+        initial_conditions = _itp_defaults(all_params),
         metadata = Dict(CoupleType => WRFCoupler,
             SysDiscreteEvent => create_updater_sys_event(name, interp_infos, starttime))
     )
