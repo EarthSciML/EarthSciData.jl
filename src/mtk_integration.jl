@@ -192,7 +192,11 @@ function _itp_defaults(params)
     dflts = Pair[]
     for p in params
         if ModelingToolkit.hasdefault(p)
-            push!(dflts, p => ModelingToolkit.getdefault(p))
+            val = ModelingToolkit.getdefault(p)
+            # Skip array-valued defaults (from @discretes) — they are handled
+            # separately by the sys_event initial conditions mechanism.
+            val isa AbstractArray && continue
+            push!(dflts, p => val)
         end
     end
     return dflts

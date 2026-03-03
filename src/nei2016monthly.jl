@@ -414,7 +414,7 @@ function NEI2016MonthlyEmis(
         push!(interp_infos, info)
         push!(vars, eq.lhs)
     end
-    all_params = [x, y, lev, Δz, all_constants..., all_discretes..., params...]
+    all_params = [x, y, lev, Δz, all_constants..., params...]
     sys = System(
         eqs,
         t,

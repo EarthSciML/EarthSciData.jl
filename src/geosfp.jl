@@ -528,7 +528,7 @@ function GEOSFP(
     push!(vars, δZδlev)
 
     all_params = [pvdict[:lon], pvdict[:lat], lev, P_unit, Rd, g, lat2meters, lon2m,
-        all_constants..., all_discretes..., params...]
+        all_constants..., params...]
     sys = System(
         eqs,
         t,
