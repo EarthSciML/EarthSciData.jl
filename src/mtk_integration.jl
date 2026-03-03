@@ -220,8 +220,11 @@ function needed_vars(sys)
     exprs = [eq.rhs for eq in equations(sys)]
     needed_eqs = vcat(equations(sys),
         observed(sys)[ModelingToolkit.observed_equations_used_by(sys, exprs)])
-    needed_vars = unique(vcat(get_variables.(needed_eqs)...))
-    EarthSciMLBase.var2symbol.(needed_vars)
+    all_vars = Set{Any}()
+    for eq in needed_eqs
+        union!(all_vars, get_variables(eq))
+    end
+    EarthSciMLBase.var2symbol.(collect(all_vars))
 end
 
 # Create a "system event" (https://base.earthsci.dev/dev/system_events/)
