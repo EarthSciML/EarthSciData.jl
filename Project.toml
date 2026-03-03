@@ -22,6 +22,7 @@ Proj = "c94c279d-25a6-4763-9509-64d165bea63e"
 SciMLBase = "0bca4576-84f4-4d90-8ffe-ffa030f20462"
 Scratch = "6c6a2e73-6563-6170-7368-637461726353"
 Symbolics = "0c5d862f-8b57-4792-8d23-62f2024744c7"
+TestEnv = "1e6cf692-eddd-4d53-88a5-2d735e33781b"
 
 [compat]
 AllocCheck = "0.2"
@@ -48,6 +49,7 @@ SciMLBase = "2.90"
 Scratch = "1"
 SymbolicIndexingInterface = "0.3.41, 0.4"
 Symbolics = "7"
+TestEnv = "1.103.5"
 TestItemRunner = "1.1.0"
 julia = "1.10"
 

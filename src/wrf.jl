@@ -270,7 +270,7 @@ function WRF(domaininfo::DomainInfo; name = :WRF, stream = true)
     push!(vars, δzδlev)
 
     all_params = [pvdict[xdim], pvdict[ydim], pvdict[:lev],
-        all_constants..., params...]
+        all_constants..., all_discretes..., params...]
     sys = System(eqs, t, vars, all_params;
         name = name,
         initial_conditions = _itp_defaults(all_params),

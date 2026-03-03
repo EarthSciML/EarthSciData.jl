@@ -2,23 +2,48 @@
 # This file contains symbolic registration, equation creation, and
 # system event generation that depend on ModelingToolkit.
 
+# Custom symtype for data buffer discretes. Using a non-Real, non-AbstractArray
+# type gives scalar symbolic shape (so canonicalize_eq! works) while routing
+# values to MTK's nonnumeric parameter buffer (is_variable_floatingpoint returns false).
+# Concrete wrapper so that MTK's Vector{DataBufferType} buffer can hold array values
+# via convert(DataBufferType, array).
+struct DataBufferType
+    data::Any
+end
+Base.convert(::Type{DataBufferType}, x::DataBufferType) = x
+Base.convert(::Type{DataBufferType}, x) = DataBufferType(x)
+
 # Dummy function for unit validation. ModelingToolkit calls the function with
 # a DynamicQuantities.Quantity or an integer to get information about the type
 # and units of the output. The array-based interp_unsafe is unitless, so we
 # return a dimensionless value (units are applied via a separate @constants multiplier).
 interp_unsafe(data::Union{DynamicQuantities.AbstractQuantity, Real}, fit, args...) = one(Float64)
 
+# Runtime unwrap: when MTK calls interp_unsafe with a DataBufferType wrapper,
+# forward to the actual array-based implementation.
+interp_unsafe(data::DataBufferType, fit, args...) = interp_unsafe(data.data, fit, args...)
+
 # Symbolic tracing for array-based interp_unsafe.
 # Arguments are: data, fit (fractional time index), fi1..fiN (fractional spatial indices), extrap.
 # Fractional indices are computed in the symbolic equation: fi = 1 + (coord - start) / step
+# DataBufferType is used as the symtype for the data buffer discrete parameter.
 # 3 spatial dims + time (4D array): data, fit, fi1, fi2, fi3, extrap = 6 args
-@register_symbolic interp_unsafe(data::AbstractArray, fit, fi1, fi2, fi3, extrap) false
+@register_symbolic interp_unsafe(data::DataBufferType, fit, fi1, fi2, fi3, extrap) false
 # 2 spatial dims + time (3D array): data, fit, fi1, fi2, extrap = 5 args
-@register_symbolic interp_unsafe(data::AbstractArray, fit, fi1, fi2, extrap) false
+@register_symbolic interp_unsafe(data::DataBufferType, fit, fi1, fi2, extrap) false
 # 1 spatial dim + time (2D array): data, fit, fi1, extrap = 4 args
-@register_symbolic interp_unsafe(data::AbstractArray, fit, fi1, extrap) false
+@register_symbolic interp_unsafe(data::DataBufferType, fit, fi1, extrap) false
 
-# Tell SymbolicUtils that interp_unsafe always returns a scalar.
+# Tell SymbolicUtils that interp_unsafe always returns a Real scalar.
+# promote_symtype: @register_symbolic generates promote_symtype dispatches for the
+# declared argument types, but DataBufferType needs explicit overrides since
+# the fallback may not handle it correctly.
+for n_args in 4:6
+    @eval Symbolics.SymbolicUtils.promote_symtype(::typeof(interp_unsafe),
+        ::Type{DataBufferType}, $(fill(:(::Type), n_args - 2)...), ::Type) = Real
+end
+
+# Tell SymbolicUtils that interp_unsafe always returns a scalar shape.
 # Without this, maketerm's default promote_shape returns Unknown(-1) when rebuilding
 # during substitute, which breaks ifelse shape checks.
 const _scalar_shape = Symbolics.SymbolicUtils.ShapeVecT()
@@ -41,22 +66,9 @@ function _fix_ifelse_promote_shape()
     end
 end
 
-# Helper to create an array-valued @discretes with a typed AbstractArray annotation.
-# The type annotation gives scalar symbolic shape (unlike the [dims...] syntax which
-# gives array shape and breaks ifelse during substitute).
 function _make_array_discrete(name::Symbol, init_data, ndims::Int, desc::String)
-    if ndims == 2
-        return only(@discretes $name(t)::AbstractArray{Float64,2} = Float64.(init_data) [
-            description = desc])
-    elseif ndims == 3
-        return only(@discretes $name(t)::AbstractArray{Float64,3} = Float64.(init_data) [
-            description = desc])
-    elseif ndims == 4
-        return only(@discretes $name(t)::AbstractArray{Float64,4} = Float64.(init_data) [
-            description = desc])
-    else
-        error("Unsupported array dimensions: $ndims")
-    end
+    return only(@discretes $name(t)::DataBufferType = Float64.(init_data) [
+        description = desc])
 end
 
 """

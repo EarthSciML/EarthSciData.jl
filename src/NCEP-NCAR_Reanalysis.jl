@@ -321,7 +321,7 @@ function NCEPNCARReanalysis(
     end
 
     all_params = [pvdict[xdim], pvdict[ydim], pvdict[:lev], lat2meters, lon2m, hPa2Pa, Rd, g,
-        all_constants..., params...]
+        all_constants..., all_discretes..., params...]
     sys = System(
         eqs,
         t,
