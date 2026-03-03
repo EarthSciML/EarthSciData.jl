@@ -43,6 +43,12 @@ for n_args in 4:6
         ::Type{DataBufferType}, $(fill(:(::Type), n_args - 2)...), ::Type) = Real
 end
 
+# Register zero derivatives for interp_unsafe. The data is updated discretely via
+# callbacks (not continuously), so the symbolic derivative is zero for all arguments.
+# Without this, calculate_tgrad creates unevaluated Differential terms with symtype Any,
+# which causes *(::Type{Any}, ::Type{Real}) errors in the IMEX solver path.
+@register_derivative interp_unsafe(args...) I Symbolics.SConst(zero(Float64))
+
 # Tell SymbolicUtils that interp_unsafe always returns a scalar shape.
 # Without this, maketerm's default promote_shape returns Unknown(-1) when rebuilding
 # during substitute, which breaks ifelse shape checks.
@@ -110,13 +116,19 @@ function create_interp_equation(itp::DataSetInterpolator{To}, filename, t, t_ref
     p_tstep = only(@discretes $n_tstep(t) = tstep_default [unit = u"s", description = "Time grid step for $(n)"])
 
     # Spatial grid constants (fixed for the lifetime of the simulation).
+    # Each constant gets the same unit as the corresponding coordinate variable
+    # (e.g., meters for Lambert, radians for longlat) so that fi = 1 + (coord - start) / step
+    # is dimensionally consistent.
     spatial_consts = []
     for (i, r) in enumerate(grid_ranges)
+        coord_unit = ModelingToolkit.get_unit(coords[i])
         sn_start = Symbol(n, :_s, i, :start)
         sn_step = Symbol(n, :_s, i, :step)
         push!(spatial_consts, only(@constants $sn_start = first(r) [
+            unit = coord_unit,
             description = "Spatial grid start dim $(i) for $(n)"]))
         push!(spatial_consts, only(@constants $sn_step = step(r) [
+            unit = coord_unit,
             description = "Spatial grid step dim $(i) for $(n)"]))
     end
 
