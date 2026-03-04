@@ -28,4 +28,8 @@ include("NCEP-NCAR_Reanalysis.jl")
 # Coupling
 include("coupling.jl")
 
+function __init__()
+    _fix_ifelse_promote_shape()
+end
+
 end
