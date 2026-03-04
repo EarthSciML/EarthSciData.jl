@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1772327379337,
+  "lastUpdate": 1772585707263,
   "repoUrl": "https://github.com/EarthSciML/EarthSciData.jl",
   "entries": {
     "Julia benchmark result": [
@@ -3023,6 +3023,42 @@ window.BENCHMARK_DATA = {
             "value": 21487330425,
             "unit": "ns",
             "extra": "gctime=2042895844\nmemory=24939663928\nallocs=798671553\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "contact@earthscilab.com",
+            "name": "Chris Tessum's AI Assistant",
+            "username": "ctessum-claude"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "303c4d87720efa2f19ce00e84d326d94018be7d7",
+          "message": "Ignore patch and minor version updates of crate-ci/typos in dependabot (#169)\n\nCo-authored-by: Claude Opus 4.6 <noreply@anthropic.com>",
+          "timestamp": "2026-03-03T18:29:32-06:00",
+          "tree_id": "6871999677d75827ec430dc146b4ee4d4d76af79",
+          "url": "https://github.com/EarthSciML/EarthSciData.jl/commit/303c4d87720efa2f19ce00e84d326d94018be7d7"
+        },
+        "date": 1772585705918,
+        "tool": "julia",
+        "benches": [
+          {
+            "name": "NEI Simulator/Serial",
+            "value": 43254103154,
+            "unit": "ns",
+            "extra": "gctime=1584277268\nmemory=24938417176\nallocs=798657801\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
+          },
+          {
+            "name": "NEI Simulator/Threads",
+            "value": 23122921966,
+            "unit": "ns",
+            "extra": "gctime=2162810990\nmemory=24939663976\nallocs=798671553\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
           }
         ]
       }
