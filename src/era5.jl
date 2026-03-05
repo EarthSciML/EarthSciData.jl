@@ -200,7 +200,7 @@ function loadslice!(data::AbstractArray, fs::ERA5PressureLevelFileSet, t::DateTi
         lat_idx = findfirst(isequal(ERA5_LAT_DIM), dims)
         if lat_idx !== nothing && fs._lat_needs_reverse
             lat_idx_notimedim = lat_idx > time_index ? lat_idx - 1 : lat_idx
-            raw = reverse(raw, dims=lat_idx_notimedim)
+            reverse!(raw, dims=lat_idx_notimedim)
         end
 
         # ERA5 pressure levels may be stored in ascending order; reverse to match
@@ -208,7 +208,7 @@ function loadslice!(data::AbstractArray, fs::ERA5PressureLevelFileSet, t::DateTi
         plev_idx = findfirst(isequal(ERA5_PLEV_DIM), dims)
         if plev_idx !== nothing && fs._plevs_need_reverse
             plev_idx_notimedim = plev_idx > time_index ? plev_idx - 1 : plev_idx
-            raw = reverse(raw, dims=plev_idx_notimedim)
+            reverse!(raw, dims=plev_idx_notimedim)
         end
 
         # ERA5 longitude is 0..360; shift to -180..180.
@@ -368,13 +368,6 @@ function ERA5(
         push!(vars, eq.lhs)
     end
 
-    syms = EarthSciMLBase.var2symbol.(vars)
-    getvar(sym::Symbol) = begin
-        i = findfirst(isequal(sym), syms)
-        @assert !isnothing(i) "ERA5 variable $(sym) not found!"
-        vars[i]
-    end
-
     # Pressure from level index.
     # ERA5 is on pressure levels, so P is directly available from the level index.
     @constants hPa2Pa = 100.0 [unit = u"Pa", description = "Conversion hPa to Pa"]
@@ -413,6 +406,7 @@ function ERA5(
     sys = System(
         eqs, t, vars, all_params;
         name=name,
+        initial_conditions = _itp_defaults(all_params),
         metadata=Dict(
             CoupleType => ERA5Coupler,
             SysDiscreteEvent => create_updater_sys_event(name, params, starttime),

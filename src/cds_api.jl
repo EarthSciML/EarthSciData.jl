@@ -115,13 +115,17 @@ end
 # HTTP helpers using Downloads.jl
 function _cds_http_get(url::AbstractString, headers::Vector{<:Pair})
     io = IOBuffer()
-    Downloads.request(url; headers=headers, output=io)
-    return String(take!(io))
+    resp = Downloads.request(url; headers=headers, output=io)
+    body = String(take!(io))
+    resp.status >= 400 && error("CDS API HTTP error $(resp.status): $(body)")
+    return body
 end
 
 function _cds_http_post(url::AbstractString, body::AbstractString, headers::Vector{<:Pair})
     io = IOBuffer()
     input = IOBuffer(body)
-    Downloads.request(url; headers=headers, output=io, input=input, method="POST")
-    return String(take!(io))
+    resp = Downloads.request(url; headers=headers, output=io, input=input, method="POST")
+    resp_body = String(take!(io))
+    resp.status >= 400 && error("CDS API HTTP error $(resp.status): $(resp_body)")
+    return resp_body
 end

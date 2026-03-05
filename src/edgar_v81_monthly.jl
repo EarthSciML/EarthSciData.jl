@@ -5,6 +5,8 @@ const EDGAR_V81_SUBSTANCES = [
 ]
 
 const EDGAR_V81_MIRROR = "https://jeodpp.jrc.ec.europa.eu/ftp/jrc-opendata/EDGAR/datasets/v81_FT2022_AP_new/monthly"
+const EDGAR_V81_START_YEAR = 2000
+const EDGAR_V81_END_YEAR = 2022
 
 # Internal: compute relative path for the EDGAR zip file (flux data).
 function _edgar_zip_relpath(substance, sector)
@@ -18,7 +20,7 @@ function _parse_edgar_nc_year(filepath)
     fname = basename(filepath)
     for m in eachmatch(r"_(\d{4})_", fname)
         year = parse(Int, m[1])
-        if 2000 <= year <= 2030
+        if EDGAR_V81_START_YEAR <= year <= EDGAR_V81_END_YEAR
             return year
         end
     end
@@ -86,12 +88,12 @@ Substances: $(join(EDGAR_V81_SUBSTANCES, ", "))
 Available from: https://edgar.jrc.ec.europa.eu/dataset_ap81
 """
 struct EDGARv81MonthlyEmisFileSet <: FileSet
-    mirror::AbstractString
-    substance::AbstractString
-    sector::AbstractString
-    ds::Any
+    mirror::String
+    substance::String
+    sector::String
+    ds::Union{NCDataset,NCDatasets.MFDataset}
     freq_info::DataFrequencyInfo
-    extract_dir::AbstractString
+    extract_dir::String
 
     function EDGARv81MonthlyEmisFileSet(substance, sector, starttime, endtime)
         EDGARv81MonthlyEmisFileSet(EDGAR_V81_MIRROR, substance, sector, starttime, endtime)
@@ -113,8 +115,8 @@ struct EDGARv81MonthlyEmisFileSet <: FileSet
         floormonth(t) = DateTime(Dates.year(t), Dates.month(t))
         buffer_start = floormonth(starttime - Day(45))
         buffer_end = floormonth(endtime + Day(45))
-        start_year = max(2000, Dates.year(buffer_start))
-        end_year = min(2022, Dates.year(buffer_end))
+        start_year = max(EDGAR_V81_START_YEAR, Dates.year(buffer_start))
+        end_year = min(EDGAR_V81_END_YEAR, Dates.year(buffer_end))
 
         nc_files = _find_edgar_nc_files(extract_dir, start_year, end_year)
         @assert length(nc_files)>0 "No EDGAR NC files found for years $start_year-$end_year in $extract_dir"
@@ -143,7 +145,7 @@ For EDGAR, this returns the zip file path (all times are in one archive).
 """
 function relpath(fs::EDGARv81MonthlyEmisFileSet, t::DateTime)
     yr = Dates.year(t)
-    @assert 2000<=yr<=2022 "EDGAR v8.1 data is only available for years 2000-2022, got $yr."
+    @assert EDGAR_V81_START_YEAR<=yr<=EDGAR_V81_END_YEAR "EDGAR v8.1 data is only available for years $(EDGAR_V81_START_YEAR)-$(EDGAR_V81_END_YEAR), got $yr."
     return _edgar_zip_relpath(fs.substance, fs.sector)
 end
 
