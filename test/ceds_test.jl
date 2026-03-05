@@ -117,8 +117,8 @@ end
     EarthSciData.lazyload!(itp, ts)
 
     # After lazy loading, the cached times should bracket the start time.
-    @test month(itp.times[1]) == 4 || month(itp.times[1]) == 5
-    @test month(itp.times[2]) == 5 || month(itp.times[2]) == 6
+    @test month(itp.cache.times[1]) == 4 || month(itp.cache.times[1]) == 5
+    @test month(itp.cache.times[2]) == 5 || month(itp.cache.times[2]) == 6
 end
 
 @testitem "CEDS run" setup=[CEDSSetup] begin
