@@ -7,6 +7,7 @@ const EDGAR_V81_SUBSTANCES = [
 const EDGAR_V81_MIRROR = "https://jeodpp.jrc.ec.europa.eu/ftp/jrc-opendata/EDGAR/datasets/v81_FT2022_AP_new/monthly"
 const EDGAR_V81_START_YEAR = 2000
 const EDGAR_V81_END_YEAR = 2022
+const _EDGAR_YEAR_RE = r"_(\d{4})_"
 
 # Internal: compute relative path for the EDGAR zip file (flux data).
 function _edgar_zip_relpath(substance, sector)
@@ -18,7 +19,7 @@ end
 # matching "2022" in the version string "FT2022".
 function _parse_edgar_nc_year(filepath)
     fname = basename(filepath)
-    for m in eachmatch(r"_(\d{4})_", fname)
+    for m in eachmatch(_EDGAR_YEAR_RE, fname)
         year = parse(Int, m[1])
         if EDGAR_V81_START_YEAR <= year <= EDGAR_V81_END_YEAR
             return year

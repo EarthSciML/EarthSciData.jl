@@ -10,6 +10,8 @@ Authentication is via an API key read from (in order of priority):
 """
 
 const CDS_API_URL = "https://cds.climate.copernicus.eu/api"
+const CDS_POLL_INTERVAL = 5   # seconds between status checks
+const CDS_TIMEOUT = 600       # seconds before giving up
 
 """
 $(SIGNATURES)
@@ -63,7 +65,7 @@ $(SIGNATURES)
 Poll a CDS API job until completion. Returns the download URL.
 """
 function cds_wait(job_id::AbstractString; api_key::AbstractString=cds_api_key(),
-                  poll_interval::Real=5, timeout::Real=600)
+                  poll_interval::Real=CDS_POLL_INTERVAL, timeout::Real=CDS_TIMEOUT)
     url = "$(CDS_API_URL)/retrieve/v1/jobs/$(job_id)"
     headers = ["PRIVATE-TOKEN" => api_key]
     start_time = time()

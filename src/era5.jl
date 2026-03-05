@@ -9,6 +9,9 @@ const ERA5_PRESSURE_LEVELS_HPA = [
     70, 50, 30, 20, 10, 7, 5, 3, 2, 1
 ]
 
+# Reverse lookup: pressure (hPa) → level index.
+const ERA5_PLEV_TO_INDEX = Dict(p => i for (i, p) in enumerate(ERA5_PRESSURE_LEVELS_HPA))
+
 # Mapping from CDS API variable names to short names used in NetCDF files.
 const ERA5_VARIABLES = Dict(
     "temperature" => "t",
@@ -258,10 +261,11 @@ function loadmetadata(fs::ERA5PressureLevelFileSet, varname)::MetaData
                 plevs_hpa = Float64.(fs.ds[ERA5_PLEV_DIM][:])
                 # Sort from highest to lowest pressure (surface up).
                 plevs_sorted = sort(plevs_hpa, rev=true)
-                # Map each to its index in ERA5_PRESSURE_LEVELS_HPA.
+                # Map each to its index via precomputed lookup.
                 indices = Float64[]
                 for p in plevs_sorted
-                    idx = findfirst(isequal(round(Int, p)), ERA5_PRESSURE_LEVELS_HPA)
+                    p_int = round(Int, p)
+                    idx = get(ERA5_PLEV_TO_INDEX, p_int, nothing)
                     @assert idx !== nothing "Pressure level $(p) hPa not in ERA5_PRESSURE_LEVELS_HPA"
                     push!(indices, Float64(idx))
                 end
