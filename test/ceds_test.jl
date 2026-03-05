@@ -15,19 +15,8 @@
     ts, te = get_tspan_datetime(domain)
 end
 
-@testitem "CEDS Setup" begin
-    using Dates: DateTime
-    using EarthSciMLBase
-    using EarthSciData
+@testitem "CEDS Setup" setup=[CEDSSetup] begin
     using ModelingToolkit
-
-    domain = DomainInfo(
-        DateTime(2016, 5, 1),
-        DateTime(2016, 5, 2);
-        latrange = deg2rad(-85.0f0):deg2rad(2):deg2rad(85.0f0),
-        lonrange = deg2rad(-180.0f0):deg2rad(2.5):deg2rad(175.0f0),
-        levrange = 1:10,
-    )
 
     # Test loading a single species.
     emis = CEDS(domain; species = ["SO2"])

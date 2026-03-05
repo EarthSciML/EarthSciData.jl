@@ -65,12 +65,25 @@ struct CEDSFileSet <: FileSet
     ds::Any
     freq_info::DataFrequencyInfo
     lon_perm::Vector{Int}  # Permutation to reorder lon from [0,360) to [-180,180).
+    lons_rad::Vector{Float64}  # Wrapped and permuted longitudes in radians.
+    lats_rad::Vector{Float64}  # Latitudes in radians.
+    # Cached dimension indices (invariant for a given dataset).
+    time_dim::Int
+    sector_dim::Int  # 0 if no sector dimension.
+    lon_dim::Int     # lon dimension index after removing time and sector.
+    fill_val::Float32
 
     function CEDSFileSet(species, starttime, endtime;
             mirror = "https://esgf-node.ornl.gov/thredds/fileServer/user_pub_work",
             version = "CEDS-CMIP-2025-04-18",
             data_version = "v20250421",
             sectors = nothing)
+        @assert species in CEDS_SPECIES "Unknown CEDS species '$species'. Valid: $CEDS_SPECIES"
+        if !isnothing(sectors)
+            for si in sectors
+                @assert 0 <= si <= 7 "Sector index $si out of range 0:7"
+            end
+        end
         # Determine which file chunks we need.
         start_year = Dates.year(starttime)
         end_year = Dates.year(endtime)
@@ -90,10 +103,11 @@ struct CEDSFileSet <: FileSet
 
         # Compute the longitude permutation to reorder from [0,360) to [-180,180).
         # We do this once and store it for use in loadslice!.
-        dummy_perm = Int[]  # Placeholder for the temp FileSet.
         check_times = [DateTime(y1, 1, 1) for (y1, _) in chunks]
+        # Temporary FileSet just for downloading; dummy values for fields not yet known.
         fs_temp = new(mirror, species, version, data_version, sectors, nothing,
-            DataFrequencyInfo(starttime, Day(1), check_times), dummy_perm)
+            DataFrequencyInfo(starttime, Day(1), check_times),
+            Int[], Float64[], Float64[], 0, 0, 0, 1.0f20)
         filepaths = [maybedownload(fs_temp, DateTime(y1, 1, 1)) for (y1, _) in chunks]
 
         # Open all files as an aggregated dataset.
@@ -101,10 +115,27 @@ struct CEDSFileSet <: FileSet
             NCDataset(filepaths, aggdim = "time")
         end
 
-        # Compute longitude reordering permutation.
+        # Compute longitude reordering permutation and cache coordinates.
         lons_deg = Float64.(ds["lon"][:])
         lons_wrapped = [l > 180 ? l - 360 : l for l in lons_deg]
         lon_perm = sortperm(lons_wrapped)
+        lons_rad = deg2rad.(lons_wrapped[lon_perm])
+        lats_rad = deg2rad.(Float64.(ds["lat"][:]))
+
+        # Cache dimension indices (invariant for a given dataset).
+        varname = "$(species)_em_anthro"
+        var = ds[varname]
+        dims = collect(NCDatasets.dimnames(var))
+        time_dim = findfirst(isequal("time"), dims)
+        sector_dim_orig = findfirst(isequal("sector"), dims)
+        sector_dim = isnothing(sector_dim_orig) ? 0 :
+            sector_dim_orig - (time_dim < sector_dim_orig ? 1 : 0)
+        lon_dim_orig = findfirst(isequal("lon"), dims)
+        lon_dim = lon_dim_orig - (time_dim < lon_dim_orig ? 1 : 0)
+        if sector_dim > 0 && sector_dim < lon_dim
+            lon_dim -= 1
+        end
+        fill_val = Float32(get(var.attrib, "_FillValue", 1.0f20))
 
         # Build DataFrequencyInfo from the time dimension.
         # CEDS uses a 365-day (no-leap) calendar, so NCDatasets returns
@@ -120,7 +151,8 @@ struct CEDSFileSet <: FileSet
         frequency = Month(1)
         dfi = DataFrequencyInfo(times[1], frequency, times)
 
-        new(mirror, species, version, data_version, sectors, ds, dfi, lon_perm)
+        new(mirror, species, version, data_version, sectors, ds, dfi, lon_perm,
+            lons_rad, lats_rad, time_dim, sector_dim, lon_dim, fill_val)
     end
 end
 
@@ -156,50 +188,37 @@ function loadslice!(
 )
     lock(nclock) do
         var = fs.ds[varname]
-        dims = collect(NCDatasets.dimnames(var))
-        time_index = findfirst(isequal("time"), dims)
+        ndims_var = length(NCDatasets.dimnames(var))
         ti = centerpoint_index(DataFrequencyInfo(fs), t)
 
         # Slice out the time dimension.
-        slices = repeat(Any[:], length(dims))
-        slices[time_index] = ti
+        slices = repeat(Any[:], ndims_var)
+        slices[fs.time_dim] = ti
         raw = var[slices...]  # e.g. shape (lon, lat, sector)
 
-        # Replace fill values before any processing.
-        fill_val = get(var.attrib, "_FillValue", 1.0f20)
-        raw[raw .>= fill_val] .= 0
+        # Replace fill values in-place.
+        fv = fs.fill_val
+        @inbounds for i in eachindex(raw)
+            if raw[i] >= fv
+                raw[i] = zero(eltype(raw))
+            end
+        end
 
-        # Find lon dimension in the sliced array (for permutation).
-        lon_dim_orig = findfirst(isequal("lon"), dims)
-        lon_dim = lon_dim_orig - (time_index < lon_dim_orig ? 1 : 0)
-
-        # Sum across sectors.
-        sector_dim_orig = findfirst(isequal("sector"), dims)
-        result = if isnothing(sector_dim_orig)
-            raw
+        # Sum across sectors, then apply longitude permutation.
+        if fs.sector_dim == 0
+            data .= selectdim(raw, fs.lon_dim, fs.lon_perm)
+        elseif isnothing(fs.sectors)
+            result = dropdims(sum(raw; dims=fs.sector_dim); dims=fs.sector_dim)
+            data .= selectdim(result, fs.lon_dim, fs.lon_perm)
         else
-            sector_dim = sector_dim_orig - (time_index < sector_dim_orig ? 1 : 0)
-            if isnothing(fs.sectors)
-                dropdims(sum(raw; dims=sector_dim); dims=sector_dim)
-            else
-                total = zeros(eltype(raw), [s for (i, s) in enumerate(size(raw)) if i != sector_dim]...)
-                for si in fs.sectors
-                    total .+= selectdim(raw, sector_dim, si + 1)
-                end
-                total
+            # Sum selected sectors directly into data.
+            data .= zero(eltype(data))
+            for si in fs.sectors
+                slice = selectdim(raw, fs.sector_dim, si + 1)
+                # Remove sector dim to get (lon, lat), then permute lon.
+                data .+= selectdim(slice, fs.lon_dim, fs.lon_perm)
             end
         end
-
-        # If sector_dim was before lon_dim, lon_dim shifted down by 1 in result.
-        if !isnothing(sector_dim_orig)
-            sd = sector_dim_orig - (time_index < sector_dim_orig ? 1 : 0)
-            if sd < lon_dim
-                lon_dim -= 1
-            end
-        end
-
-        # Apply longitude permutation to reorder from [0,360) to [-180,180).
-        data .= selectdim(result, lon_dim, fs.lon_perm)
     end
     nothing
 end
@@ -213,29 +232,19 @@ function loadmetadata(fs::CEDSFileSet, varname)::MetaData
     lock(nclock) do
         var = fs.ds[varname]
 
-        # Get coordinates, convert lon from [0,360) to [-180,180), then to radians.
-        # Use the precomputed permutation from the FileSet.
-        lons_deg = Float64.(fs.ds["lon"][:])
-        lons_wrapped = [l > 180 ? l - 360 : l for l in lons_deg]
-        lons = deg2rad.(lons_wrapped[fs.lon_perm])
-        lats = deg2rad.(Float64.(fs.ds["lat"][:]))
-
         # Units and description.
         _, units = to_unit(var.attrib["units"])
         description = var.attrib["long_name"]
 
-        # Dimension info: after removing time and sector, we have (lat, lon).
         dimnames_out = ["lon", "lat"]
-        varsize = [length(lons), length(lats)]
+        varsize = [length(fs.lons_rad), length(fs.lats_rad)]
 
         native_sr = "+proj=longlat +datum=WGS84 +no_defs"
         xdim = 1  # lon
         ydim = 2  # lat
 
-        coords = [lons, lats]
-
         return MetaData(
-            coords,
+            [fs.lons_rad, fs.lats_rad],
             string(units),
             description,
             dimnames_out,
@@ -301,6 +310,10 @@ function CEDS(
         name = :CEDS,
         stream = true,
 )
+    for sp in species
+        @assert sp in CEDS_SPECIES "Unknown CEDS species '$sp'. Valid: $CEDS_SPECIES"
+    end
+
     starttime, endtime = get_tspan_datetime(domaininfo)
 
     pvdict = Dict([Symbol(v) => v for v in EarthSciMLBase.pvars(domaininfo)]...)
@@ -328,20 +341,16 @@ function CEDS(
         push!(vars, eq.lhs)
     end
 
+    all_params = [lon, lat, params...]
     sys = System(
         eqs,
         t,
         vars,
-        [lon, lat, params...];
+        all_params;
         name = name,
+        initial_conditions = _itp_defaults(all_params),
         metadata = Dict(CoupleType => CEDSCoupler,
             SysDiscreteEvent => create_updater_sys_event(name, params, starttime))
     )
     return sys
-end
-
-function EarthSciMLBase.couple2(c::CEDSCoupler, g::GEOSFPCoupler)
-    c, g = c.sys, g.sys
-    c = param_to_var(c, :lat, :lon)
-    ConnectorSystem([c.lat ~ g.lat, c.lon ~ g.lon], c, g)
 end
