@@ -24,6 +24,7 @@ include("regridding.jl")
 include("nei2016monthly.jl")
 include("netcdf_output.jl")
 include("NCEP-NCAR_Reanalysis.jl")
+include("openaq.jl")
 
 # Coupling
 include("coupling.jl")

@@ -26,6 +26,7 @@ TestItemRunner = "f8b46487-2199-4994-9208-9a1283c18c0a"
 
 [compat]
 AllocCheck = "0.2"
+CodecZlib = "0.7"
 ConservativeRegridding = "0.1"
 DataInterpolations = "8"
 DiffEqCallbacks = "4.3"
@@ -54,6 +55,7 @@ julia = "1.10"
 
 [extras]
 AllocCheck = "9b6a8646-10ed-4001-bbdc-1d2f46dfbb1a"
+CodecZlib = "944b1d66-785c-5afd-91f1-9de20f533193"
 DifferentialEquations = "0c46a032-eb83-5123-abaf-570d42b7fbaa"
 DomainSets = "5b8099bc-c8ec-5219-889f-1d9e522a28bf"
 LaTeXStrings = "b964fa9f-0449-5b57-a5c2-d3ea65f4040f"
@@ -66,4 +68,4 @@ Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 TestItemRunner = "f8b46487-2199-4994-9208-9a1283c18c0a"
 
 [targets]
-test = ["Test", "TestItemRunner", "DomainSets", "LaTeXStrings", "OrdinaryDiffEqLowOrderRK", "OrdinaryDiffEqSDIRK", "OrdinaryDiffEqTsit5", "Random", "AllocCheck", "SymbolicIndexingInterface"]
+test = ["Test", "TestItemRunner", "DomainSets", "LaTeXStrings", "OrdinaryDiffEqLowOrderRK", "OrdinaryDiffEqSDIRK", "OrdinaryDiffEqTsit5", "Random", "AllocCheck", "SymbolicIndexingInterface", "CodecZlib"]
