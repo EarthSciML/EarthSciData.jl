@@ -18,25 +18,6 @@
     fileset = EarthSciData.EDGARv81MonthlyEmisFileSet("NOx", "POWER_INDUSTRY", ts, te)
 end
 
-@testitem "EDGAR Setup" tags=[:edgar] begin
-    using Dates: DateTime
-    using EarthSciMLBase
-    using EarthSciData
-
-    domain = DomainInfo(
-        DateTime(2020, 6, 1),
-        DateTime(2020, 7, 1);
-        latrange = deg2rad(40.0f0):deg2rad(2):deg2rad(60.0f0),
-        lonrange = deg2rad(-10.0f0):deg2rad(2.5):deg2rad(30.0f0),
-        levrange = 1:10
-    )
-
-    ts, te = get_tspan_datetime(domain)
-
-    emis = EDGARv81MonthlyEmis("NOx", "POWER_INDUSTRY", domain)
-    fileset = EarthSciData.EDGARv81MonthlyEmisFileSet("NOx", "POWER_INDUSTRY", ts, te)
-end
-
 @testitem "EDGAR Basics" setup=[EDGARSetup] tags=[:edgar] begin
     using ModelingToolkit: equations
     eqs = equations(emis)

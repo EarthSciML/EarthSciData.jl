@@ -48,18 +48,7 @@ function _edgar_ensure_extracted(zip_url, zip_local, extract_dir)
     if !isfile(zip_local)
         mkpath(dirname(zip_local))
         @info "Downloading EDGAR data from $zip_url"
-        try
-            prog = Progress(100; desc = "Downloading $(basename(zip_url)):", dt = 0.1)
-            Downloads.download(zip_url, zip_local,
-                progress = (total::Integer, now::Integer) -> begin
-                    prog.n = total
-                    ProgressMeter.update!(prog, now)
-                end
-            )
-        catch e
-            rm(zip_local, force = true)
-            rethrow(e)
-        end
+        _download_with_progress(zip_url, zip_local)
     end
     mkpath(extract_dir)
     @info "Extracting EDGAR NC files to $extract_dir"
