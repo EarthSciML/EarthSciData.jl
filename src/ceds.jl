@@ -110,22 +110,26 @@ struct CEDSFileSet <: FileSet
             Int[], Float64[], Float64[], 0, 0, 0, 1.0f20)
         filepaths = [maybedownload(fs_temp, DateTime(y1, 1, 1)) for (y1, _) in chunks]
 
-        # Open all files as an aggregated dataset.
-        ds = lock(nclock) do
-            NCDataset(filepaths, aggdim = "time")
+        # Open all files as an aggregated dataset and read metadata.
+        ds, lons_deg, lats_rad, dims, fill_val, cftimes = lock(nclock) do
+            ds = NCDataset(filepaths, aggdim = "time")
+            lons_deg = Float64.(ds["lon"][:])
+            lats_rad = deg2rad.(Float64.(ds["lat"][:]))
+            varname = "$(species)_em_anthro"
+            var = ds[varname]
+            dims = collect(NCDatasets.dimnames(var))
+            fill_val = Float32(get(var.attrib, "_FillValue", 1.0f20))
+            cftimes = ds["time"][:]
+            (ds, lons_deg, lats_rad, dims, fill_val, cftimes)
         end
 
         # Compute longitude reordering permutation and cache coordinates.
-        lons_deg = Float64.(ds["lon"][:])
         lons_wrapped = [l > 180 ? l - 360 : l for l in lons_deg]
         lon_perm = sortperm(lons_wrapped)
         lons_rad = deg2rad.(lons_wrapped[lon_perm])
-        lats_rad = deg2rad.(Float64.(ds["lat"][:]))
 
         # Cache dimension indices (invariant for a given dataset).
         varname = "$(species)_em_anthro"
-        var = ds[varname]
-        dims = collect(NCDatasets.dimnames(var))
         time_dim = findfirst(isequal("time"), dims)
         sector_dim_orig = findfirst(isequal("sector"), dims)
         sector_dim = isnothing(sector_dim_orig) ? 0 :
@@ -134,16 +138,6 @@ struct CEDSFileSet <: FileSet
         lon_dim = lon_dim_orig - (time_dim < lon_dim_orig ? 1 : 0)
         if sector_dim > 0 && sector_dim < lon_dim
             lon_dim -= 1
-        end
-        fill_val = Float32(get(var.attrib, "_FillValue", 1.0f20))
-
-        # Build DataFrequencyInfo from the time dimension.
-        # CEDS uses a 365-day (no-leap) calendar, so NCDatasets returns
-        # CFTime.DateTimeNoLeap objects. We convert to standard DateTime
-        # by extracting year/month/day components. The small calendar
-        # differences (no leap days) are acceptable for monthly data.
-        cftimes = lock(nclock) do
-            ds["time"][:]
         end
         times = [DateTime(Dates.year(ct), Dates.month(ct), Dates.day(ct),
                           Dates.hour(ct), Dates.minute(ct), Dates.second(ct))
@@ -192,8 +186,7 @@ function loadslice!(
         ti = centerpoint_index(DataFrequencyInfo(fs), t)
 
         # Slice out the time dimension.
-        slices = repeat(Any[:], ndims_var)
-        slices[fs.time_dim] = ti
+        slices = ntuple(i -> i == fs.time_dim ? ti : Colon(), ndims_var)
         raw = var[slices...]  # e.g. shape (lon, lat, sector)
 
         # Replace fill values in-place.
@@ -215,7 +208,6 @@ function loadslice!(
             data .= zero(eltype(data))
             for si in fs.sectors
                 slice = selectdim(raw, fs.sector_dim, si + 1)
-                # Remove sector dim to get (lon, lat), then permute lon.
                 data .+= selectdim(slice, fs.lon_dim, fs.lon_perm)
             end
         end
