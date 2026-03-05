@@ -58,8 +58,12 @@ struct OpenAQFileSet <: FileSet
     grid_lon_edges::Vector{Float64}
     grid_lat_edges::Vector{Float64}
     fill_value::Float64
+    unit_scale::Float64
     # Precomputed mapping: grid_index => [station_indices...]
     cell_stations::Dict{Tuple{Int,Int}, Vector{Int}}
+    # Per-instance cache: (location_id, date) => parsed rows for that parameter
+    day_cache::Dict{Tuple{Int, Date}, Vector{Tuple{DateTime, Float64}}}
+    day_cache_lock::ReentrantLock
 end
 
 """
@@ -75,6 +79,7 @@ specifying the bounding box for station discovery.
 `api_key` is the OpenAQ API key. Defaults to `ENV["OPENAQ_API_KEY"]`.
 
 `station_filter` is an optional function `f(::OpenAQStation) -> Bool` to filter stations.
+Note: station coordinates (`lon`, `lat`) are in radians when the filter is applied.
 
 `fill_value` is used for grid cells with no stations (default `NaN`).
 """
@@ -108,6 +113,11 @@ function OpenAQFileSet(
 
     cell_stations = _build_cell_station_map(stations, lon_edges, lat_edges)
 
+    unit_scale = 1.0
+    if haskey(OPENAQ_PARAMETERS, parameter)
+        unit_scale, _ = to_unit(OPENAQ_PARAMETERS[parameter][1])
+    end
+
     OpenAQFileSet(
         OPENAQ_S3_MIRROR,
         String(parameter),
@@ -116,7 +126,10 @@ function OpenAQFileSet(
         lon_edges,
         lat_edges,
         Float64(fill_value),
+        Float64(unit_scale),
         cell_stations,
+        Dict{Tuple{Int, Date}, Vector{Tuple{DateTime, Float64}}}(),
+        ReentrantLock(),
     )
 end
 
@@ -195,7 +208,7 @@ function _fetch_stations_from_api(
     bbox::NamedTuple{(:lon_min, :lat_min, :lon_max, :lat_max)},
     api_key::AbstractString,
 )
-    all_results = []
+    all_results = Any[]
     page = 1
     limit = 1000
 
@@ -258,33 +271,34 @@ function download_station_data(
 )
     dates = Date(starttime):Day(1):Date(endtime)
     n_total = length(stations) * length(dates)
-    n_downloaded = 0
-    n_skipped = 0
-    for st in stations
-        for d in dates
-            p = _s3_localpath(st.id, d)
-            if isfile(p)
-                n_skipped += 1
-                continue
-            end
-            mkpath(dirname(p))
-            u = _s3_url(st.id, d)
-            try
-                Downloads.download(u, p)
-                n_downloaded += 1
-            catch e
-                if e isa Downloads.RequestError
-                    # File may not exist (station had no data that day). That's OK.
-                    n_skipped += 1
-                else
-                    @warn "OpenAQ: unexpected error downloading $u" exception=(e, catch_backtrace())
-                    n_skipped += 1
-                end
+
+    tasks = [(st, d) for st in stations for d in dates]
+    n_downloaded = Threads.Atomic{Int}(0)
+    n_skipped = Threads.Atomic{Int}(0)
+
+    asyncmap(tasks; ntasks=16) do (st, d)
+        p = _s3_localpath(st.id, d)
+        if isfile(p)
+            Threads.atomic_add!(n_skipped, 1)
+            return
+        end
+        mkpath(dirname(p))
+        u = _s3_url(st.id, d)
+        try
+            Downloads.download(u, p)
+            Threads.atomic_add!(n_downloaded, 1)
+        catch e
+            if e isa Downloads.RequestError
+                Threads.atomic_add!(n_skipped, 1)
+            else
+                @warn "OpenAQ: unexpected error downloading $u" exception=(e, catch_backtrace())
+                Threads.atomic_add!(n_skipped, 1)
             end
         end
     end
-    if n_downloaded > 0
-        @info "OpenAQ: downloaded $n_downloaded files ($n_skipped cached/missing of $n_total total)"
+    nd = n_downloaded[]
+    if nd > 0
+        @info "OpenAQ: downloaded $nd files ($(n_skipped[]) cached/missing of $n_total total)"
     end
 end
 
@@ -385,81 +399,76 @@ function loadslice!(
     hour_end = hour_start + Hour(1)
     d = Date(t)
 
-    # Compute unit scale once outside the loop
-    unit_scale = 1.0
-    if haskey(OPENAQ_PARAMETERS, fs.parameter)
-        unit_scale, _ = to_unit(OPENAQ_PARAMETERS[fs.parameter][1])
-    end
-
     for ((i, j), station_idxs) in fs.cell_stations
         total = 0.0
         count = 0
         for si in station_idxs
             st = fs.stations[si]
-            t_s, c_s = _read_station_hour(st.id, d, fs.parameter, hour_start, hour_end)
+            t_s, c_s = _read_station_hour(fs, st.id, d, hour_start, hour_end)
             total += t_s
             count += c_s
         end
         if count > 0
-            data[i, j] = total / count * unit_scale
+            data[i, j] = total / count * fs.unit_scale
         end
     end
     nothing
 end
 
-# --- Station day data cache ---
-# Caches parsed CSV rows per (location_id, date) to avoid re-decompressing
-# the same gzip file for every hour query.
-const _STATION_DAY_CACHE = Dict{Tuple{Int, Date}, Vector{Tuple{DateTime, String, Float64}}}()
-
 """
-Load and cache all parsed rows from a station's daily CSV file.
-Returns a vector of (datetime_utc, parameter, value) tuples.
+Load and cache parsed rows for a station's daily CSV file, filtered to the
+FileSet's parameter. Returns a vector of (datetime_utc, value) tuples.
+The cache is scoped to the `OpenAQFileSet` instance and protected by a lock.
 """
-function _load_station_day(location_id::Int, d::Date)
+function _load_station_day(fs::OpenAQFileSet, location_id::Int, d::Date)
     key = (location_id, d)
-    haskey(_STATION_DAY_CACHE, key) && return _STATION_DAY_CACHE[key]
+    lock(fs.day_cache_lock) do
+        haskey(fs.day_cache, key) && return fs.day_cache[key]
 
-    rows = Tuple{DateTime, String, Float64}[]
-    path = _s3_localpath(location_id, d)
-    if !isfile(path)
-        _STATION_DAY_CACHE[key] = rows
-        return rows
-    end
-
-    try
-        csv_data = open(path) do io
-            read(GzipDecompressorStream(io), String)
+        rows = Tuple{DateTime, Float64}[]
+        path = _s3_localpath(location_id, d)
+        if !isfile(path)
+            fs.day_cache[key] = rows
+            return rows
         end
-        lines = split(csv_data, '\n')
-        isempty(lines) && return (_STATION_DAY_CACHE[key] = rows)
 
-        headers = _split_csv_line(lines[1])
-        dt_col = findfirst(==("datetime"), headers)
-        param_col = findfirst(==("parameter"), headers)
-        val_col = findfirst(==("value"), headers)
-        (isnothing(dt_col) || isnothing(param_col) || isnothing(val_col)) && return (_STATION_DAY_CACHE[key] = rows)
+        try
+            csv_data = open(path) do io
+                read(GzipDecompressorStream(io), String)
+            end
+            lines = split(csv_data, '\n')
+            if !isempty(lines)
+                headers = _split_csv_line(lines[1])
+                dt_col = findfirst(==("datetime"), headers)
+                param_col = findfirst(==("parameter"), headers)
+                val_col = findfirst(==("value"), headers)
+                if !isnothing(dt_col) && !isnothing(param_col) && !isnothing(val_col)
+                    ncols = max(dt_col, param_col, val_col)
+                    for i in 2:length(lines)
+                        line = lines[i]
+                        isempty(line) && continue
+                        fields = _split_csv_line(line)
+                        length(fields) < ncols && continue
 
-        ncols = max(dt_col, param_col, val_col)
-        for i in 2:length(lines)
-            line = lines[i]
-            isempty(line) && continue
-            fields = _split_csv_line(line)
-            length(fields) < ncols && continue
+                        # Filter by parameter at parse time
+                        fields[param_col] == fs.parameter || continue
 
-            row_dt = _parse_openaq_datetime(fields[dt_col])
-            isnothing(row_dt) && continue
+                        row_dt = _parse_openaq_datetime(fields[dt_col])
+                        isnothing(row_dt) && continue
 
-            v = tryparse(Float64, fields[val_col])
-            (!isnothing(v) && v >= 0) || continue
+                        v = tryparse(Float64, fields[val_col])
+                        (!isnothing(v) && v >= 0) || continue
 
-            push!(rows, (row_dt, fields[param_col], v))
+                        push!(rows, (row_dt, v))
+                    end
+                end
+            end
+        catch e
+            @warn "Failed to read OpenAQ data file $path" exception=(e, catch_backtrace())
         end
-    catch e
-        @warn "Failed to read OpenAQ data file $path" exception=(e, catch_backtrace())
+        fs.day_cache[key] = rows
+        rows
     end
-    _STATION_DAY_CACHE[key] = rows
-    rows
 end
 
 """
@@ -468,17 +477,16 @@ Returns `(total, count)` for computing an average.
 Uses cached daily data to avoid repeated decompression.
 """
 function _read_station_hour(
+    fs::OpenAQFileSet,
     location_id::Int,
     d::Date,
-    parameter::AbstractString,
     hour_start::DateTime,
     hour_end::DateTime,
 )
-    rows = _load_station_day(location_id, d)
+    rows = _load_station_day(fs, location_id, d)
     total = 0.0
     count = 0
-    for (dt, param, val) in rows
-        param == parameter || continue
+    for (dt, val) in rows
         hour_start <= dt < hour_end || continue
         total += val
         count += 1
@@ -552,7 +560,8 @@ function _parse_openaq_datetime(s::AbstractString)
 
         # No timezone info, assume UTC
         return DateTime(s, dateformat"yyyy-mm-ddTHH:MM:SS")
-    catch
+    catch e
+        e isa InterruptException && rethrow()
         nothing
     end
 end

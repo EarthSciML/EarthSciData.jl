@@ -88,8 +88,10 @@ end
     )
     fs = EarthSciData.OpenAQFileSet(
         EarthSciData.OPENAQ_S3_MIRROR, "pm25", stations, freq_info,
-        collect(lon_edges), collect(lat_edges), NaN,
+        collect(lon_edges), collect(lat_edges), NaN, 1e-6,
         Dict{Tuple{Int,Int}, Vector{Int}}(),
+        Dict{Tuple{Int, Date}, Vector{Tuple{DateTime, Float64}}}(),
+        ReentrantLock(),
     )
 
     md = EarthSciData.loadmetadata(fs, "pm25")
@@ -105,9 +107,6 @@ end
 
 @testitem "loadslice! with synthetic data" setup=[OpenAQSetup] begin
     using CodecZlib
-
-    # Clear the station day cache before this test
-    empty!(EarthSciData._STATION_DAY_CACHE)
 
     tmpdir = mktempdir()
     ENV["EARTHSCIDATADIR"] = tmpdir
@@ -156,8 +155,10 @@ end
     cell_stations = EarthSciData._build_cell_station_map(stations, collect(lon_edges), collect(lat_edges))
     fs = EarthSciData.OpenAQFileSet(
         EarthSciData.OPENAQ_S3_MIRROR, "pm25", stations, freq_info,
-        collect(lon_edges), collect(lat_edges), NaN,
+        collect(lon_edges), collect(lat_edges), NaN, 1e-6,
         cell_stations,
+        Dict{Tuple{Int, Date}, Vector{Tuple{DateTime, Float64}}}(),
+        ReentrantLock(),
     )
 
     data = zeros(Float64, 2, 2)
@@ -179,12 +180,13 @@ end
     @test isnan(data[2, 1])
     @test isnan(data[1, 2])
 
-    # Test with custom fill_value
-    empty!(EarthSciData._STATION_DAY_CACHE)
+    # Test with custom fill_value (fresh cache per instance, no global to clear)
     fs_zero = EarthSciData.OpenAQFileSet(
         EarthSciData.OPENAQ_S3_MIRROR, "pm25", stations, freq_info,
-        collect(lon_edges), collect(lat_edges), 0.0,
+        collect(lon_edges), collect(lat_edges), 0.0, 1e-6,
         cell_stations,
+        Dict{Tuple{Int, Date}, Vector{Tuple{DateTime, Float64}}}(),
+        ReentrantLock(),
     )
     data2 = zeros(Float64, 2, 2)
     EarthSciData.loadslice!(data2, fs_zero, DateTime(2024, 6, 15, 12), "pm25")
@@ -202,8 +204,10 @@ end
     )
     fs = EarthSciData.OpenAQFileSet(
         EarthSciData.OPENAQ_S3_MIRROR, "o3", stations, freq_info,
-        [0.0, 1.0], [0.0, 1.0], NaN,
+        [0.0, 1.0], [0.0, 1.0], NaN, 1e-6,
         Dict{Tuple{Int,Int}, Vector{Int}}(),
+        Dict{Tuple{Int, Date}, Vector{Tuple{DateTime, Float64}}}(),
+        ReentrantLock(),
     )
     @test EarthSciData.varnames(fs) == ["o3"]
 end
@@ -218,8 +222,10 @@ end
     lat_edges = [0.0, 1.0, 2.0]
     fs = EarthSciData.OpenAQFileSet(
         EarthSciData.OPENAQ_S3_MIRROR, "pm25", stations, freq_info,
-        lon_edges, lat_edges, NaN,
+        lon_edges, lat_edges, NaN, 1e-6,
         Dict{Tuple{Int,Int}, Vector{Int}}(),
+        Dict{Tuple{Int, Date}, Vector{Tuple{DateTime, Float64}}}(),
+        ReentrantLock(),
     )
     md = EarthSciData.loadmetadata(fs, "pm25")
     polys = EarthSciData.get_geometry(fs, md)
