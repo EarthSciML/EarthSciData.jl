@@ -87,7 +87,7 @@ end
         collect(DateTime(2024, 1, 1):Hour(1):DateTime(2024, 1, 2)),
     )
     fs = EarthSciData.OpenAQFileSet(
-        EarthSciData.OPENAQ_S3_MIRROR, "pm25", stations, freq_info,
+        "pm25", stations, freq_info,
         collect(lon_edges), collect(lat_edges), NaN, 1e-6,
         Dict{Tuple{Int,Int}, Vector{Int}}(),
         Dict{Tuple{Int, Date}, Vector{Tuple{DateTime, Float64}}}(),
@@ -154,7 +154,7 @@ end
 
     cell_stations = EarthSciData._build_cell_station_map(stations, collect(lon_edges), collect(lat_edges))
     fs = EarthSciData.OpenAQFileSet(
-        EarthSciData.OPENAQ_S3_MIRROR, "pm25", stations, freq_info,
+        "pm25", stations, freq_info,
         collect(lon_edges), collect(lat_edges), NaN, 1e-6,
         cell_stations,
         Dict{Tuple{Int, Date}, Vector{Tuple{DateTime, Float64}}}(),
@@ -182,7 +182,7 @@ end
 
     # Test with custom fill_value (fresh cache per instance, no global to clear)
     fs_zero = EarthSciData.OpenAQFileSet(
-        EarthSciData.OPENAQ_S3_MIRROR, "pm25", stations, freq_info,
+        "pm25", stations, freq_info,
         collect(lon_edges), collect(lat_edges), 0.0, 1e-6,
         cell_stations,
         Dict{Tuple{Int, Date}, Vector{Tuple{DateTime, Float64}}}(),
@@ -203,7 +203,7 @@ end
         collect(DateTime(2024, 1, 1):Hour(1):DateTime(2024, 1, 2)),
     )
     fs = EarthSciData.OpenAQFileSet(
-        EarthSciData.OPENAQ_S3_MIRROR, "o3", stations, freq_info,
+        "o3", stations, freq_info,
         [0.0, 1.0], [0.0, 1.0], NaN, 1e-6,
         Dict{Tuple{Int,Int}, Vector{Int}}(),
         Dict{Tuple{Int, Date}, Vector{Tuple{DateTime, Float64}}}(),
@@ -221,7 +221,7 @@ end
     lon_edges = [0.0, 1.0, 2.0]
     lat_edges = [0.0, 1.0, 2.0]
     fs = EarthSciData.OpenAQFileSet(
-        EarthSciData.OPENAQ_S3_MIRROR, "pm25", stations, freq_info,
+        "pm25", stations, freq_info,
         lon_edges, lat_edges, NaN, 1e-6,
         Dict{Tuple{Int,Int}, Vector{Int}}(),
         Dict{Tuple{Int, Date}, Vector{Tuple{DateTime, Float64}}}(),

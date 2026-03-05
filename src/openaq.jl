@@ -3,18 +3,18 @@ export OpenAQ
 const OPENAQ_S3_MIRROR = "https://openaq-data-archive.s3.amazonaws.com"
 const OPENAQ_API_BASE = "https://api.openaq.org/v3"
 
-# OpenAQ parameter name => (unit_string, description)
+# OpenAQ parameter name => (api_id, unit_string, description)
 const OPENAQ_PARAMETERS = Dict(
-    "pm25" => ("ug/m3", "Particulate matter (PM2.5)"),
-    "pm10" => ("ug/m3", "Particulate matter (PM10)"),
-    "o3" => ("ug/m3", "Ozone"),
-    "no2" => ("ug/m3", "Nitrogen dioxide"),
-    "so2" => ("ug/m3", "Sulfur dioxide"),
-    "co" => ("ug/m3", "Carbon monoxide"),
-    "bc" => ("ug/m3", "Black carbon"),
-    "pm1" => ("ug/m3", "Particulate matter (PM1)"),
-    "no" => ("ug/m3", "Nitric oxide"),
-    "nox" => ("ug/m3", "Nitrogen oxides"),
+    "pm25" => (id=2, unit="ug/m3", description="Particulate matter (PM2.5)"),
+    "pm10" => (id=1, unit="ug/m3", description="Particulate matter (PM10)"),
+    "o3" => (id=3, unit="ug/m3", description="Ozone"),
+    "no2" => (id=5, unit="ug/m3", description="Nitrogen dioxide"),
+    "so2" => (id=4, unit="ug/m3", description="Sulfur dioxide"),
+    "co" => (id=6, unit="ug/m3", description="Carbon monoxide"),
+    "bc" => (id=11, unit="ug/m3", description="Black carbon"),
+    "pm1" => (id=19, unit="ug/m3", description="Particulate matter (PM1)"),
+    "no" => (id=7, unit="ug/m3", description="Nitric oxide"),
+    "nox" => (id=8, unit="ug/m3", description="Nitrogen oxides"),
 )
 
 """
@@ -51,7 +51,6 @@ The `station_filter` function can be used to filter stations, e.g. by name or ID
 It should accept an `OpenAQStation` and return `true` to include the station.
 """
 struct OpenAQFileSet <: FileSet
-    mirror::String
     parameter::String
     stations::Vector{OpenAQStation}
     freq_info::DataFrequencyInfo
@@ -115,11 +114,10 @@ function OpenAQFileSet(
 
     unit_scale = 1.0
     if haskey(OPENAQ_PARAMETERS, parameter)
-        unit_scale, _ = to_unit(OPENAQ_PARAMETERS[parameter][1])
+        unit_scale, _ = to_unit(OPENAQ_PARAMETERS[parameter].unit)
     end
 
     OpenAQFileSet(
-        OPENAQ_S3_MIRROR,
         String(parameter),
         stations,
         freq_info,
@@ -233,16 +231,9 @@ function _fetch_stations_from_api(
     all_results
 end
 
-# Known OpenAQ v3 parameter IDs.
-const _OPENAQ_PARAM_IDS = Dict(
-    "pm25" => 2, "pm10" => 1, "o3" => 3, "no2" => 5,
-    "so2" => 4, "co" => 6, "bc" => 11, "pm1" => 19,
-    "no" => 7, "nox" => 8,
-)
-
 function _parameter_id(name::AbstractString)
-    haskey(_OPENAQ_PARAM_IDS, name) && return _OPENAQ_PARAM_IDS[name]
-    error("Unknown OpenAQ parameter: $name. Known parameters: $(join(keys(_OPENAQ_PARAM_IDS), ", "))")
+    haskey(OPENAQ_PARAMETERS, name) && return OPENAQ_PARAMETERS[name].id
+    error("Unknown OpenAQ parameter: $name. Known parameters: $(join(keys(OPENAQ_PARAMETERS), ", "))")
 end
 
 function _api_get(url_str::AbstractString, api_key::AbstractString)
@@ -348,7 +339,9 @@ function loadmetadata(fs::OpenAQFileSet, varname)::MetaData
     lon_centers = [(fs.grid_lon_edges[i] + fs.grid_lon_edges[i+1]) / 2 for i in 1:nx]
     lat_centers = [(fs.grid_lat_edges[j] + fs.grid_lat_edges[j+1]) / 2 for j in 1:ny]
 
-    unit_str, desc = get(OPENAQ_PARAMETERS, varname, ("ug/m3", varname))
+    info = get(OPENAQ_PARAMETERS, varname, (id=0, unit="ug/m3", description=varname))
+    unit_str = info.unit
+    desc = info.description
 
     MetaData(
         [lon_centers, lat_centers],
