@@ -97,7 +97,7 @@ end
     lonv = deg2rad(-90.0)
     latv = deg2rad(35.0)
     levv = 1.0
-    val = EarthSciData.interp!(itp, tt, lonv, latv, levv)
+    val = EarthSciData.interp(itp, tt, lonv, latv, levv)
     # Temperature should be reasonable (200-320 K at 1000 hPa).
     @test 200.0 < val < 320.0
 end

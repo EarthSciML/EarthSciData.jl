@@ -28,16 +28,16 @@ end
 # Internal: find NC files in extract_dir filtered by year range, sorted by year.
 function _find_edgar_nc_files(extract_dir, start_year, end_year)
     all_files = filter(f -> endswith(f, ".nc"), readdir(extract_dir, join = true))
-    result = String[]
+    pairs = Tuple{Int,String}[]
     for f in all_files
         yr = _parse_edgar_nc_year(f)
         isnothing(yr) && continue
         if start_year <= yr <= end_year
-            push!(result, f)
+            push!(pairs, (yr, f))
         end
     end
-    sort!(result, by = f -> _parse_edgar_nc_year(f))
-    return result
+    sort!(pairs, by = first)
+    return [p[2] for p in pairs]
 end
 
 # Internal: download zip and extract NC files if not already done.
@@ -64,7 +64,9 @@ function _extract_edgar_zip(zip_path, extract_dir)
             if endswith(fname, ".nc") && !startswith(fname, ".")
                 outpath = joinpath(extract_dir, fname)
                 if !isfile(outpath)
-                    write(outpath, read(f))
+                    open(outpath, "w") do io
+                        write(io, f)
+                    end
                 end
             end
         end

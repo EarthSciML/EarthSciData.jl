@@ -35,6 +35,9 @@ const ERA5_LON_DIM = "longitude"
 const ERA5_LAT_DIM = "latitude"
 const ERA5_PLEV_DIM = "pressure_level"
 
+# Map ERA5 dimension names to DomainInfo coordinate names.
+const ERA5_COORD_MAP = Dict(ERA5_LON_DIM => :lon, ERA5_LAT_DIM => :lat, ERA5_PLEV_DIM => :lev)
+
 """
 $(SIGNATURES)
 
@@ -52,8 +55,7 @@ struct ERA5PressureLevelFileSet <: FileSet
     ds::Union{NCDataset, NCDatasets.MFDataset}
     freq_info::DataFrequencyInfo
     varlist::Vector{String}
-    # Cached coordinate arrays for loadslice! hot path.
-    _lon_vals::Vector{Float64}
+    # Cached coordinate flags for loadslice! hot path.
     _lat_needs_reverse::Bool
     _plevs_need_reverse::Bool
     _lon_shift::Int  # circshift amount for 0..360 → -180..180, 0 if no shift needed.
@@ -167,7 +169,7 @@ struct ERA5PressureLevelFileSet <: FileSet
             end
 
             return new(String(mirror), ds, dfi, varlist,
-                       lon_vals, lat_needs_reverse, plevs_need_reverse, lon_shift_amount)
+                       lat_needs_reverse, plevs_need_reverse, lon_shift_amount)
         end
     end
 end
@@ -348,9 +350,6 @@ function ERA5(
     params = Any[t_ref]
     vars = Num[]
 
-    # Map ERA5 dimension names to DomainInfo coordinate names.
-    coord_map = Dict(ERA5_LON_DIM => :lon, ERA5_LAT_DIM => :lat, ERA5_PLEV_DIM => :lev)
-
     for varname in varnames(fs)
         dt = EarthSciMLBase.eltype(domaininfo)
         itp = DataSetInterpolator{dt}(
@@ -359,7 +358,7 @@ function ERA5(
         dims = dimnames(itp)
         coords = Num[]
         for dim in dims
-            mapped = get(coord_map, dim, Symbol(dim))
+            mapped = get(ERA5_COORD_MAP, dim, Symbol(dim))
             @assert mapped ∈ keys(pvdict) "ERA5 dimension $(dim) (mapped to $(mapped)) not in domaininfo coordinates ($(pvs))."
             push!(coords, pvdict[mapped])
         end
@@ -385,11 +384,11 @@ function ERA5(
     push!(vars, P)
 
     # Coordinate transforms.
+    @constants lat2meters = 111.32e3 * 180 / π [unit = u"m/rad"]
+    @constants lon2m = 40075.0e3 / 2π [unit = u"m/rad"]
     if :lat in keys(pvdict)
         @variables δxδlon(t) [unit = u"m/rad", description = "X gradient with respect to longitude"]
         @variables δyδlat(t) [unit = u"m/rad", description = "Y gradient with respect to latitude"]
-        @constants lat2meters = 111.32e3 * 180 / π [unit = u"m/rad"]
-        @constants lon2m = 40075.0e3 / 2π [unit = u"m/rad"]
         push!(eqs, δxδlon ~ lon2m * cos(pvdict[:lat]))
         push!(eqs, δyδlat ~ lat2meters)
         push!(vars, δxδlon, δyδlat)
