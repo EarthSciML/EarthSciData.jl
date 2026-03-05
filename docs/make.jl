@@ -18,6 +18,7 @@ makedocs(;
         "Home" => "index.md",
         "GEOS-FP" => "geosfp.md",
         "2016 NEI" => "nei2016.md",
+        "CEDS" => "ceds.md",
         "API" => "api.md",
         "🔗 Benchmarks" => "benchmarks.md"
     ]

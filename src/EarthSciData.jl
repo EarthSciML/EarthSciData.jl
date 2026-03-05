@@ -22,6 +22,7 @@ include("geosfp.jl")
 include("wrf.jl")
 include("regridding.jl")
 include("nei2016monthly.jl")
+include("ceds.jl")
 include("netcdf_output.jl")
 include("NCEP-NCAR_Reanalysis.jl")
 
