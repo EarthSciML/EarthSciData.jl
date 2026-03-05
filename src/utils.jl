@@ -38,7 +38,16 @@ function to_unit(u)
         "none" => (1, Quantity(1.0)),
         "?" => (1, Quantity(1.0)),
         "" => (1, Quantity(1.0)),
-        "-" => (1, Quantity(1.0))
+        "-" => (1, Quantity(1.0)),
+        # ERA5-style unit strings (CF convention with ** for exponents)
+        "m s**-1" => (1, u"m/s"),
+        "Pa s**-1" => (1, u"Pa/s"),
+        "m**2 s**-2" => (1, u"m^2/s^2"),
+        "kg kg**-1" => (1, u"kg/kg"),
+        "s**-1" => (1, u"s^-1"),
+        "K m**2 kg**-1 s**-1" => (1, u"K*m^2/kg/s"),
+        "%" => (0.01, Quantity(1.0)),
+        "(0 - 1)" => (1, Quantity(1.0)),
     )
     if haskey(d, u)
         return d[u]
