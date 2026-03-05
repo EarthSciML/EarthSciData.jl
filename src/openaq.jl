@@ -334,8 +334,7 @@ function loadmetadata(fs::OpenAQFileSet, varname)::MetaData
     lon_centers = [(fs.grid_lon_edges[i] + fs.grid_lon_edges[i+1]) / 2 for i in 1:nx]
     lat_centers = [(fs.grid_lat_edges[j] + fs.grid_lat_edges[j+1]) / 2 for j in 1:ny]
 
-    unit_str = haskey(OPENAQ_PARAMETERS, varname) ? OPENAQ_PARAMETERS[varname][1] : "ug/m3"
-    desc = haskey(OPENAQ_PARAMETERS, varname) ? OPENAQ_PARAMETERS[varname][2] : varname
+    unit_str, desc = get(OPENAQ_PARAMETERS, varname, ("ug/m3", varname))
 
     MetaData(
         [lon_centers, lat_centers],
@@ -380,11 +379,9 @@ function loadslice!(
 )
     @assert varname == fs.parameter
 
-    nx = length(fs.grid_lon_edges) - 1
-    ny = length(fs.grid_lat_edges) - 1
     fill!(data, fs.fill_value)
 
-    hour_start = DateTime(Dates.year(t), Dates.month(t), Dates.day(t), Dates.hour(t))
+    hour_start = Dates.trunc(t, Hour)
     hour_end = hour_start + Hour(1)
     d = Date(t)
 
@@ -394,20 +391,14 @@ function loadslice!(
         unit_scale, _ = to_unit(OPENAQ_PARAMETERS[fs.parameter][1])
     end
 
-    for j in 1:ny, i in 1:nx
-        key = (i, j)
-        haskey(fs.cell_stations, key) || continue
-        station_idxs = fs.cell_stations[key]
-
+    for ((i, j), station_idxs) in fs.cell_stations
         total = 0.0
         count = 0
         for si in station_idxs
             st = fs.stations[si]
-            vals = _read_station_hour(st.id, d, fs.parameter, hour_start, hour_end)
-            if !isempty(vals)
-                total += sum(vals)
-                count += length(vals)
-            end
+            t_s, c_s = _read_station_hour(st.id, d, fs.parameter, hour_start, hour_end)
+            total += t_s
+            count += c_s
         end
         if count > 0
             data[i, j] = total / count * unit_scale
@@ -437,7 +428,9 @@ function _load_station_day(location_id::Int, d::Date)
     end
 
     try
-        csv_data = read(GzipDecompressorStream(open(path)), String)
+        csv_data = open(path) do io
+            read(GzipDecompressorStream(io), String)
+        end
         lines = split(csv_data, '\n')
         isempty(lines) && return (_STATION_DAY_CACHE[key] = rows)
 
@@ -471,7 +464,7 @@ end
 
 """
 Read measurements for a single station for a single hour.
-Returns a vector of Float64 values (may be empty if no data).
+Returns `(total, count)` for computing an average.
 Uses cached daily data to avoid repeated decompression.
 """
 function _read_station_hour(
@@ -482,13 +475,15 @@ function _read_station_hour(
     hour_end::DateTime,
 )
     rows = _load_station_day(location_id, d)
-    values = Float64[]
+    total = 0.0
+    count = 0
     for (dt, param, val) in rows
         param == parameter || continue
         hour_start <= dt < hour_end || continue
-        push!(values, val)
+        total += val
+        count += 1
     end
-    values
+    (total, count)
 end
 
 function _split_csv_line(line::AbstractString)
