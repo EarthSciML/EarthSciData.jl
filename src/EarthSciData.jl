@@ -10,6 +10,7 @@ using DynamicQuantities, Latexify, ProgressMeter
 using Scratch
 using JLD2
 using ConservativeRegridding
+using JSON3, CodecZlib
 
 # General utilities
 include("load.jl")

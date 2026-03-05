@@ -6,45 +6,6 @@ end
 
 # --- Unit tests for internal helpers (no network needed) ---
 
-@testitem "JSON parser" setup=[OpenAQSetup] begin
-    parse_json = EarthSciData._parse_json_string
-
-    @test parse_json("42") == 42
-    @test parse_json("3.14") ≈ 3.14
-    @test parse_json("\"hello\"") == "hello"
-    @test parse_json("true") == true
-    @test parse_json("false") == false
-    @test parse_json("null") === nothing
-    @test parse_json("[1,2,3]") == [1, 2, 3]
-    @test parse_json("{\"a\":1,\"b\":\"c\"}") == Dict("a" => 1, "b" => "c")
-
-    nested = parse_json("{\"results\":[{\"id\":123,\"coordinates\":{\"longitude\":-73.5,\"latitude\":40.7}}]}")
-    @test nested["results"][1]["id"] == 123
-    @test nested["results"][1]["coordinates"]["longitude"] ≈ -73.5
-
-    # Round-trip
-    io = IOBuffer()
-    EarthSciData._json_write(io, nested)
-    rt = parse_json(String(take!(io)))
-    @test rt["results"][1]["id"] == 123
-end
-
-@testitem "JSON write/read round-trip" setup=[OpenAQSetup] begin
-    data = [
-        Dict{String,Any}("id" => 1, "name" => "Station A",
-            "coordinates" => Dict{String,Any}("longitude" => -120.5, "latitude" => 37.8)),
-        Dict{String,Any}("id" => 2, "name" => "Station B",
-            "coordinates" => Dict{String,Any}("longitude" => -118.2, "latitude" => 34.1)),
-    ]
-    tmpfile = tempname() * ".json"
-    EarthSciData._write_json_file(tmpfile, data)
-    result = EarthSciData._parse_json_file(tmpfile)
-    @test length(result) == 2
-    @test result[1]["id"] == 1
-    @test result[2]["coordinates"]["latitude"] ≈ 34.1
-    rm(tmpfile; force=true)
-end
-
 @testitem "CSV line splitting" setup=[OpenAQSetup] begin
     split_csv = EarthSciData._split_csv_line
 
@@ -60,7 +21,10 @@ end
 
     @test parse_dt("2024-01-15T12:00:00+00:00") == DateTime(2024, 1, 15, 12, 0, 0)
     @test parse_dt("2024-06-01T08:30:00Z") == DateTime(2024, 6, 1, 8, 30, 0)
-    @test parse_dt("2023-12-31T23:59:59-05:00") == DateTime(2023, 12, 31, 23, 59, 59)
+    # UTC-5 offset: 23:59:59-05:00 is 2024-01-01T04:59:59 UTC
+    @test parse_dt("2023-12-31T23:59:59-05:00") == DateTime(2024, 1, 1, 4, 59, 59)
+    # Positive offset: 10:00:00+05:30 is 04:30:00 UTC
+    @test parse_dt("2024-01-15T10:00:00+05:30") == DateTime(2024, 1, 15, 4, 30, 0)
     @test parse_dt("invalid") === nothing
 end
 
@@ -142,6 +106,9 @@ end
 @testitem "loadslice! with synthetic data" setup=[OpenAQSetup] begin
     using CodecZlib
 
+    # Clear the station day cache before this test
+    empty!(EarthSciData._STATION_DAY_CACHE)
+
     tmpdir = mktempdir()
     ENV["EARTHSCIDATADIR"] = tmpdir
 
@@ -203,11 +170,7 @@ end
     # Average = (10+20+30)/3 = 20.0; unit conversion: 20.0 * 1e-6 = 2e-5
     @test data[1, 1] ≈ 20.0e-6
 
-    # Station 1003 (lon=-72.5°) → lon bin 2 (between -73 and -72)... wait
-    # -72.5° is between -73.0 and -72.0 → searchsortedlast = 1? No:
-    # lon_edges in deg: [-74, -73, -72]. In radians these are sorted ascending (negative).
-    # deg2rad(-74) < deg2rad(-73) < deg2rad(-72)
-    # deg2rad(-72.5) is between deg2rad(-73) and deg2rad(-72) → searchsortedlast = 2
+    # Station 1003 (lon=-72.5°) → lon bin 2 (between -73 and -72)
     # lat 40.8° is between 40.5° and 41.0° → lat bin 2
     # → cell (2, 2)
     @test data[2, 2] ≈ 50.0e-6
@@ -217,6 +180,7 @@ end
     @test isnan(data[1, 2])
 
     # Test with custom fill_value
+    empty!(EarthSciData._STATION_DAY_CACHE)
     fs_zero = EarthSciData.OpenAQFileSet(
         EarthSciData.OPENAQ_S3_MIRROR, "pm25", stations, freq_info,
         collect(lon_edges), collect(lat_edges), 0.0,

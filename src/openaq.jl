@@ -136,12 +136,7 @@ function _build_cell_station_map(
         ix = searchsortedlast(lon_edges, st.lon)
         iy = searchsortedlast(lat_edges, st.lat)
         if 1 <= ix <= nx && 1 <= iy <= ny
-            key = (ix, iy)
-            if haskey(cell_stations, key)
-                push!(cell_stations[key], si)
-            else
-                cell_stations[key] = [si]
-            end
+            push!(get!(Vector{Int}, cell_stations, (ix, iy)), si)
         end
     end
     cell_stations
@@ -168,13 +163,15 @@ function discover_stations(
     bbox_str = "$(bbox.lon_min)_$(bbox.lat_min)_$(bbox.lon_max)_$(bbox.lat_max)"
     cache_file = joinpath(cache_dir, "$(parameter)_$(bbox_str).json")
 
-    local raw_stations::Vector{Dict{String,Any}}
+    local raw_stations::Vector
     if isfile(cache_file)
         @info "OpenAQ: loading cached station list from $cache_file"
-        raw_stations = _parse_json_file(cache_file)
+        raw_stations = JSON3.read(read(cache_file, String))
     else
         raw_stations = _fetch_stations_from_api(parameter, bbox, api_key)
-        _write_json_file(cache_file, raw_stations)
+        open(cache_file, "w") do io
+            JSON3.write(io, raw_stations)
+        end
     end
 
     stations = OpenAQStation[]
@@ -198,7 +195,7 @@ function _fetch_stations_from_api(
     bbox::NamedTuple{(:lon_min, :lat_min, :lon_max, :lat_max)},
     api_key::AbstractString,
 )
-    all_results = Dict{String,Any}[]
+    all_results = []
     page = 1
     limit = 1000
 
@@ -244,192 +241,8 @@ function _api_get(url_str::AbstractString, api_key::AbstractString)
         error("OpenAQ API request failed for $url_str: $e")
     end
     body_str = String(take!(buf))
-    _parse_json_string(body_str)
+    JSON3.read(body_str)
 end
-
-# --- Minimal JSON parsing (no external dependency) ---
-
-function _parse_json_string(s::AbstractString)
-    _json_parse(s, firstindex(s))[1]
-end
-
-function _parse_json_file(path::AbstractString)
-    s = read(path, String)
-    _parse_json_string(s)
-end
-
-function _write_json_file(path::AbstractString, data)
-    open(path, "w") do io
-        _json_write(io, data)
-    end
-end
-
-function _json_skip_whitespace(s, i)
-    while i <= lastindex(s) && isspace(s[i])
-        i = nextind(s, i)
-    end
-    i
-end
-
-function _json_parse(s, i)
-    i = _json_skip_whitespace(s, i)
-    i > lastindex(s) && error("Unexpected end of JSON")
-    c = s[i]
-    if c == '"'
-        _json_parse_string(s, i)
-    elseif c == '{'
-        _json_parse_object(s, i)
-    elseif c == '['
-        _json_parse_array(s, i)
-    elseif c == 't'
-        @assert SubString(s, i, i+3) == "true"
-        (true, i + 4)
-    elseif c == 'f'
-        @assert SubString(s, i, i+4) == "false"
-        (false, i + 5)
-    elseif c == 'n'
-        @assert SubString(s, i, i+3) == "null"
-        (nothing, i + 4)
-    else
-        _json_parse_number(s, i)
-    end
-end
-
-function _json_parse_string(s, i)
-    @assert s[i] == '"'
-    i = nextind(s, i)
-    buf = IOBuffer()
-    while i <= lastindex(s)
-        c = s[i]
-        if c == '\\'
-            i = nextind(s, i)
-            c2 = s[i]
-            if c2 == '"' || c2 == '\\' || c2 == '/'
-                write(buf, c2)
-            elseif c2 == 'n'
-                write(buf, '\n')
-            elseif c2 == 't'
-                write(buf, '\t')
-            elseif c2 == 'r'
-                write(buf, '\r')
-            elseif c2 == 'b'
-                write(buf, '\b')
-            elseif c2 == 'f'
-                write(buf, '\f')
-            elseif c2 == 'u'
-                hex = SubString(s, i+1, i+4)
-                write(buf, Char(parse(UInt16, hex; base=16)))
-                i += 4
-            end
-        elseif c == '"'
-            return (String(take!(buf)), nextind(s, i))
-        else
-            write(buf, c)
-        end
-        i = nextind(s, i)
-    end
-    error("Unterminated JSON string")
-end
-
-function _json_parse_number(s, i)
-    j = i
-    while j <= lastindex(s) && (isdigit(s[j]) || s[j] in ('-', '+', '.', 'e', 'E'))
-        j = nextind(s, j)
-    end
-    num_str = SubString(s, i, prevind(s, j))
-    if occursin('.', num_str) || occursin('e', num_str) || occursin('E', num_str)
-        (parse(Float64, num_str), j)
-    else
-        (parse(Int, num_str), j)
-    end
-end
-
-function _json_parse_object(s, i)
-    @assert s[i] == '{'
-    i = nextind(s, i)
-    d = Dict{String,Any}()
-    i = _json_skip_whitespace(s, i)
-    if s[i] == '}'
-        return (d, nextind(s, i))
-    end
-    while true
-        i = _json_skip_whitespace(s, i)
-        key, i = _json_parse_string(s, i)
-        i = _json_skip_whitespace(s, i)
-        @assert s[i] == ':'
-        i = nextind(s, i)
-        val, i = _json_parse(s, i)
-        d[key] = val
-        i = _json_skip_whitespace(s, i)
-        if s[i] == '}'
-            return (d, nextind(s, i))
-        end
-        @assert s[i] == ','
-        i = nextind(s, i)
-    end
-end
-
-function _json_parse_array(s, i)
-    @assert s[i] == '['
-    i = nextind(s, i)
-    arr = Any[]
-    i = _json_skip_whitespace(s, i)
-    if s[i] == ']'
-        return (arr, nextind(s, i))
-    end
-    while true
-        val, i = _json_parse(s, i)
-        push!(arr, val)
-        i = _json_skip_whitespace(s, i)
-        if s[i] == ']'
-            return (arr, nextind(s, i))
-        end
-        @assert s[i] == ','
-        i = nextind(s, i)
-    end
-end
-
-function _json_write(io::IO, d::Dict)
-    print(io, '{')
-    first = true
-    for (k, v) in d
-        first || print(io, ',')
-        first = false
-        _json_write(io, k)
-        print(io, ':')
-        _json_write(io, v)
-    end
-    print(io, '}')
-end
-
-function _json_write(io::IO, arr::AbstractVector)
-    print(io, '[')
-    for (i, v) in enumerate(arr)
-        i > 1 && print(io, ',')
-        _json_write(io, v)
-    end
-    print(io, ']')
-end
-
-function _json_write(io::IO, s::AbstractString)
-    print(io, '"')
-    for c in s
-        if c == '"'
-            print(io, "\\\"")
-        elseif c == '\\'
-            print(io, "\\\\")
-        elseif c == '\n'
-            print(io, "\\n")
-        else
-            print(io, c)
-        end
-    end
-    print(io, '"')
-end
-
-_json_write(io::IO, n::Number) = print(io, n)
-_json_write(io::IO, b::Bool) = print(io, b ? "true" : "false")
-_json_write(io::IO, ::Nothing) = print(io, "null")
 
 # --- S3 data download ---
 
@@ -459,9 +272,14 @@ function download_station_data(
             try
                 Downloads.download(u, p)
                 n_downloaded += 1
-            catch
-                # File may not exist (station had no data that day). That's OK.
-                n_skipped += 1
+            catch e
+                if e isa Downloads.RequestError
+                    # File may not exist (station had no data that day). That's OK.
+                    n_skipped += 1
+                else
+                    @warn "OpenAQ: unexpected error downloading $u" exception=(e, catch_backtrace())
+                    n_skipped += 1
+                end
             end
         end
     end
@@ -470,17 +288,20 @@ function download_station_data(
     end
 end
 
-function _s3_url(location_id::Int, d::Date)
+function _s3_date_parts(d::Date)
     yr = Dates.year(d)
     mo = lpad(Dates.month(d), 2, '0')
     day_str = Dates.format(d, dateformat"yyyy-mm-dd")
+    (yr, mo, day_str)
+end
+
+function _s3_url(location_id::Int, d::Date)
+    yr, mo, day_str = _s3_date_parts(d)
     "$(OPENAQ_S3_MIRROR)/records/csv.gz/locationid=$(location_id)/year=$(yr)/month=$(mo)/location-$(location_id)-$(day_str).csv.gz"
 end
 
 function _s3_localpath(location_id::Int, d::Date)
-    yr = Dates.year(d)
-    mo = lpad(Dates.month(d), 2, '0')
-    day_str = Dates.format(d, dateformat"yyyy-mm-dd")
+    yr, mo, day_str = _s3_date_parts(d)
     joinpath(
         download_cache(),
         "openaq_data",
@@ -496,10 +317,7 @@ end
 DataFrequencyInfo(fs::OpenAQFileSet) = fs.freq_info
 
 function relpath(fs::OpenAQFileSet, t::DateTime)
-    d = Date(t)
-    yr = Dates.year(d)
-    mo = lpad(Dates.month(d), 2, '0')
-    day_str = Dates.format(d, dateformat"yyyy-mm-dd")
+    yr, mo, day_str = _s3_date_parts(Date(t))
     "openaq/$(fs.parameter)/$(yr)/$(mo)/$(day_str)"
 end
 
@@ -570,6 +388,12 @@ function loadslice!(
     hour_end = hour_start + Hour(1)
     d = Date(t)
 
+    # Compute unit scale once outside the loop
+    unit_scale = 1.0
+    if haskey(OPENAQ_PARAMETERS, fs.parameter)
+        unit_scale, _ = to_unit(OPENAQ_PARAMETERS[fs.parameter][1])
+    end
+
     for j in 1:ny, i in 1:nx
         key = (i, j)
         haskey(fs.cell_stations, key) || continue
@@ -586,22 +410,69 @@ function loadslice!(
             end
         end
         if count > 0
-            data[i, j] = total / count
-            # Apply unit conversion
-            if haskey(OPENAQ_PARAMETERS, fs.parameter)
-                scale, _ = to_unit(OPENAQ_PARAMETERS[fs.parameter][1])
-                if scale != 1
-                    data[i, j] *= scale
-                end
-            end
+            data[i, j] = total / count * unit_scale
         end
     end
     nothing
 end
 
+# --- Station day data cache ---
+# Caches parsed CSV rows per (location_id, date) to avoid re-decompressing
+# the same gzip file for every hour query.
+const _STATION_DAY_CACHE = Dict{Tuple{Int, Date}, Vector{Tuple{DateTime, String, Float64}}}()
+
+"""
+Load and cache all parsed rows from a station's daily CSV file.
+Returns a vector of (datetime_utc, parameter, value) tuples.
+"""
+function _load_station_day(location_id::Int, d::Date)
+    key = (location_id, d)
+    haskey(_STATION_DAY_CACHE, key) && return _STATION_DAY_CACHE[key]
+
+    rows = Tuple{DateTime, String, Float64}[]
+    path = _s3_localpath(location_id, d)
+    if !isfile(path)
+        _STATION_DAY_CACHE[key] = rows
+        return rows
+    end
+
+    try
+        csv_data = read(GzipDecompressorStream(open(path)), String)
+        lines = split(csv_data, '\n')
+        isempty(lines) && return (_STATION_DAY_CACHE[key] = rows)
+
+        headers = _split_csv_line(lines[1])
+        dt_col = findfirst(==("datetime"), headers)
+        param_col = findfirst(==("parameter"), headers)
+        val_col = findfirst(==("value"), headers)
+        (isnothing(dt_col) || isnothing(param_col) || isnothing(val_col)) && return (_STATION_DAY_CACHE[key] = rows)
+
+        ncols = max(dt_col, param_col, val_col)
+        for i in 2:length(lines)
+            line = lines[i]
+            isempty(line) && continue
+            fields = _split_csv_line(line)
+            length(fields) < ncols && continue
+
+            row_dt = _parse_openaq_datetime(fields[dt_col])
+            isnothing(row_dt) && continue
+
+            v = tryparse(Float64, fields[val_col])
+            (!isnothing(v) && v >= 0) || continue
+
+            push!(rows, (row_dt, fields[param_col], v))
+        end
+    catch e
+        @warn "Failed to read OpenAQ data file $path" exception=(e, catch_backtrace())
+    end
+    _STATION_DAY_CACHE[key] = rows
+    rows
+end
+
 """
 Read measurements for a single station for a single hour.
 Returns a vector of Float64 values (may be empty if no data).
+Uses cached daily data to avoid repeated decompression.
 """
 function _read_station_hour(
     location_id::Int,
@@ -610,40 +481,12 @@ function _read_station_hour(
     hour_start::DateTime,
     hour_end::DateTime,
 )
-    path = _s3_localpath(location_id, d)
-    isfile(path) || return Float64[]
-
+    rows = _load_station_day(location_id, d)
     values = Float64[]
-    try
-        # Decompress gzip using external gzip command.
-        csv_data = read(`gzip -dc $path`, String)
-        lines = split(csv_data, '\n')
-        isempty(lines) && return values
-
-        headers = _split_csv_line(lines[1])
-        dt_col = findfirst(==("datetime"), headers)
-        param_col = findfirst(==("parameter"), headers)
-        val_col = findfirst(==("value"), headers)
-        (isnothing(dt_col) || isnothing(param_col) || isnothing(val_col)) && return values
-
-        ncols = max(dt_col, param_col, val_col)
-        for i in 2:length(lines)
-            line = lines[i]
-            isempty(line) && continue
-            fields = _split_csv_line(line)
-            length(fields) < ncols && continue
-            fields[param_col] != parameter && continue
-
-            row_dt = _parse_openaq_datetime(fields[dt_col])
-            isnothing(row_dt) && continue
-
-            if hour_start <= row_dt < hour_end
-                v = tryparse(Float64, fields[val_col])
-                !isnothing(v) && v >= 0 && push!(values, v)
-            end
-        end
-    catch
-        # Corrupted or unreadable file; skip.
+    for (dt, param, val) in rows
+        param == parameter || continue
+        hour_start <= dt < hour_end || continue
+        push!(values, val)
     end
     values
 end
@@ -688,17 +531,32 @@ function _split_csv_line(line::AbstractString)
     fields
 end
 
+"""
+Parse an OpenAQ datetime string, converting timezone offsets to UTC.
+Supports formats: "2024-01-15T12:00:00+00:00", "2024-01-15T12:00:00Z",
+"2024-01-15T12:00:00".
+"""
 function _parse_openaq_datetime(s::AbstractString)
     try
-        dt_str = s
-        for pat in (r"[+-]\d{2}:\d{2}$", r"Z$")
-            m = match(pat, dt_str)
-            if !isnothing(m)
-                dt_str = SubString(dt_str, 1, prevind(dt_str, m.offset))
-                break
-            end
+        # Check for timezone offset like +05:30 or -05:00
+        m_offset = match(r"([+-])(\d{2}):(\d{2})$", s)
+        if !isnothing(m_offset)
+            dt_str = SubString(s, 1, prevind(s, m_offset.offset))
+            dt = DateTime(dt_str, dateformat"yyyy-mm-ddTHH:MM:SS")
+            sign = m_offset.captures[1] == "+" ? -1 : 1
+            hours = parse(Int, m_offset.captures[2])
+            mins = parse(Int, m_offset.captures[3])
+            return dt + Minute(sign * (hours * 60 + mins))
         end
-        DateTime(dt_str, dateformat"yyyy-mm-ddTHH:MM:SS")
+
+        # Check for Z suffix (already UTC)
+        if endswith(s, 'Z')
+            dt_str = SubString(s, 1, prevind(s, lastindex(s)))
+            return DateTime(dt_str, dateformat"yyyy-mm-ddTHH:MM:SS")
+        end
+
+        # No timezone info, assume UTC
+        return DateTime(s, dateformat"yyyy-mm-ddTHH:MM:SS")
     catch
         nothing
     end
