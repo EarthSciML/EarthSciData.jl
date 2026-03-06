@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1772585707263,
+  "lastUpdate": 1772760356135,
   "repoUrl": "https://github.com/EarthSciML/EarthSciData.jl",
   "entries": {
     "Julia benchmark result": [
@@ -3059,6 +3059,42 @@ window.BENCHMARK_DATA = {
             "value": 23122921966,
             "unit": "ns",
             "extra": "gctime=2162810990\nmemory=24939663976\nallocs=798671553\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "ctessum@gmail.com",
+            "name": "Christopher Tessum",
+            "username": "ctessum"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "b93a42cc3f8f910a9f15f60b2157d884028bfbd7",
+          "message": "Merge pull request #171 from ctessum-claude/add-ceds-emissions\n\nAdd CEDS global emissions data loader",
+          "timestamp": "2026-03-05T19:00:02-06:00",
+          "tree_id": "be73f6c954ba162a114ac187a422dc3e22337a80",
+          "url": "https://github.com/EarthSciML/EarthSciData.jl/commit/b93a42cc3f8f910a9f15f60b2157d884028bfbd7"
+        },
+        "date": 1772760354820,
+        "tool": "julia",
+        "benches": [
+          {
+            "name": "NEI Simulator/Serial",
+            "value": 42899777348,
+            "unit": "ns",
+            "extra": "gctime=1650013681\nmemory=24938417176\nallocs=798657801\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
+          },
+          {
+            "name": "NEI Simulator/Threads",
+            "value": 22647669730,
+            "unit": "ns",
+            "extra": "gctime=2576690195\nmemory=24939663976\nallocs=798671553\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
           }
         ]
       }
