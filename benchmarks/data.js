@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1772764803291,
+  "lastUpdate": 1772809753821,
   "repoUrl": "https://github.com/EarthSciML/EarthSciData.jl",
   "entries": {
     "Julia benchmark result": [
@@ -3131,6 +3131,42 @@ window.BENCHMARK_DATA = {
             "value": 20176058509,
             "unit": "ns",
             "extra": "gctime=1440387251\nmemory=24939663976\nallocs=798671553\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "ctessum@gmail.com",
+            "name": "Christopher Tessum",
+            "username": "ctessum"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "0e59c18c20de79af7a593fec4e46a98dd6a958f3",
+          "message": "Merge pull request #173 from ctessum-claude/add-era5-loader\n\nAdd ERA5 and EDGAR v8.1 data loaders",
+          "timestamp": "2026-03-06T08:44:56-06:00",
+          "tree_id": "c512b3ae769daca5c97fbc73dcf44ab9780989eb",
+          "url": "https://github.com/EarthSciML/EarthSciData.jl/commit/0e59c18c20de79af7a593fec4e46a98dd6a958f3"
+        },
+        "date": 1772809752734,
+        "tool": "julia",
+        "benches": [
+          {
+            "name": "NEI Simulator/Serial",
+            "value": 37551486094,
+            "unit": "ns",
+            "extra": "gctime=1557830132\nmemory=24938417176\nallocs=798657801\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
+          },
+          {
+            "name": "NEI Simulator/Threads",
+            "value": 19752181979,
+            "unit": "ns",
+            "extra": "gctime=1572532382\nmemory=24939663976\nallocs=798671553\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
           }
         ]
       }
