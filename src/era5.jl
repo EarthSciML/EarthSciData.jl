@@ -1,4 +1,4 @@
-export ERA5
+export ERA5, partialderivatives_δPδlev_era5
 
 # ERA5 pressure levels in hPa, ordered from surface (highest pressure) to top (lowest pressure).
 # Level index 1 = 1000 hPa, index 37 = 1 hPa.
@@ -417,4 +417,44 @@ function ERA5(
         ),
     )
     return sys
+end
+
+"""
+$(SIGNATURES)
+
+Return a function to calculate coefficients to multiply the
+`δ(u)/δ(lev)` partial derivative operator by to convert
+from `δ(u)/δ(lev)` to `δ(u)/δ(P)`, i.e. from vertical level index
+to pressure in Pa.
+
+Usage (mirrors the GEOSFP pattern):
+```julia
+era5 = ERA5(domain; ...)
+domain2 = EarthSciMLBase.add_partial_derivative_func(
+    domain,
+    partialderivatives_δPδlev_era5(),
+)
+composed = couple(sys, domain2, Advection(), era5)
+```
+"""
+function partialderivatives_δPδlev_era5(; default_lev=1.0)
+    @constants P_unit = 100.0 [unit = u"Pa", description = "hPa to Pa conversion factor"]
+    (pvars::AbstractVector) -> begin
+        levindex = EarthSciMLBase.matching_suffix_idx(pvars, :lev)
+        if length(levindex) > 1
+            error("Multiple variables with suffix :lev found in pvars: $(pvars[levindex])")
+        end
+        if length(levindex) > 0
+            lev = pvars[only(levindex)]
+        else
+            lev = default_lev
+        end
+
+        # d(u)/d(P) = d(u)/d(lev) / (d(P)/d(lev))
+        # P(lev) = P_unit * era5_P_itp(lev)  [Pa]
+        # dP/dlev = P_unit * derivative(era5_P_itp, lev)  [Pa/level]
+        δPδlev = P_unit * DataInterpolations.derivative(era5_P_itp, Num(lev))
+
+        return Dict(only(levindex) => 1 / δPδlev)
+    end
 end
