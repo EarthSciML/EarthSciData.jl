@@ -30,7 +30,6 @@ ZipFile = "a5390f91-8eb1-5f08-bee0-b1d1ffed6cea"
 [compat]
 AllocCheck = "0.2"
 CodecZlib = "0.7"
-JSON3 = "1"
 ConservativeRegridding = "0.1"
 DataInterpolations = "8"
 DiffEqCallbacks = "4.3"
