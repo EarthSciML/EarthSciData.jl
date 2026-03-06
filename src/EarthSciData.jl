@@ -11,7 +11,7 @@ using Scratch
 using JLD2
 using ConservativeRegridding
 using ZipFile
-using JSON3
+using JSON3, CodecZlib
 
 # General utilities
 include("load.jl")
@@ -30,6 +30,7 @@ include("edgar_v81_monthly.jl")
 include("netcdf_output.jl")
 include("NCEP-NCAR_Reanalysis.jl")
 include("era5.jl")
+include("openaq.jl")
 
 # Coupling
 include("coupling.jl")
