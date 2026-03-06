@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1772760356135,
+  "lastUpdate": 1772764803291,
   "repoUrl": "https://github.com/EarthSciML/EarthSciData.jl",
   "entries": {
     "Julia benchmark result": [
@@ -3095,6 +3095,42 @@ window.BENCHMARK_DATA = {
             "value": 22647669730,
             "unit": "ns",
             "extra": "gctime=2576690195\nmemory=24939663976\nallocs=798671553\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "ctessum@gmail.com",
+            "name": "Christopher Tessum",
+            "username": "ctessum"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "c95afbe72c1513b0aeab4edb63cc17f27e1e7eda",
+          "message": "Merge pull request #172 from ctessum-claude/add-openaq-loader\n\nAdd OpenAQ air quality data loader",
+          "timestamp": "2026-03-05T20:15:48-06:00",
+          "tree_id": "b088f59c65175b5862bf3c1695cd21e7f33e3313",
+          "url": "https://github.com/EarthSciML/EarthSciData.jl/commit/c95afbe72c1513b0aeab4edb63cc17f27e1e7eda"
+        },
+        "date": 1772764802627,
+        "tool": "julia",
+        "benches": [
+          {
+            "name": "NEI Simulator/Serial",
+            "value": 39093425895,
+            "unit": "ns",
+            "extra": "gctime=1452576218\nmemory=24938417176\nallocs=798657801\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
+          },
+          {
+            "name": "NEI Simulator/Threads",
+            "value": 20176058509,
+            "unit": "ns",
+            "extra": "gctime=1440387251\nmemory=24939663976\nallocs=798671553\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
           }
         ]
       }
