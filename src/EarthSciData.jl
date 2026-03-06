@@ -10,6 +10,7 @@ using DynamicQuantities, Latexify, ProgressMeter
 using Scratch
 using JLD2
 using ConservativeRegridding
+using JSON3, CodecZlib
 
 # General utilities
 include("load.jl")
@@ -25,6 +26,7 @@ include("nei2016monthly.jl")
 include("ceds.jl")
 include("netcdf_output.jl")
 include("NCEP-NCAR_Reanalysis.jl")
+include("openaq.jl")
 
 # Coupling
 include("coupling.jl")
