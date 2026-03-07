@@ -248,6 +248,76 @@ if !Sys.iswindows() # Allocation tests don't seem to work on windows.
     end
 end
 
+@testitem "create_interpolator! with Float32 coords" begin
+    using EarthSciData
+    using Interpolations: BSpline, Linear, interpolate!, scale
+    using Dates: DateTime, Hour, datetime2unix
+
+    # Float32 coords (as when DomainInfo uses Float32 u_proto)
+    coords_f32 = (Float32(0.0):Float32(0.1):Float32(0.3), Float32(0.0):Float32(0.1):Float32(0.3))
+    times = [DateTime(2024, 1, 1) + Hour(i) for i in 0:1]
+    data = zeros(Float32, 4, 4, 2)
+    interp_cache = similar(data)
+    grid, itp = EarthSciData.create_interpolator!(interp_cache, data, coords_f32, times)
+
+    # All ranges in the grid should be Float64
+    for r in grid
+        @test eltype(r) == Float64
+    end
+
+    # A second call (simulating update_interpolator!) should produce the same type
+    data2 = ones(Float32, 4, 4, 2)
+    interp_cache2 = similar(data2)
+    grid2, itp2 = EarthSciData.create_interpolator!(interp_cache2, data2, coords_f32, times)
+    @test typeof(itp) == typeof(itp2)
+end
+
+@testitem "interp_cache_times! boundary" begin
+    using EarthSciData
+    using EarthSciMLBase: DomainInfo
+    using Dates: DateTime, Second, Hour
+
+    struct BoundaryCacheTestFS <: EarthSciData.FileSet
+        start::DateTime
+        finish::DateTime
+    end
+
+    function EarthSciData.DataFrequencyInfo(fs::BoundaryCacheTestFS)::EarthSciData.DataFrequencyInfo
+        frequency = Hour(1)
+        centerpoints = collect(fs.start:frequency:fs.finish)
+        EarthSciData.DataFrequencyInfo(fs.start, frequency, centerpoints)
+    end
+    function EarthSciData.loadslice!(cache::AbstractArray, fs::BoundaryCacheTestFS, t::DateTime, varname)
+        fill!(cache, 1.0)
+    end
+    function EarthSciData.loadmetadata(fs::BoundaryCacheTestFS, varname)
+        EarthSciData.MetaData(
+            [[0.0, 1.0], [0.0, 1.0]],
+            "m", "test", ["x", "y"], [2, 2],
+            "+proj=longlat +datum=WGS84 +no_defs", 1, 2, -1, (false, false, false),
+        )
+    end
+
+    domain = DomainInfo(
+        DateTime(2024, 1, 1), DateTime(2024, 1, 2);
+        lonrange = deg2rad(0.0):deg2rad(1.0):deg2rad(1.0),
+        latrange = deg2rad(0.0):deg2rad(1.0):deg2rad(1.0),
+        levrange = 1:1,
+    )
+    fs = BoundaryCacheTestFS(DateTime(2024, 1, 1), DateTime(2024, 1, 2))
+    itp = EarthSciData.DataSetInterpolator{Float64}(fs, "X", DateTime(2024, 1, 1), DateTime(2024, 1, 2), domain)
+
+    # At the last centerpoint, should not throw BoundsError
+    times = EarthSciData.interp_cache_times!(itp, DateTime(2024, 1, 2))
+    @test length(times) <= length(itp.cache.times)
+    @test times[end] == DateTime(2024, 1, 2)
+
+    # At the first centerpoint, should also work
+    times_first = EarthSciData.interp_cache_times!(itp, DateTime(2024, 1, 1))
+    @test length(times_first) <= length(itp.cache.times)
+    @test times_first[1] == DateTime(2024, 1, 1)
+end
+
 @testitem "tuple_from_vals" begin
     @test EarthSciData.tuple_from_vals(1, 1, 2, 2, 3, 3) == (1, 2, 3)
     @test EarthSciData.tuple_from_vals(2, 2, 1, 1, 3, 3) == (1, 2, 3)

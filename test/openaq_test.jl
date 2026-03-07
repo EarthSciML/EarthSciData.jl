@@ -72,10 +72,10 @@ end
 @testitem "S3 URL construction" setup=[OpenAQSetup] begin
     d = Date(2024, 3, 15)
     url = EarthSciData._s3_url(12345, d)
-    @test url == "https://openaq-data-archive.s3.amazonaws.com/records/csv.gz/locationid=12345/year=2024/month=03/location-12345-2024-03-15.csv.gz"
+    @test url == "https://openaq-data-archive.s3.amazonaws.com/records/csv.gz/locationid=12345/year=2024/month=03/location-12345-20240315.csv.gz"
 
     path = EarthSciData._s3_localpath(12345, d)
-    @test endswith(path, joinpath("openaq_data", "locationid=12345", "year=2024", "month=03", "location-12345-2024-03-15.csv.gz"))
+    @test endswith(path, joinpath("openaq_data", "locationid=12345", "year=2024", "month=03", "location-12345-20240315.csv.gz"))
 end
 
 @testitem "loadmetadata" setup=[OpenAQSetup] begin

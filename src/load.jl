@@ -406,10 +406,10 @@ end
 Create a new interpolator, overwriting `interp_cache`.
 """
 function create_interpolator!(interp_cache, data, coords, times)
-    grid = tuple(coords..., knots2range(datetime2unix.(times)))
+    grid = tuple((knots2range(Float64.(c)) for c in coords)..., knots2range(datetime2unix.(times)))
     copyto!(interp_cache, data)
     itp = interpolate!(interp_cache, BSpline(Linear()))
-    itp = scale(itp, grid)
+    itp = scale(itp, grid...)
     return grid, itp
 end
 
@@ -458,13 +458,16 @@ function interp_cache_times!(itp::DataSetInterpolator, t::DateTime)
     cache_size = length(itp.cache.times)
     dfi = DataFrequencyInfo(itp.fs.fs)
     ti = centerpoint_index(dfi, t)
+    n = length(dfi.centerpoints)
     # Currently assuming we're going forwards in time.
     if t < dfi.centerpoints[ti]  # Load data starting with previous time step.
-        times = dfi.centerpoints[(ti - 1):(ti + cache_size - 2)]
-    else  # Load data starting with previous time step.
-        times = dfi.centerpoints[ti:(ti + cache_size - 1)]
+        ti_end = min(n, ti + cache_size - 2)
+        ti_start = max(1, ti_end - cache_size + 1)
+    else
+        ti_end = min(n, ti + cache_size - 1)
+        ti_start = max(1, ti_end - cache_size + 1)
     end
-    times
+    dfi.centerpoints[ti_start:ti_end]
 end
 
 """
