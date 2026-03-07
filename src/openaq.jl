@@ -80,7 +80,7 @@ specifying the bounding box for station discovery.
 `station_filter` is an optional function `f(::OpenAQStation) -> Bool` to filter stations.
 Note: station coordinates (`lon`, `lat`) are in radians when the filter is applied.
 
-`fill_value` is used for grid cells with no stations (default `NaN`).
+`fill_value` is used for grid cells with no stations (default `0.0`).
 """
 function OpenAQFileSet(
     parameter::AbstractString,
@@ -91,7 +91,10 @@ function OpenAQFileSet(
     grid_lat_edges::AbstractVector{<:Real} = Float64[],
     api_key::AbstractString = get(ENV, "OPENAQ_API_KEY", ""),
     station_filter::Function = (_) -> true,
-    fill_value::Real = NaN,
+    # TODO: fill_value should be `missing` or `NaN` so downstream code can
+    # distinguish cells with measurements from cells without. Currently 0.0
+    # because DataSetInterpolator's BSpline propagates NaN to the entire field.
+    fill_value::Real = 0.0,
 )
     @assert !isempty(api_key) "OpenAQ API key is required. Set ENV[\"OPENAQ_API_KEY\"] or pass `api_key`."
     @assert !isempty(grid_lon_edges) "grid_lon_edges must be provided"
@@ -575,7 +578,7 @@ observations for the given parameter.
 
 `station_filter` is a function `f(::OpenAQStation) -> Bool` to filter stations.
 
-`fill_value` is used for grid cells with no stations (default `NaN`).
+`fill_value` is used for grid cells with no stations (default `0.0`).
 
 `stream` specifies whether data should be streamed or loaded all at once.
 """
@@ -584,7 +587,10 @@ function OpenAQ(
     domaininfo::DomainInfo;
     api_key::AbstractString = get(ENV, "OPENAQ_API_KEY", ""),
     station_filter::Function = (_) -> true,
-    fill_value::Real = NaN,
+    # TODO: fill_value should be `missing` or `NaN` so downstream code can
+    # distinguish cells with measurements from cells without. Currently 0.0
+    # because DataSetInterpolator's BSpline propagates NaN to the entire field.
+    fill_value::Real = 0.0,
     name::Symbol = :OpenAQ,
     stream::Bool = true,
 )
@@ -620,7 +626,11 @@ function OpenAQ(
 
     dt = EarthSciMLBase.eltype(domaininfo)
     # OpenAQ data is already on the model grid (same lon/lat edges), so bypass
-    # BSpline regridding (which propagates NaN from empty cells) and just copy.
+    # BSpline regridding and just copy.
+    # TODO: fill_value should be `missing` or `NaN` so downstream code can
+    # distinguish cells with measurements from cells without. Currently we use
+    # 0.0 because the DataSetInterpolator builds a BSpline over the data array
+    # and NaN in any cell propagates to the entire interpolated field.
     copy_regridder = (dst, src; extrapolate_type=nothing) -> copyto!(dst, src)
     fswr = FileSetWithRegridder(fs, copy_regridder)
     itp = DataSetInterpolator{dt}(fswr, parameter, starttime, endtime, domaininfo;
