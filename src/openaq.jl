@@ -296,7 +296,7 @@ end
 function _s3_date_parts(d::Date)
     yr = Dates.year(d)
     mo = lpad(Dates.month(d), 2, '0')
-    day_str = Dates.format(d, dateformat"yyyy-mm-dd")
+    day_str = Dates.format(d, dateformat"yyyymmdd")
     (yr, mo, day_str)
 end
 
