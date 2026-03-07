@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1772860051419,
+  "lastUpdate": 1772860132135,
   "repoUrl": "https://github.com/EarthSciML/EarthSciData.jl",
   "entries": {
     "Julia benchmark result": [
@@ -3239,6 +3239,42 @@ window.BENCHMARK_DATA = {
             "value": 20519398596,
             "unit": "ns",
             "extra": "gctime=1862710285\nmemory=24939663976\nallocs=798671553\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "ctessum@gmail.com",
+            "name": "Christopher Tessum",
+            "username": "ctessum"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "118f70cc4407d31c0f7c6492f3d78245440392e3",
+          "message": "Merge pull request #176 from EarthSciML/ctessum-patch-2\n\nBump version from 0.15.2 to 0.15.3",
+          "timestamp": "2026-03-06T22:44:48-06:00",
+          "tree_id": "4ad571d03ae15596485447c33369f202ca9492ff",
+          "url": "https://github.com/EarthSciML/EarthSciData.jl/commit/118f70cc4407d31c0f7c6492f3d78245440392e3"
+        },
+        "date": 1772860130735,
+        "tool": "julia",
+        "benches": [
+          {
+            "name": "NEI Simulator/Serial",
+            "value": 39473466449,
+            "unit": "ns",
+            "extra": "gctime=1809026130\nmemory=24938417176\nallocs=798657801\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
+          },
+          {
+            "name": "NEI Simulator/Threads",
+            "value": 23902306528,
+            "unit": "ns",
+            "extra": "gctime=2687888291\nmemory=24939663976\nallocs=798671553\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
           }
         ]
       }
