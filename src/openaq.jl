@@ -619,7 +619,11 @@ function OpenAQ(
     @parameters t_ref = get_tref(domaininfo) [unit = u"s", description = "Reference time"]
 
     dt = EarthSciMLBase.eltype(domaininfo)
-    itp = DataSetInterpolator{dt}(fs, parameter, starttime, endtime, domaininfo;
+    # OpenAQ data is already on the model grid (same lon/lat edges), so bypass
+    # BSpline regridding (which propagates NaN from empty cells) and just copy.
+    copy_regridder = (dst, src; extrapolate_type=nothing) -> copyto!(dst, src)
+    fswr = FileSetWithRegridder(fs, copy_regridder)
+    itp = DataSetInterpolator{dt}(fswr, parameter, starttime, endtime, domaininfo;
         stream = stream)
 
     eq, param = create_interp_equation(itp, "", t, t_ref, [x, y])
