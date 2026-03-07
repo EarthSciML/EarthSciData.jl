@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1772812296330,
+  "lastUpdate": 1772860051419,
   "repoUrl": "https://github.com/EarthSciML/EarthSciData.jl",
   "entries": {
     "Julia benchmark result": [
@@ -3203,6 +3203,42 @@ window.BENCHMARK_DATA = {
             "value": 21290909375,
             "unit": "ns",
             "extra": "gctime=2092935281\nmemory=24939663976\nallocs=798671553\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "ctessum@gmail.com",
+            "name": "Christopher Tessum",
+            "username": "ctessum"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "f4f5c8982ccdf1e45fd94f7e5b337e656806c925",
+          "message": "Merge pull request #174 from ctessum-claude/add-openaq-loader\n\nFix Float32 domain interpolation and streaming boundary errors",
+          "timestamp": "2026-03-06T22:44:09-06:00",
+          "tree_id": "bb07ac8e6a39ae7193966936d2c28b2ef19f41c9",
+          "url": "https://github.com/EarthSciML/EarthSciData.jl/commit/f4f5c8982ccdf1e45fd94f7e5b337e656806c925"
+        },
+        "date": 1772860050804,
+        "tool": "julia",
+        "benches": [
+          {
+            "name": "NEI Simulator/Serial",
+            "value": 38571651700,
+            "unit": "ns",
+            "extra": "gctime=1559940384\nmemory=24938417176\nallocs=798657801\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
+          },
+          {
+            "name": "NEI Simulator/Threads",
+            "value": 20519398596,
+            "unit": "ns",
+            "extra": "gctime=1862710285\nmemory=24939663976\nallocs=798671553\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
           }
         ]
       }
