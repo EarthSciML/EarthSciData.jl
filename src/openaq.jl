@@ -1,4 +1,8 @@
-export OpenAQ
+export OpenAQ, OpenAQCoupler
+
+struct OpenAQCoupler
+    sys::Any
+end
 
 const OPENAQ_S3_MIRROR = "https://openaq-data-archive.s3.amazonaws.com"
 const OPENAQ_API_BASE = "https://api.openaq.org/v3"
@@ -650,6 +654,7 @@ function OpenAQ(
         name = name,
         initial_conditions = _itp_defaults(all_params),
         metadata = Dict(
+            CoupleType => OpenAQCoupler,
             SysDiscreteEvent => create_updater_sys_event(name, params, starttime),
         ),
     )
