@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1772860132135,
+  "lastUpdate": 1772939611138,
   "repoUrl": "https://github.com/EarthSciML/EarthSciData.jl",
   "entries": {
     "Julia benchmark result": [
@@ -3275,6 +3275,42 @@ window.BENCHMARK_DATA = {
             "value": 23902306528,
             "unit": "ns",
             "extra": "gctime=2687888291\nmemory=24939663976\nallocs=798671553\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "ctessum@gmail.com",
+            "name": "Christopher Tessum",
+            "username": "ctessum"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "35e7bbe3cacf5678d61e831439ad105a1cd5a885",
+          "message": "Merge pull request #178 from EarthSciML/add-openaq-loader\n\nAdd CoupleType to OpenAQ system",
+          "timestamp": "2026-03-07T20:48:53-06:00",
+          "tree_id": "ba48cf11469a7a1aa6b6fb0358c5f17d0d470d23",
+          "url": "https://github.com/EarthSciML/EarthSciData.jl/commit/35e7bbe3cacf5678d61e831439ad105a1cd5a885"
+        },
+        "date": 1772939610299,
+        "tool": "julia",
+        "benches": [
+          {
+            "name": "NEI Simulator/Serial",
+            "value": 40395388961,
+            "unit": "ns",
+            "extra": "gctime=1597194696\nmemory=24938417176\nallocs=798657801\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
+          },
+          {
+            "name": "NEI Simulator/Threads",
+            "value": 22062585708,
+            "unit": "ns",
+            "extra": "gctime=2813054473\nmemory=24939663976\nallocs=798671553\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
           }
         ]
       }
