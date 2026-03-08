@@ -123,6 +123,26 @@ function localpath(fs::FileSet, t::DateTime, varname=nothing)
 end
 
 """
+Download a file with a progress bar, deleting the partial file on error.
+"""
+function _download_with_progress(download_url::AbstractString, path::AbstractString)
+    try
+        prog = Progress(100; desc = "Downloading $(basename(download_url)):", dt = 0.1)
+        Downloads.download(download_url, path,
+            progress = (
+                total::Integer, now::Integer) -> begin
+                prog.n = total
+                ProgressMeter.update!(prog, now)
+            end
+        )
+    catch e
+        rm(path, force = true)
+        rethrow(e)
+    end
+    return path
+end
+
+"""
 $(SIGNATURES)
 
 Check if the specified file exists locally. If not, download it.
@@ -138,19 +158,7 @@ function maybedownload(fs::FileSet, t::DateTime, varname=nothing)
         mkpath(dirname(p))
     end
     u = url(fs, t, varname)
-    try
-        prog = Progress(100; desc = "Downloading $(basename(u)):", dt = 0.1)
-        Downloads.download(u, p,
-            progress = (
-                total::Integer, now::Integer) -> begin
-                prog.n = total
-                ProgressMeter.update!(prog, now)
-            end
-        )
-    catch e # Delete partially downloaded file if an error occurs.
-        rm(p, force = true)
-        rethrow(e)
-    end
+    _download_with_progress(u, p)
     return p
 end
 
