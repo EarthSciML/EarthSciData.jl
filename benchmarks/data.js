@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1772939613239,
+  "lastUpdate": 1772942588497,
   "repoUrl": "https://github.com/EarthSciML/EarthSciData.jl",
   "entries": {
     "Julia benchmark result": [
@@ -3347,6 +3347,42 @@ window.BENCHMARK_DATA = {
             "value": 22311327508,
             "unit": "ns",
             "extra": "gctime=2309818890\nmemory=24939663976\nallocs=798671553\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "ctessum@gmail.com",
+            "name": "Christopher Tessum",
+            "username": "ctessum"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "0567b8263bb284314fce2544343edc067db8e936",
+          "message": "Merge pull request #179 from EarthSciML/fix-ug-m3-unit-scale\n\nFix μg/m³ unit scale factor (1e-6 → 1e-9)",
+          "timestamp": "2026-03-07T21:27:04-06:00",
+          "tree_id": "4ba7e2ecdc6cc8a2e0fca09a2bf843f2684b1e58",
+          "url": "https://github.com/EarthSciML/EarthSciData.jl/commit/0567b8263bb284314fce2544343edc067db8e936"
+        },
+        "date": 1772942587504,
+        "tool": "julia",
+        "benches": [
+          {
+            "name": "NEI Simulator/Serial",
+            "value": 39300707913,
+            "unit": "ns",
+            "extra": "gctime=1547496864\nmemory=24938417176\nallocs=798657801\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
+          },
+          {
+            "name": "NEI Simulator/Threads",
+            "value": 21032425614,
+            "unit": "ns",
+            "extra": "gctime=1905479654\nmemory=24939663976\nallocs=798671553\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
           }
         ]
       }
