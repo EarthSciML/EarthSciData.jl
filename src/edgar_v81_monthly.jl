@@ -106,9 +106,10 @@ struct EDGARv81MonthlyEmisFileSet <: FileSet
         # Download and extract zip
         zip_rpath = _edgar_zip_relpath(substance, sector)
         zip_url = join([mirror, zip_rpath], "/")
-        zip_local = joinpath(download_cache(), replace(mirror, "://" => "_"),
-            replace(zip_rpath, ':' => '_'))
-        extract_dir = zip_local * "_extracted"
+        zip_local = joinpath(download_cache(), "edgar_v81", substance,
+            "bkl_$(sector)_flx_nc.zip")
+        extract_dir = joinpath(download_cache(), "edgar_v81", substance,
+            "bkl_$(sector)_nc")
 
         _edgar_ensure_extracted(zip_url, zip_local, extract_dir)
 

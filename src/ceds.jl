@@ -166,6 +166,19 @@ function relpath(fs::CEDSFileSet, t::DateTime)
     return "input4MIPs/CMIP7/CMIP/PNNL-JGCRI/$(fs.version)/atmos/mon/$(varname)/gn/$(fs.data_version)/$(filename)"
 end
 
+"""
+$(SIGNATURES)
+
+Local cache path for CEDS data files, using a short directory structure
+to avoid exceeding Windows' 260-character MAX_PATH limit.
+"""
+function localpath(fs::CEDSFileSet, t::DateTime, varname=nothing)
+    year = Dates.year(t)
+    y1, y2 = _ceds_chunk_for_year(year)
+    filename = "$(fs.species)-em-anthro_$(fs.version)_gn_$(lpad(y1,4,'0'))01-$(lpad(y2,4,'0'))12.nc"
+    joinpath(download_cache(), "ceds", fs.version, filename)
+end
+
 DataFrequencyInfo(fs::CEDSFileSet) = fs.freq_info
 
 """
