@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1773654686574,
+  "lastUpdate": 1773654707833,
   "repoUrl": "https://github.com/EarthSciML/EarthSciData.jl",
   "entries": {
     "Julia benchmark result": [
@@ -3491,6 +3491,42 @@ window.BENCHMARK_DATA = {
             "value": 21394092031,
             "unit": "ns",
             "extra": "gctime=2064817621\nmemory=24939663976\nallocs=798671553\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "ctessum@gmail.com",
+            "name": "Christopher Tessum",
+            "username": "ctessum"
+          },
+          "committer": {
+            "email": "ctessum@gmail.com",
+            "name": "Christopher Tessum",
+            "username": "ctessum"
+          },
+          "distinct": true,
+          "id": "452ec60086af2122b20d46f44ce820b1c095c5d7",
+          "message": "Add localpath function for CEDS data file caching and update EDGAR download paths",
+          "timestamp": "2026-03-16T14:56:32+05:30",
+          "tree_id": "b46bc8f0d9862759b78afe7683ca4e170ba7a677",
+          "url": "https://github.com/EarthSciML/EarthSciData.jl/commit/452ec60086af2122b20d46f44ce820b1c095c5d7"
+        },
+        "date": 1773654707104,
+        "tool": "julia",
+        "benches": [
+          {
+            "name": "NEI Simulator/Serial",
+            "value": 40014775221,
+            "unit": "ns",
+            "extra": "gctime=1759707697\nmemory=24938417176\nallocs=798657801\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
+          },
+          {
+            "name": "NEI Simulator/Threads",
+            "value": 22243158240,
+            "unit": "ns",
+            "extra": "gctime=3290530174\nmemory=24939663976\nallocs=798671553\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
           }
         ]
       }
