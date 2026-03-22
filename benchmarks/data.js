@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1774187871197,
+  "lastUpdate": 1774210954028,
   "repoUrl": "https://github.com/EarthSciML/EarthSciData.jl",
   "entries": {
     "Julia benchmark result": [
@@ -3563,6 +3563,42 @@ window.BENCHMARK_DATA = {
             "value": 21954698497,
             "unit": "ns",
             "extra": "gctime=2297022937\nmemory=25675081944\nallocs=844635176\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "ctessum@gmail.com",
+            "name": "Christopher Tessum",
+            "username": "ctessum"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "0f7b1d011bacd7d610bd63cb81813e6c03e8a6dd",
+          "message": "Merge pull request #181 from ctessum-claude/add-usgs3dep\n\nAdd USGS 3DEP elevation data source",
+          "timestamp": "2026-03-23T01:26:33+05:30",
+          "tree_id": "2b4d287f11e3de21648ec3ac32cf9d59e1606067",
+          "url": "https://github.com/EarthSciML/EarthSciData.jl/commit/0f7b1d011bacd7d610bd63cb81813e6c03e8a6dd"
+        },
+        "date": 1774210953307,
+        "tool": "julia",
+        "benches": [
+          {
+            "name": "NEI Simulator/Serial",
+            "value": 41786716879,
+            "unit": "ns",
+            "extra": "gctime=1936428479\nmemory=25674056072\nallocs=844635232\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
+          },
+          {
+            "name": "NEI Simulator/Threads",
+            "value": 22864573432,
+            "unit": "ns",
+            "extra": "gctime=3558581488\nmemory=25675081944\nallocs=844635176\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
           }
         ]
       }
