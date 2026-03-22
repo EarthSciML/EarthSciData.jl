@@ -23,6 +23,7 @@ makedocs(;
         "ERA5" => "era5.md",
         "EDGAR v8.1" => "edgar_v81.md",
         "USGS 3DEP" => "usgs3dep.md",
+        "LANDFIRE" => "landfire.md",
         "API" => "api.md",
         "🔗 Benchmarks" => "benchmarks.md"
     ]

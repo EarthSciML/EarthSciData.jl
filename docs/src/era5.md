@@ -35,6 +35,67 @@ Files should be named `era5_pl_YYYY_MM.nc` (one file per month, containing all v
 
 ## Implementation
 
+To use ERA5 data in production, you will need a CDS API key (see [Setup](@ref) above).
+The example below uses a small synthetic dataset to demonstrate the API.
+
+```@example era5
+using EarthSciData, EarthSciMLBase # hide
+using ModelingToolkit, DataFrames # hide
+using ModelingToolkit: t # hide
+using Dates # hide
+using DynamicQuantities # hide
+using DynamicQuantities: dimension # hide
+using NCDatasets # hide
+# hide
+# Generate a small synthetic ERA5 NetCDF file for this example. # hide
+era5_dir = mktempdir() # hide
+lon_vals = Float64.(-130.0:5.0:-60.0) # hide
+lat_vals = Float64.(20.0:5.0:50.0) # hide
+plev_vals = Float64.([1000, 975, 950, 925]) # hide
+time_vals = [DateTime(2022, 1, d, h) for d in 1:31 for h in 0:6:18] # hide
+era5_vars = Dict( # hide
+    "t" => ("K", "Temperature", 260.0, 300.0), # hide
+    "u" => ("m s**-1", "U component of wind", -15.0, 15.0), # hide
+    "v" => ("m s**-1", "V component of wind", -15.0, 15.0), # hide
+    "w" => ("Pa s**-1", "Vertical velocity", -1.0, 1.0), # hide
+    "q" => ("kg kg**-1", "Specific humidity", 0.0, 0.02), # hide
+    "r" => ("%", "Relative humidity", 0.0, 100.0), # hide
+    "z" => ("m**2 s**-2", "Geopotential", 0.0, 1e5), # hide
+    "d" => ("s**-1", "Divergence", -1e-5, 1e-5), # hide
+    "vo" => ("s**-1", "Vorticity (relative)", -1e-5, 1e-5), # hide
+    "o3" => ("kg kg**-1", "Ozone mass mixing ratio", 0.0, 1e-5), # hide
+    "cc" => ("(0 - 1)", "Fraction of cloud cover", 0.0, 1.0), # hide
+    "ciwc" => ("kg kg**-1", "Specific cloud ice water content", 0.0, 1e-5), # hide
+    "clwc" => ("kg kg**-1", "Specific cloud liquid water content", 0.0, 1e-5), # hide
+    "crwc" => ("kg kg**-1", "Specific rain water content", 0.0, 1e-5), # hide
+    "cswc" => ("kg kg**-1", "Specific snow water content", 0.0, 1e-5), # hide
+    "pv" => ("K m**2 kg**-1 s**-1", "Potential vorticity", -1e-5, 1e-5), # hide
+) # hide
+NCDataset(joinpath(era5_dir, "era5_pl_2022_01.nc"), "c") do ds # hide
+    nlon, nlat, nplev, ntime = length(lon_vals), length(lat_vals), length(plev_vals), length(time_vals) # hide
+    defDim(ds, "longitude", nlon) # hide
+    defDim(ds, "latitude", nlat) # hide
+    defDim(ds, "pressure_level", nplev) # hide
+    defDim(ds, "valid_time", ntime) # hide
+    defVar(ds, "longitude", Float64, ("longitude",))[:] = lon_vals # hide
+    defVar(ds, "latitude", Float64, ("latitude",))[:] = lat_vals # hide
+    defVar(ds, "pressure_level", Float64, ("pressure_level",))[:] = plev_vals # hide
+    nctime = defVar(ds, "valid_time", Float64, ("valid_time",), # hide
+        attrib = Dict("units" => "hours since 1900-01-01 00:00:00", # hide
+                      "calendar" => "proleptic_gregorian")) # hide
+    nctime[:] = time_vals # hide
+    for (vname, (units, long_name, vmin, vmax)) in era5_vars # hide
+        ncvar = defVar(ds, vname, Float32, # hide
+            ("longitude", "latitude", "pressure_level", "valid_time"), # hide
+            attrib = Dict("units" => units, "long_name" => long_name)) # hide
+        data = [Float32(vmin + (vmax - vmin) * (i + j + k + ti) / (nlon + nlat + nplev + ntime)) # hide
+                for i in 1:nlon, j in 1:nlat, k in 1:nplev, ti in 1:ntime] # hide
+        ncvar[:, :, :, :] = data # hide
+    end # hide
+end # hide
+nothing # hide
+```
+
 ```@example era5
 using EarthSciData, EarthSciMLBase
 using ModelingToolkit, DataFrames
@@ -44,12 +105,12 @@ using DynamicQuantities
 using DynamicQuantities: dimension
 
 domain = DomainInfo(DateTime(2022, 1, 1), DateTime(2022, 1, 3);
-    latrange = deg2rad(20.0f0):deg2rad(0.25):deg2rad(50.0f0),
-    lonrange = deg2rad(-130.0f0):deg2rad(0.25):deg2rad(-60.0f0),
+    latrange = deg2rad(20.0f0):deg2rad(5.0):deg2rad(50.0f0),
+    lonrange = deg2rad(-130.0f0):deg2rad(5.0):deg2rad(-60.0f0),
     levrange = 1:4,
 )
 
-era5 = ERA5(domain; mirror="file:///tmp/era5_local_test")
+era5 = ERA5(domain; mirror="file://$(era5_dir)")
 ```
 
 ### State Variables
