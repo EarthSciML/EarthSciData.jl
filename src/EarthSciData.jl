@@ -32,6 +32,7 @@ include("netcdf_output.jl")
 include("NCEP-NCAR_Reanalysis.jl")
 include("era5.jl")
 include("openaq.jl")
+include("usgs3dep.jl")
 include("landfire.jl")
 
 # Coupling
