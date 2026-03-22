@@ -26,6 +26,62 @@ end
     @test fs.bbox[4] >= 39.83
 end
 
+@testitem "USGS3DEP offline structural tests" setup = [USGS3DEPSetup] tags = [:usgs3dep] begin
+    # These tests verify FileSet construction, metadata, and URL generation
+    # without any network access.
+    fs = EarthSciData.USGS3DEPFileSet(domain; resolution=10.0)
+
+    # URL format
+    u = EarthSciData.url(fs, DateTime(2018, 11, 8))
+    @test startswith(u, "https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer/exportImage?")
+    @test occursin("bbox=", u)
+    @test occursin("bboxSR=4326", u)
+    @test occursin("format=tiff", u)
+    @test occursin("pixelType=F32", u)
+
+    # relpath encodes bbox and dimensions
+    rp = EarthSciData.relpath(fs, DateTime(2018, 11, 8))
+    @test startswith(rp, "usgs3dep/elevation_")
+    @test endswith(rp, ".tif")
+    @test occursin("$(fs.width)x$(fs.height)", rp)
+
+    # Metadata (computed from bbox, no download needed)
+    md = EarthSciData.loadmetadata(fs, "elevation")
+    @test md.unit_str == "m"
+    @test md.description == "Terrain elevation above sea level"
+    @test md.xdim == 1
+    @test md.ydim == 2
+    @test md.zdim == -1
+    @test md.varsize == [fs.width, fs.height]
+    # Coords in radians, correct hemisphere, sorted ascending
+    @test all(md.coords[1] .< 0)  # western hemisphere
+    @test all(md.coords[2] .> 0)  # northern hemisphere
+    @test issorted(md.coords[1])
+    @test issorted(md.coords[2])
+    # Pixel-centre coordinates should lie within the bounding box
+    @test rad2deg(first(md.coords[1])) > fs.bbox[1]
+    @test rad2deg(last(md.coords[1])) < fs.bbox[3]
+    @test rad2deg(first(md.coords[2])) > fs.bbox[2]
+    @test rad2deg(last(md.coords[2])) < fs.bbox[4]
+
+    # Pixel clamping: very fine resolution should hit the 4000-pixel cap
+    fs_fine = EarthSciData.USGS3DEPFileSet(domain; resolution=0.001)
+    @test fs_fine.width == 4000
+    @test fs_fine.height == 4000
+
+    # Invalid varname should error
+    @test_throws AssertionError EarthSciData.loadmetadata(fs, "temperature")
+
+    # Out-of-coverage domain should warn
+    eu_domain = DomainInfo(
+        DateTime(2018, 11, 8), DateTime(2018, 11, 9);
+        lonrange=deg2rad(10.0):deg2rad(0.1):deg2rad(11.0),
+        latrange=deg2rad(48.0):deg2rad(0.1):deg2rad(49.0),
+        levrange=1:1,
+    )
+    @test_warn "outside USGS 3DEP coverage" EarthSciData.USGS3DEPFileSet(eu_domain)
+end
+
 @testitem "USGS3DEP metadata" setup = [USGS3DEPSetup] tags = [:usgs3dep] begin
     fs = EarthSciData.USGS3DEPFileSet(domain; resolution=10.0)  # coarse for speed
     md = EarthSciData.loadmetadata(fs, "elevation")
@@ -50,8 +106,10 @@ end
     ts, _ = EarthSciMLBase.get_tspan_datetime(domain)
     EarthSciData.loadslice!(data, fs, ts, "elevation")
     # Paradise area elevation should be roughly 100-1000m
-    @test any(data .> 0)
-    @test minimum(data[data.>0]) > 50
+    valid = data[data.>0]
+    # At least 90% of pixels should have valid elevation data
+    @test length(valid) / length(data) > 0.9
+    @test minimum(valid) > 50
     @test maximum(data) < 3000
 end
 

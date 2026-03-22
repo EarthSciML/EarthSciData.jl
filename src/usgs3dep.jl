@@ -30,6 +30,11 @@ $(SIGNATURES)
 
 Create a USGS3DEPFileSet covering the spatial extent of the given domain.
 
+!!! warning "US coverage only"
+    3DEP provides elevation data for the United States (CONUS, Alaska, Hawaii,
+    and US territories). Requests for domains outside this coverage will return
+    nodata values.
+
 # Arguments
 - `domaininfo`: A `DomainInfo` or `GridSpec` providing the spatial domain.
 - `resolution`: Target resolution in arc-seconds (default 1/3 ≈ 10m).
@@ -39,6 +44,12 @@ function USGS3DEPFileSet(domaininfo; resolution=1 / 3)
     grid = _compute_grid(domaininfo, (false, false, false))
     lon_min, lon_max = rad2deg.(extrema(grid[1]))
     lat_min, lat_max = rad2deg.(extrema(grid[2]))
+
+    # Warn if domain falls outside approximate US coverage bounds.
+    if lon_max < -180 || lon_min > -60 || lat_max < 17 || lat_min > 72
+        @warn "Domain appears to be outside USGS 3DEP coverage (US only). " *
+              "Elevation data may be unavailable or filled with nodata values."
+    end
     # Add a small buffer so the data fully covers the domain edges.
     buffer = resolution / 3600  # one pixel worth of buffer
     bbox = (lon_min - buffer, lat_min - buffer, lon_max + buffer, lat_max + buffer)
@@ -139,7 +150,8 @@ Create a ModelingToolkit `System` that provides terrain elevation data from the
 USGS 3D Elevation Program (3DEP).
 
 The system exposes a single variable `elevation` (m) interpolated to the
-simulation coordinates.
+simulation coordinates. Note that 3DEP coverage is limited to the United States
+(CONUS, Alaska, Hawaii, and US territories).
 
 # Arguments
 - `domaininfo`: A `DomainInfo` specifying the spatial and temporal domain.
