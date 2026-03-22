@@ -25,6 +25,7 @@ SciMLBase = "0bca4576-84f4-4d90-8ffe-ffa030f20462"
 Scratch = "6c6a2e73-6563-6170-7368-637461726353"
 Symbolics = "0c5d862f-8b57-4792-8d23-62f2024744c7"
 TestItemRunner = "f8b46487-2199-4994-9208-9a1283c18c0a"
+TiffImages = "731e570b-9d59-4bfa-96dc-6df516fadf69"
 ZipFile = "a5390f91-8eb1-5f08-bee0-b1d1ffed6cea"
 
 [compat]
@@ -55,6 +56,7 @@ Scratch = "1"
 SymbolicIndexingInterface = "0.3.41, 0.4"
 Symbolics = "7"
 TestItemRunner = "1.1.0"
+TiffImages = "0.11.8"
 ZipFile = "0.10"
 julia = "1.10"
 
