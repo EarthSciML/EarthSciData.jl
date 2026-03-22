@@ -21,7 +21,7 @@ struct LANDFIREFileSet <: FileSet
     mirror::String
     product::String   # e.g. "FBFM13" or "FBFM40"
     version::String   # e.g. "LF2022"
-    bbox::NTuple{4,Float64}  # (west, south, east, north) in degrees
+    bbox::NTuple{4, Float64}  # (west, south, east, north) in degrees
     width::Int
     height::Int
     freq_info::DataFrequencyInfo
@@ -33,13 +33,16 @@ $(SIGNATURES)
 Create a LANDFIREFileSet covering the spatial extent of the given domain.
 
 # Arguments
-- `domaininfo`: A `DomainInfo` or `GridSpec` providing the spatial domain.
-- `product`: LANDFIRE product name (default `"FBFM13"` for Anderson 13 fuel models;
-  use `"FBFM40"` for Scott & Burgan 40 fuel models).
-- `version`: LANDFIRE version (default `"LF2022"`).
-- `resolution`: Target resolution in arc-seconds (default 1.0 ≈ 30m).
+
+  - `domaininfo`: A `DomainInfo` or `GridSpec` providing the spatial domain.
+  - `product`: LANDFIRE product name (default `"FBFM13"` for Anderson 13 fuel models;
+    use `"FBFM40"` for Scott & Burgan 40 fuel models).
+  - `version`: LANDFIRE version (default `"LF2022"`).
+  - `resolution`: Target resolution in arc-seconds (default 1.0 ≈ 30m).
+    Note: the LANDFIRE ImageServer limits requests to 4000×4000 pixels.
+    For large domains at fine resolution, the image will be silently downsampled.
 """
-function LANDFIREFileSet(domaininfo; product="FBFM13", version="LF2022", resolution=1.0)
+function LANDFIREFileSet(domaininfo; product = "FBFM13", version = "LF2022", resolution = 1.0)
     grid = _compute_grid(domaininfo, (false, false, false))
     lon_min, lon_max = rad2deg.(extrema(grid[1]))
     lat_min, lat_max = rad2deg.(extrema(grid[2]))
@@ -52,6 +55,8 @@ function LANDFIREFileSet(domaininfo; product="FBFM13", version="LF2022", resolut
     height = clamp(height, 1, 4000)
 
     starttime, endtime = get_tspan_datetime(domaininfo)
+    # Static (time-invariant) dataset: create a single-interval DataFrequencyInfo
+    # spanning the simulation period so that the temporal cache machinery works.
     freq_info = DataFrequencyInfo(
         starttime, endtime - starttime + Day(1), [starttime, endtime + Day(1)])
 
@@ -60,12 +65,12 @@ end
 
 function relpath(fs::LANDFIREFileSet, t::DateTime)
     w, s, e, n = fs.bbox
-    "landfire/$(fs.product)_$(w)_$(s)_$(e)_$(n)_$(fs.width)x$(fs.height).tif"
+    return "landfire/$(fs.product)_$(w)_$(s)_$(e)_$(n)_$(fs.width)x$(fs.height).tif"
 end
 
-function url(fs::LANDFIREFileSet, t::DateTime, varname=nothing)
+function url(fs::LANDFIREFileSet, t::DateTime, varname = nothing)
     w, s, e, n = fs.bbox
-    string(
+    return string(
         fs.mirror,
         "/Landfire_$(fs.version)/$(fs.version)_$(fs.product)_CONUS/ImageServer",
         "/exportImage?",
@@ -76,9 +81,11 @@ function url(fs::LANDFIREFileSet, t::DateTime, varname=nothing)
         "&format=tiff",
         "&pixelType=S16",
         "&interpolation=+RSP_NearestNeighbor",
-        "&f=image",
+        "&f=image"
     )
 end
+
+Base.close(::LANDFIREFileSet) = nothing
 
 DataFrequencyInfo(fs::LANDFIREFileSet)::DataFrequencyInfo = fs.freq_info
 
@@ -89,12 +96,12 @@ function loadmetadata(fs::LANDFIREFileSet, varname)::MetaData
     w, s, e, n = fs.bbox
     dx = (e - w) / fs.width
     dy = (n - s) / fs.height
-    lons = [w + (i - 0.5) * dx for i in 1:fs.width]
-    lats = [s + (j - 0.5) * dy for j in 1:fs.height]
+    lons = [w + (i - 0.5) * dx for i in 1:(fs.width)]
+    lats = [s + (j - 0.5) * dy for j in 1:(fs.height)]
     lons_rad = deg2rad.(lons)
     lats_rad = deg2rad.(lats)
     prj = "+proj=longlat +datum=WGS84 +no_defs"
-    MetaData(
+    return MetaData(
         [lons_rad, lats_rad],
         "1",
         "Fire behavior fuel model (Anderson 13)",
@@ -104,7 +111,7 @@ function loadmetadata(fs::LANDFIREFileSet, varname)::MetaData
         1,    # xdim (lon)
         2,    # ydim (lat)
         -1,   # zdim (none)
-        (false, false, false),
+        (false, false, false)
     )
 end
 
@@ -130,9 +137,9 @@ Nearest-neighbour version of `interpolate_from!`, suitable for categorical
 (integer-valued) data such as fuel model codes.  Uses `BSpline(Constant())`
 instead of `BSpline(Linear())`.
 """
-function _nearest_interpolate_from!(dst::AbstractArray{T,2},
-        src::AbstractArray{T,2}, mta::MetaData, model_grid, domain;
-        extrapolate_type=Flat()) where {T}
+function _nearest_interpolate_from!(dst::AbstractArray{T, 2},
+        src::AbstractArray{T, 2}, mta::MetaData, model_grid, domain;
+        extrapolate_type = Flat()) where {T}
     data_grid = Tuple(knots2range.(mta.coords))
     itp = interpolate!(src, BSpline(Constant()))
     itp = extrapolate(scale(itp, data_grid), extrapolate_type)
@@ -164,32 +171,34 @@ to the simulation coordinates using nearest-neighbour interpolation (appropriate
 for categorical data).
 
 # Arguments
-- `domaininfo`: A `DomainInfo` specifying the spatial and temporal domain.
-- `name`: System name (default `:LANDFIRE`).
-- `product`: LANDFIRE product (default `"FBFM13"` for Anderson 13 fuel models).
-- `version`: LANDFIRE version (default `"LF2022"`).
-- `resolution`: Target resolution in arc-seconds (default 1.0 ≈ 30m).
-- `stream`: Whether to stream data lazily (default `true`).
+
+  - `domaininfo`: A `DomainInfo` specifying the spatial and temporal domain.
+  - `name`: System name (default `:LANDFIRE`).
+  - `product`: LANDFIRE product (default `"FBFM13"` for Anderson 13 fuel models).
+  - `version`: LANDFIRE version (default `"LF2022"`).
+  - `resolution`: Target resolution in arc-seconds (default 1.0 ≈ 30m).
+  - `stream`: Whether to stream data lazily (default `true`).
 
 # Example
+
 ```julia
 using EarthSciData, EarthSciMLBase, ModelingToolkit, Dates
 domain = DomainInfo(
     DateTime(2018, 11, 8), DateTime(2018, 11, 9);
     lonrange = deg2rad(-121.7):deg2rad(0.01):deg2rad(-121.5),
     latrange = deg2rad(39.7):deg2rad(0.01):deg2rad(39.8),
-    levrange = 1:1,
+    levrange = 1:1
 )
 fuel = LANDFIRE(domain)
 ```
 """
-function LANDFIRE(domaininfo::DomainInfo; name=:LANDFIRE,
-        product="FBFM13", version="LF2022", resolution=1.0, stream=true)
+function LANDFIRE(domaininfo::DomainInfo; name = :LANDFIRE,
+        product = "FBFM13", version = "LF2022", resolution = 1.0, stream = true)
     starttime, endtime = get_tspan_datetime(domaininfo)
-    fs = LANDFIREFileSet(domaininfo; product=product, version=version,
-        resolution=resolution)
+    fs = LANDFIREFileSet(domaininfo; product = product, version = version,
+        resolution = resolution)
 
-    @parameters t_ref = get_tref(domaininfo) [unit = u"s", description = "Reference time"]
+    @parameters t_ref=get_tref(domaininfo) [unit = u"s", description = "Reference time"]
     pvs = EarthSciMLBase.pvars(domaininfo)
     pvdict = Dict([Symbol(v) => v for v in pvs]...)
 
@@ -197,15 +206,15 @@ function LANDFIRE(domaininfo::DomainInfo; name=:LANDFIRE,
     metadata = loadmetadata(fs, "fuel_model")
     model_grid = _compute_grid(domaininfo, metadata.staggering)
     regrid_f = (dst::AbstractArray, src::AbstractArray;
-            extrapolate_type=Flat()) -> begin
+        extrapolate_type = Flat()) -> begin
         _nearest_interpolate_from!(dst, src, metadata, model_grid, domaininfo;
-            extrapolate_type=extrapolate_type)
+            extrapolate_type = extrapolate_type)
     end
     fswr = FileSetWithRegridder(fs, regrid_f)
 
     dt = eltype(domaininfo)
     itp = DataSetInterpolator{dt}(
-        fswr, "fuel_model", starttime, endtime, domaininfo; stream=stream)
+        fswr, "fuel_model", starttime, endtime, domaininfo; stream = stream)
     dims = dimnames(itp)
     coords = Num[]
     for dim in dims
@@ -221,12 +230,12 @@ function LANDFIRE(domaininfo::DomainInfo; name=:LANDFIRE,
 
     sys = System(
         eqs, t, vars, params;
-        name=name,
-        initial_conditions=_itp_defaults(params),
-        metadata=Dict(
+        name = name,
+        initial_conditions = _itp_defaults(params),
+        metadata = Dict(
             CoupleType => LANDFIRECoupler,
-            SysDiscreteEvent => create_updater_sys_event(name, params, starttime),
-        ),
+            SysDiscreteEvent => create_updater_sys_event(name, params, starttime)
+        )
     )
     return sys
 end
