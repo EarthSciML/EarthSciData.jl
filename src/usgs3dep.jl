@@ -1,4 +1,4 @@
-export USGS3DEP
+export USGS3DEP, USGS3DEPCoupler
 
 const USGS3DEP_MIRROR = "https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer"
 
@@ -137,6 +137,96 @@ function loadslice!(data::AbstractArray, fs::USGS3DEPFileSet, t::DateTime, varna
     nothing
 end
 
+# ---- Slope computation -------------------------------------------------------
+
+# Earth radius constants for coordinate conversion (matching EarthSciMLBase.coord_trans)
+const _LON2M = 40075.0e3 / 2π   # m/rad – equatorial circumference / 2π
+const _LAT2M = 111.32e3 * 180 / π  # m/rad – meridional arc length per radian
+
+"""
+$(SIGNATURES)
+
+A FileSet that computes terrain slope from USGS 3DEP elevation data.
+
+Wraps a [`USGS3DEPFileSet`](@ref) and computes the dimensionless elevation
+gradient in either the x (east) or y (north) direction using central finite
+differences on the elevation grid, with coordinate conversion from lon/lat
+to metric distances.
+
+The `component` field selects which gradient to compute: `:dzdx` or `:dzdy`.
+"""
+struct USGS3DEPSlopeFileSet <: FileSet
+    parent::USGS3DEPFileSet
+    component::Symbol  # :dzdx or :dzdy
+end
+
+mirror(fs::USGS3DEPSlopeFileSet) = mirror(fs.parent)
+relpath(fs::USGS3DEPSlopeFileSet, t::DateTime) = relpath(fs.parent, t)
+url(fs::USGS3DEPSlopeFileSet, t::DateTime, varname=nothing) = url(fs.parent, t, varname)
+DataFrequencyInfo(fs::USGS3DEPSlopeFileSet)::DataFrequencyInfo = DataFrequencyInfo(fs.parent)
+varnames(fs::USGS3DEPSlopeFileSet) = [string(fs.component)]
+
+function loadmetadata(fs::USGS3DEPSlopeFileSet, varname)::MetaData
+    elev_md = loadmetadata(fs.parent, "elevation")
+    desc = fs.component == :dzdx ?
+           "Terrain slope in x (east) direction (dimensionless, rise/run)" :
+           "Terrain slope in y (north) direction (dimensionless, rise/run)"
+    MetaData(
+        elev_md.coords, "1", desc,
+        elev_md.dimnames, elev_md.varsize, elev_md.native_sr,
+        elev_md.xdim, elev_md.ydim, elev_md.zdim, elev_md.staggering,
+    )
+end
+
+function loadslice!(data::AbstractArray, fs::USGS3DEPSlopeFileSet, t::DateTime, varname)
+    nlon, nlat = size(data)
+    # Load elevation into a temporary array.
+    elev = zeros(Float64, nlon, nlat)
+    loadslice!(elev, fs.parent, t, "elevation")
+
+    # Get pixel-centre coordinates (radians) from metadata.
+    md = loadmetadata(fs.parent, "elevation")
+    lons_rad = md.coords[1]
+    lats_rad = md.coords[2]
+
+    if fs.component == :dzdx
+        for j in 1:nlat
+            # Metric scale factor for this latitude row.
+            dx_per_rad = _LON2M * cos(lats_rad[j])  # m/rad
+            for i in 1:nlon
+                if i == 1
+                    dz = elev[2, j] - elev[1, j]
+                    dlon = lons_rad[2] - lons_rad[1]
+                elseif i == nlon
+                    dz = elev[nlon, j] - elev[nlon - 1, j]
+                    dlon = lons_rad[nlon] - lons_rad[nlon - 1]
+                else
+                    dz = elev[i + 1, j] - elev[i - 1, j]
+                    dlon = lons_rad[i + 1] - lons_rad[i - 1]
+                end
+                data[i, j] = dz / (dlon * dx_per_rad)
+            end
+        end
+    else  # :dzdy
+        for j in 1:nlat
+            for i in 1:nlon
+                if j == 1
+                    dz = elev[i, 2] - elev[i, 1]
+                    dlat = lats_rad[2] - lats_rad[1]
+                elseif j == nlat
+                    dz = elev[i, nlat] - elev[i, nlat - 1]
+                    dlat = lats_rad[nlat] - lats_rad[nlat - 1]
+                else
+                    dz = elev[i, j + 1] - elev[i, j - 1]
+                    dlat = lats_rad[j + 1] - lats_rad[j - 1]
+                end
+                data[i, j] = dz / (dlat * _LAT2M)
+            end
+        end
+    end
+    nothing
+end
+
 # ---- ModelingToolkit integration ---------------------------------------------
 
 struct USGS3DEPCoupler
@@ -146,11 +236,18 @@ end
 """
 $(SIGNATURES)
 
-Create a ModelingToolkit `System` that provides terrain elevation data from the
-USGS 3D Elevation Program (3DEP).
+Create a ModelingToolkit `System` that provides terrain elevation and slope data
+from the USGS 3D Elevation Program (3DEP).
 
-The system exposes a single variable `elevation` (m) interpolated to the
-simulation coordinates. Note that 3DEP coverage is limited to the United States
+The system exposes three variables interpolated to the simulation coordinates:
+- `elevation` (m): terrain elevation above sea level
+- `dzdx` (dimensionless): terrain slope in the x (east) direction (rise/run)
+- `dzdy` (dimensionless): terrain slope in the y (north) direction (rise/run)
+
+Slopes are computed from the elevation grid using central finite differences
+with coordinate conversion from lon/lat to metric distances.
+
+Note that 3DEP coverage is limited to the United States
 (CONUS, Alaska, Hawaii, and US territories).
 
 # Arguments
@@ -180,20 +277,34 @@ function USGS3DEP(domaininfo::DomainInfo; name=:USGS3DEP, resolution=1 / 3, stre
     pvdict = Dict([Symbol(v) => v for v in pvs]...)
 
     dt = eltype(domaininfo)
-    itp = DataSetInterpolator{dt}(
+
+    # Build coordinate list (shared by all interpolators).
+    elev_itp = DataSetInterpolator{dt}(
         fs, "elevation", starttime, endtime, domaininfo; stream=stream)
-    dims = dimnames(itp)
+    dims = dimnames(elev_itp)
     coords = Num[]
     for dim in dims
         d = Symbol(dim)
         @assert d ∈ keys(pvdict) "USGS3DEP coordinate $d not found in domaininfo coordinates ($(pvs))."
         push!(coords, pvdict[d])
     end
-    eq, param = create_interp_equation(itp, "", t, t_ref, coords)
 
-    params = Any[t_ref, param]
-    vars = Num[eq.lhs]
-    eqs = Equation[eq]
+    # Elevation equation.
+    eq_elev, p_elev = create_interp_equation(elev_itp, "", t, t_ref, coords)
+    params = Any[t_ref, p_elev]
+    vars = Num[eq_elev.lhs]
+    eqs = Equation[eq_elev]
+
+    # Slope equations (dzdx and dzdy).
+    for component in (:dzdx, :dzdy)
+        slope_fs = USGS3DEPSlopeFileSet(fs, component)
+        slope_itp = DataSetInterpolator{dt}(
+            slope_fs, string(component), starttime, endtime, domaininfo; stream=stream)
+        eq_slope, p_slope = create_interp_equation(slope_itp, "", t, t_ref, coords)
+        push!(eqs, eq_slope)
+        push!(vars, eq_slope.lhs)
+        push!(params, p_slope)
+    end
 
     sys = System(
         eqs, t, vars, params;
