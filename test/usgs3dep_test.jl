@@ -125,11 +125,131 @@ end
     @test 50 < val < 3000
 end
 
+@testitem "USGS3DEP slope FileSet structural" setup = [USGS3DEPSetup] tags = [:usgs3dep] begin
+    fs = EarthSciData.USGS3DEPFileSet(domain; resolution=10.0)
+
+    # dzdx
+    slope_x = EarthSciData.USGS3DEPSlopeFileSet(fs, :dzdx)
+    @test EarthSciData.varnames(slope_x) == ["dzdx"]
+    md_x = EarthSciData.loadmetadata(slope_x, "dzdx")
+    @test md_x.unit_str == "1"
+    @test md_x.varsize == [fs.width, fs.height]
+    @test occursin("east", md_x.description)
+    # Same download path as parent
+    @test EarthSciData.relpath(slope_x, DateTime(2018, 11, 8)) ==
+          EarthSciData.relpath(fs, DateTime(2018, 11, 8))
+
+    # dzdy
+    slope_y = EarthSciData.USGS3DEPSlopeFileSet(fs, :dzdy)
+    @test EarthSciData.varnames(slope_y) == ["dzdy"]
+    md_y = EarthSciData.loadmetadata(slope_y, "dzdy")
+    @test md_y.unit_str == "1"
+    @test occursin("north", md_y.description)
+end
+
+@testitem "USGS3DEP slope data loading" setup = [USGS3DEPSetup] tags = [:usgs3dep] begin
+    fs = EarthSciData.USGS3DEPFileSet(domain; resolution=10.0)
+    md = EarthSciData.loadmetadata(fs, "elevation")
+    ts, _ = EarthSciMLBase.get_tspan_datetime(domain)
+
+    dzdx = zeros(Float64, md.varsize...)
+    slope_x = EarthSciData.USGS3DEPSlopeFileSet(fs, :dzdx)
+    EarthSciData.loadslice!(dzdx, slope_x, ts, "dzdx")
+
+    dzdy = zeros(Float64, md.varsize...)
+    slope_y = EarthSciData.USGS3DEPSlopeFileSet(fs, :dzdy)
+    EarthSciData.loadslice!(dzdy, slope_y, ts, "dzdy")
+
+    # Slopes should be finite and physically reasonable
+    # (Paradise, CA area has mountains; slopes up to ~1.0 = 45°)
+    @test all(isfinite, dzdx)
+    @test all(isfinite, dzdy)
+    @test maximum(abs, dzdx) > 0.001  # not completely flat
+    @test maximum(abs, dzdy) > 0.001
+    @test maximum(abs, dzdx) < 10.0   # not unreasonably steep
+    @test maximum(abs, dzdy) < 10.0
+
+    # Combined slope magnitude
+    tanphi = sqrt.(dzdx .^ 2 .+ dzdy .^ 2)
+    @test maximum(tanphi) > 0.01  # mountainous terrain has noticeable slope
+    @test maximum(tanphi) < 10.0
+end
+
+@testitem "USGS3DEP slope analytical test" setup = [USGS3DEPSetup] tags = [:usgs3dep] begin
+    # Verify slope computation against synthetic elevation ramps.
+    # Test each direction independently to avoid cross-terms from
+    # the latitude-dependent metric in the x direction.
+    fs = EarthSciData.USGS3DEPFileSet(domain; resolution=10.0)
+    md = EarthSciData.loadmetadata(fs, "elevation")
+    nlon, nlat = md.varsize
+    lons_rad = md.coords[1]
+    lats_rad = md.coords[2]
+
+    # --- Test dzdx: elevation ramp that only varies in longitude ---
+    target_slope_x = 0.15
+    elev_x = zeros(Float64, nlon, nlat)
+    for j in 1:nlat
+        for i in 1:nlon
+            x_m = EarthSciData._LON2M * cos(lats_rad[j]) * (lons_rad[i] - lons_rad[1])
+            elev_x[i, j] = target_slope_x * x_m
+        end
+    end
+    dzdx = zeros(Float64, nlon, nlat)
+    for j in 1:nlat
+        dx_per_rad = EarthSciData._LON2M * cos(lats_rad[j])
+        for i in 1:nlon
+            if i == 1
+                dz = elev_x[2, j] - elev_x[1, j]
+                dlon = lons_rad[2] - lons_rad[1]
+            elseif i == nlon
+                dz = elev_x[nlon, j] - elev_x[nlon - 1, j]
+                dlon = lons_rad[nlon] - lons_rad[nlon - 1]
+            else
+                dz = elev_x[i + 1, j] - elev_x[i - 1, j]
+                dlon = lons_rad[i + 1] - lons_rad[i - 1]
+            end
+            dzdx[i, j] = dz / (dlon * dx_per_rad)
+        end
+    end
+    # Interior points should recover the target slope.
+    @test all(abs.(dzdx[2:end-1, :] .- target_slope_x) .< 1e-6)
+
+    # --- Test dzdy: elevation ramp that only varies in latitude ---
+    target_slope_y = -0.08
+    elev_y = zeros(Float64, nlon, nlat)
+    for j in 1:nlat
+        for i in 1:nlon
+            y_m = EarthSciData._LAT2M * (lats_rad[j] - lats_rad[1])
+            elev_y[i, j] = target_slope_y * y_m
+        end
+    end
+    dzdy = zeros(Float64, nlon, nlat)
+    for j in 1:nlat
+        for i in 1:nlon
+            if j == 1
+                dz = elev_y[i, 2] - elev_y[i, 1]
+                dlat = lats_rad[2] - lats_rad[1]
+            elseif j == nlat
+                dz = elev_y[i, nlat] - elev_y[i, nlat - 1]
+                dlat = lats_rad[nlat] - lats_rad[nlat - 1]
+            else
+                dz = elev_y[i, j + 1] - elev_y[i, j - 1]
+                dlat = lats_rad[j + 1] - lats_rad[j - 1]
+            end
+            dzdy[i, j] = dz / (dlat * EarthSciData._LAT2M)
+        end
+    end
+    @test all(abs.(dzdy[:, 2:end-1] .- target_slope_y) .< 1e-6)
+end
+
 @testitem "USGS3DEP System" setup = [USGS3DEPSetup] tags = [:usgs3dep] begin
+    using Symbolics
     sys = USGS3DEP(domain; resolution=10.0)
     @test sys isa ModelingToolkit.AbstractSystem
-    @test length(equations(sys)) >= 1
-    # Check that the elevation variable exists
+    @test length(equations(sys)) == 3  # elevation + dzdx + dzdy
+    # Check that all three variables exist
     eq_names = [Symbolics.tosymbol(eq.lhs, escape=false) for eq in equations(sys)]
     @test :elevation ∈ eq_names
+    @test :dzdx ∈ eq_names
+    @test :dzdy ∈ eq_names
 end
