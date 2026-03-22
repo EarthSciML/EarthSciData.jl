@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1773654707833,
+  "lastUpdate": 1774187871197,
   "repoUrl": "https://github.com/EarthSciML/EarthSciData.jl",
   "entries": {
     "Julia benchmark result": [
@@ -3527,6 +3527,42 @@ window.BENCHMARK_DATA = {
             "value": 22243158240,
             "unit": "ns",
             "extra": "gctime=3290530174\nmemory=24939663976\nallocs=798671553\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "ctessum@gmail.com",
+            "name": "Christopher Tessum",
+            "username": "ctessum"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "fc50a8fad907caf0204277db4fc77c62fc8c2e39",
+          "message": "Merge pull request #182 from ctessum-claude/add-landfire\n\nAdd LANDFIRE fuel model data source",
+          "timestamp": "2026-03-22T19:03:07+05:30",
+          "tree_id": "1e56dea56f7cec9f9ba87ffcb9b90bfc9e21f8a4",
+          "url": "https://github.com/EarthSciML/EarthSciData.jl/commit/fc50a8fad907caf0204277db4fc77c62fc8c2e39"
+        },
+        "date": 1774187870485,
+        "tool": "julia",
+        "benches": [
+          {
+            "name": "NEI Simulator/Serial",
+            "value": 41308157878,
+            "unit": "ns",
+            "extra": "gctime=1680812511\nmemory=25674056072\nallocs=844635232\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
+          },
+          {
+            "name": "NEI Simulator/Threads",
+            "value": 21954698497,
+            "unit": "ns",
+            "extra": "gctime=2297022937\nmemory=25675081944\nallocs=844635176\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
           }
         ]
       }
