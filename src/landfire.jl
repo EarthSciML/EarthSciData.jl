@@ -3,6 +3,51 @@ export LANDFIRE
 const LANDFIRE_MIRROR = "https://lfps.usgs.gov/arcgis/rest/services"
 
 """
+Compute the WGS84 bounding box `(west, south, east, north)` in **degrees**
+for the given domain, handling arbitrary projections.
+
+For longlat domains the grid extrema are converted from radians to degrees.
+For projected domains (e.g. LCC) every point along the four edges of the
+domain rectangle is transformed to WGS84 and the envelope is returned.
+"""
+function _domain_bbox_wgs84(domaininfo)
+    grid = _compute_grid(domaininfo, (false, false, false))
+    sr = _spatial_ref(domaininfo)
+
+    if sr == _LONLAT_SR
+        lon_min, lon_max = rad2deg.(extrema(grid[1]))
+        lat_min, lat_max = rad2deg.(extrema(grid[2]))
+    else
+        to_lonlat = Proj.Transformation(
+            "+proj=pipeline +step +inv " * sr * " +step " * _LONLAT_SR)
+        xs, ys = grid[1], grid[2]
+        lon_vals = Float64[]
+        lat_vals = Float64[]
+        for x in (first(xs), last(xs))
+            for y in (first(ys), last(ys))
+                lo, la = to_lonlat(x, y)
+                push!(lon_vals, rad2deg(lo)); push!(lat_vals, rad2deg(la))
+            end
+        end
+        for x in xs
+            lo, la = to_lonlat(x, first(ys))
+            push!(lon_vals, rad2deg(lo)); push!(lat_vals, rad2deg(la))
+            lo, la = to_lonlat(x, last(ys))
+            push!(lon_vals, rad2deg(lo)); push!(lat_vals, rad2deg(la))
+        end
+        for y in ys
+            lo, la = to_lonlat(first(xs), y)
+            push!(lon_vals, rad2deg(lo)); push!(lat_vals, rad2deg(la))
+            lo, la = to_lonlat(last(xs), y)
+            push!(lon_vals, rad2deg(lo)); push!(lat_vals, rad2deg(la))
+        end
+        lon_min, lon_max = extrema(lon_vals)
+        lat_min, lat_max = extrema(lat_vals)
+    end
+    return (lon_min, lat_min, lon_max, lat_max)
+end
+
+"""
 $(SIGNATURES)
 
 A FileSet for LANDFIRE (Landscape Fire and Resource Management Planning Tools)
@@ -43,9 +88,7 @@ Create a LANDFIREFileSet covering the spatial extent of the given domain.
     For large domains at fine resolution, the image will be silently downsampled.
 """
 function LANDFIREFileSet(domaininfo; product = "FBFM13", version = "LF2022", resolution = 1.0)
-    grid = _compute_grid(domaininfo, (false, false, false))
-    lon_min, lon_max = rad2deg.(extrema(grid[1]))
-    lat_min, lat_max = rad2deg.(extrema(grid[2]))
+    lon_min, lat_min, lon_max, lat_max = _domain_bbox_wgs84(domaininfo)
     buffer = resolution / 3600
     bbox = (lon_min - buffer, lat_min - buffer, lon_max + buffer, lat_max + buffer)
 
@@ -216,12 +259,7 @@ function LANDFIRE(domaininfo::DomainInfo; name = :LANDFIRE,
     itp = DataSetInterpolator{dt}(
         fswr, "fuel_model", starttime, endtime, domaininfo; stream = stream)
     dims = dimnames(itp)
-    coords = Num[]
-    for dim in dims
-        d = Symbol(dim)
-        @assert d ∈ keys(pvdict) "LANDFIRE coordinate $d not found in domaininfo coordinates ($(pvs))."
-        push!(coords, pvdict[d])
-    end
+    coords = _match_domain_coords(dims, pvdict, pvs)
     eq, param = create_interp_equation(itp, "", t, t_ref, coords)
 
     params = Any[t_ref, param]
