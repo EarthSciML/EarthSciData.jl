@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1774293781304,
+  "lastUpdate": 1774301303116,
   "repoUrl": "https://github.com/EarthSciML/EarthSciData.jl",
   "entries": {
     "Julia benchmark result": [
@@ -3671,6 +3671,42 @@ window.BENCHMARK_DATA = {
             "value": 21581228113,
             "unit": "ns",
             "extra": "gctime=1770719260\nmemory=25675081944\nallocs=844635176\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "ctessum@gmail.com",
+            "name": "Christopher Tessum",
+            "username": "ctessum"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "365d5c0c43b98e7b85789b658bd230ac4a7ce36b",
+          "message": "Merge pull request #185 from ctessum-claude/landfire-projection-support\n\nSupport non-lonlat domain projections in LANDFIRE",
+          "timestamp": "2026-03-23T15:49:52-05:00",
+          "tree_id": "68de8744d0586131995bdaab9ea6b26d8dcbba0a",
+          "url": "https://github.com/EarthSciML/EarthSciData.jl/commit/365d5c0c43b98e7b85789b658bd230ac4a7ce36b"
+        },
+        "date": 1774301301690,
+        "tool": "julia",
+        "benches": [
+          {
+            "name": "NEI Simulator/Serial",
+            "value": 42987390903,
+            "unit": "ns",
+            "extra": "gctime=1874572023\nmemory=25674056072\nallocs=844635232\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
+          },
+          {
+            "name": "NEI Simulator/Threads",
+            "value": 24267722627,
+            "unit": "ns",
+            "extra": "gctime=2409631500\nmemory=25675081944\nallocs=844635176\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
           }
         ]
       }
