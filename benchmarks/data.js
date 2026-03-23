@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1774224827723,
+  "lastUpdate": 1774293781304,
   "repoUrl": "https://github.com/EarthSciML/EarthSciData.jl",
   "entries": {
     "Julia benchmark result": [
@@ -3635,6 +3635,42 @@ window.BENCHMARK_DATA = {
             "value": 60892406007,
             "unit": "ns",
             "extra": "gctime=2413824946\nmemory=25675081944\nallocs=844635176\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "ctessum@gmail.com",
+            "name": "Christopher Tessum",
+            "username": "ctessum"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "b8f9d4276f8443117137ba1b45021bc5cd4b9487",
+          "message": "Merge pull request #184 from ctessum-claude/fix-usgs3dep-projection-support\n\nSupport non-lonlat domain projections in USGS3DEP",
+          "timestamp": "2026-03-23T13:45:58-05:00",
+          "tree_id": "240a3671131d7272e5da87d97eaaa994a0d83104",
+          "url": "https://github.com/EarthSciML/EarthSciData.jl/commit/b8f9d4276f8443117137ba1b45021bc5cd4b9487"
+        },
+        "date": 1774293780609,
+        "tool": "julia",
+        "benches": [
+          {
+            "name": "NEI Simulator/Serial",
+            "value": 41919918399,
+            "unit": "ns",
+            "extra": "gctime=1691782416\nmemory=25674056072\nallocs=844635232\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
+          },
+          {
+            "name": "NEI Simulator/Threads",
+            "value": 21581228113,
+            "unit": "ns",
+            "extra": "gctime=1770719260\nmemory=25675081944\nallocs=844635176\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
           }
         ]
       }
