@@ -191,8 +191,10 @@ struct MetaData
 end
 
 function proj_trans(metadata::MetaData, domain)
+    # Pipeline: inverse of domain projection (domain coords → geographic lon/lat),
+    # then forward data projection (geographic lon/lat → data native coords).
     Proj.Transformation(
-        "+proj=pipeline +step " *
+        "+proj=pipeline +step +inv " *
         _spatial_ref(domain) *
         " +step " *
         metadata.native_sr,
