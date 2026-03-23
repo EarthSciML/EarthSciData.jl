@@ -101,3 +101,68 @@ end
     eq_names=[Symbolics.tosymbol(eq.lhs, escape = false) for eq in equations(sys)]
     @test :fuel_model ∈ eq_names
 end
+
+# ---- LCC (Lambert Conformal Conic) projection tests -------------------------
+
+@testsnippet LANDFIRELCCSetup begin
+    using EarthSciData
+    using EarthSciMLBase
+    using ModelingToolkit
+    using Dates
+    using Proj
+
+    lcc_sr = "+proj=lcc +lat_1=30.0 +lat_2=60.0 +lat_0=38.999996 +lon_0=-97.0 +x_0=0 +y_0=0 +a=6370000 +b=6370000 +to_meter=1"
+
+    # Transform Paradise, CA centre to LCC coordinates
+    trans = Proj.Transformation(
+        "+proj=pipeline +step +proj=longlat +datum=WGS84 +no_defs +step " * lcc_sr)
+    x_center, y_center = trans(deg2rad(-121.6), deg2rad(39.78))
+
+    domain_lcc = DomainInfo(
+        DateTime(2018, 11, 8),
+        DateTime(2018, 11, 9);
+        xrange = (x_center - 5000):1000:(x_center + 5000),
+        yrange = (y_center - 5000):1000:(y_center + 5000),
+        levrange = 1:1,
+        spatial_ref = lcc_sr
+    )
+end
+
+@testitem "LANDFIRE LCC bbox helper" setup=[LANDFIRELCCSetup] tags=[:landfire] begin
+    lon_min, lat_min, lon_max, lat_max = EarthSciData._domain_bbox_wgs84(domain_lcc)
+    @test lon_min < -121.6 < lon_max
+    @test lat_min < 39.78 < lat_max
+    # Bbox should be reasonable (not huge)
+    @test lon_max - lon_min < 1.0
+    @test lat_max - lat_min < 1.0
+end
+
+@testitem "LANDFIRE LCC FileSet construction" setup=[LANDFIRELCCSetup] tags=[:landfire] begin
+    fs = EarthSciData.LANDFIREFileSet(domain_lcc)
+    @test fs.product == "FBFM13"
+    @test fs.bbox[1] < -121.6 < fs.bbox[3]
+    @test fs.bbox[2] < 39.78 < fs.bbox[4]
+    @test fs.width > 0
+    @test fs.height > 0
+end
+
+@testitem "LANDFIRE LCC data loading" setup=[LANDFIRELCCSetup] tags=[:landfire] begin
+    fs = EarthSciData.LANDFIREFileSet(domain_lcc; resolution = 10.0)
+    md = EarthSciData.loadmetadata(fs, "fuel_model")
+    data = zeros(Float32, md.varsize...)
+    ts, _ = EarthSciMLBase.get_tspan_datetime(domain_lcc)
+    EarthSciData.loadslice!(data, fs, ts, "fuel_model")
+    valid_codes = Set([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13,
+        91, 92, 93, 98, 99])
+    unique_vals = Set(round.(Int, unique(data)))
+    @test length(unique_vals) > 1
+    @test all(v -> v in valid_codes, unique_vals)
+end
+
+@testitem "LANDFIRE LCC System" setup=[LANDFIRELCCSetup] tags=[:landfire] begin
+    sys = LANDFIRE(domain_lcc; resolution = 10.0)
+    @test sys isa ModelingToolkit.AbstractSystem
+    @test length(equations(sys)) >= 1
+    eq_names = [Symbolics.tosymbol(eq.lhs, escape = false) for eq in equations(sys)]
+    @test :fuel_model ∈ eq_names
+end
