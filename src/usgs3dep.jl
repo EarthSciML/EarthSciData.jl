@@ -2,6 +2,8 @@ export USGS3DEP, USGS3DEPCoupler
 
 const USGS3DEP_MIRROR = "https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer"
 
+const _LONLAT_SR = "+proj=longlat +datum=WGS84 +no_defs"
+
 """
 $(SIGNATURES)
 
@@ -42,8 +44,45 @@ Create a USGS3DEPFileSet covering the spatial extent of the given domain.
 """
 function USGS3DEPFileSet(domaininfo; resolution=1 / 3)
     grid = _compute_grid(domaininfo, (false, false, false))
-    lon_min, lon_max = rad2deg.(extrema(grid[1]))
-    lat_min, lat_max = rad2deg.(extrema(grid[2]))
+
+    # Convert domain grid coordinates to lon-lat degrees for the API request.
+    domain_sr = _spatial_ref(domaininfo)
+    if domain_sr == _LONLAT_SR
+        # Domain is already in lon-lat radians.
+        lon_min, lon_max = rad2deg.(extrema(grid[1]))
+        lat_min, lat_max = rad2deg.(extrema(grid[2]))
+    else
+        # Domain uses a projected CRS — transform corners to lon-lat.
+        # Use +inv on the domain step to go from projected coords → geographic.
+        to_lonlat = Proj.Transformation(
+            "+proj=pipeline +step +inv " * domain_sr * " +step " * _LONLAT_SR)
+        xs, ys = grid[1], grid[2]
+        # Transform all corner combinations to handle rotated grids.
+        lon_vals = Float64[]
+        lat_vals = Float64[]
+        for x in (first(xs), last(xs))
+            for y in (first(ys), last(ys))
+                lo, la = to_lonlat(x, y)
+                push!(lon_vals, rad2deg(lo))
+                push!(lat_vals, rad2deg(la))
+            end
+        end
+        # Also sample edges to capture curvature for large domains.
+        for x in xs
+            lo, la = to_lonlat(x, first(ys))
+            push!(lon_vals, rad2deg(lo)); push!(lat_vals, rad2deg(la))
+            lo, la = to_lonlat(x, last(ys))
+            push!(lon_vals, rad2deg(lo)); push!(lat_vals, rad2deg(la))
+        end
+        for y in ys
+            lo, la = to_lonlat(first(xs), y)
+            push!(lon_vals, rad2deg(lo)); push!(lat_vals, rad2deg(la))
+            lo, la = to_lonlat(last(xs), y)
+            push!(lon_vals, rad2deg(lo)); push!(lat_vals, rad2deg(la))
+        end
+        lon_min, lon_max = extrema(lon_vals)
+        lat_min, lat_max = extrema(lat_vals)
+    end
 
     # Warn if domain falls outside approximate US coverage bounds.
     if lon_max < -180 || lon_min > -60 || lat_max < 17 || lat_min > 72
@@ -105,14 +144,13 @@ function loadmetadata(fs::USGS3DEPFileSet, varname)::MetaData
     # Convert to radians.
     lons_rad = deg2rad.(lons)
     lats_rad = deg2rad.(lats)
-    prj = "+proj=longlat +datum=WGS84 +no_defs"
     MetaData(
         [lons_rad, lats_rad],
         "m",
         "Terrain elevation above sea level",
         ["lon", "lat"],
         [length(lons_rad), length(lats_rad)],
-        prj,
+        _LONLAT_SR,
         1,    # xdim (lon)
         2,    # ydim (lat)
         -1,   # zdim (none)
@@ -247,6 +285,12 @@ The system exposes three variables interpolated to the simulation coordinates:
 Slopes are computed from the elevation grid using central finite differences
 with coordinate conversion from lon/lat to metric distances.
 
+The domain may use any coordinate reference system (lon-lat, UTM, Lambert
+Conformal Conic, etc.). The domain bounding box is automatically reprojected
+to WGS84 for the USGS API request, and coordinate transforms between the
+domain CRS and the data's native lon-lat grid are handled by the interpolation
+infrastructure.
+
 Note that 3DEP coverage is limited to the United States
 (CONUS, Alaska, Hawaii, and US territories).
 
@@ -278,16 +322,13 @@ function USGS3DEP(domaininfo::DomainInfo; name=:USGS3DEP, resolution=1 / 3, stre
 
     dt = eltype(domaininfo)
 
-    # Build coordinate list (shared by all interpolators).
+    # Build coordinate list. The data is always in lon-lat, but the domain
+    # may use x/y (projected CRS). Map domain coordinate names to the data
+    # dimension names so the interpolator can apply coord_trans automatically.
     elev_itp = DataSetInterpolator{dt}(
         fs, "elevation", starttime, endtime, domaininfo; stream=stream)
-    dims = dimnames(elev_itp)
-    coords = Num[]
-    for dim in dims
-        d = Symbol(dim)
-        @assert d ∈ keys(pvdict) "USGS3DEP coordinate $d not found in domaininfo coordinates ($(pvs))."
-        push!(coords, pvdict[d])
-    end
+    dims = dimnames(elev_itp)  # ["lon", "lat"] from the data metadata
+    coords = _match_domain_coords(dims, pvdict, pvs)
 
     # Elevation equation.
     eq_elev, p_elev = create_interp_equation(elev_itp, "", t, t_ref, coords)
@@ -316,4 +357,29 @@ function USGS3DEP(domaininfo::DomainInfo; name=:USGS3DEP, resolution=1 / 3, stre
         ),
     )
     return sys
+end
+
+"""
+Map data dimension names (e.g. ["lon", "lat"]) to domain coordinate variables.
+
+For lon-lat domains the mapping is direct (lon→lon, lat→lat).
+For projected domains where the domain has `x` and `y` variables,
+`lon` maps to `x` and `lat` maps to `y`.  The coordinate transform
+between the domain CRS and the data CRS is handled by `coord_trans`
+inside `DataSetInterpolator`.
+"""
+function _match_domain_coords(dims::Vector{String}, pvdict, pvs)
+    # Mapping from data dim names to possible domain variable names.
+    _DIM_MAP = Dict("lon" => [:lon, :x], "lat" => [:lat, :y])
+    coords = Num[]
+    for dim in dims
+        candidates = get(_DIM_MAP, dim, [Symbol(dim)])
+        matched = findfirst(c -> c ∈ keys(pvdict), candidates)
+        if matched === nothing
+            error("USGS3DEP coordinate '$dim' could not be matched to any domain " *
+                  "coordinate. Domain has: $(pvs). Expected one of: $(candidates).")
+        end
+        push!(coords, pvdict[candidates[matched]])
+    end
+    return coords
 end

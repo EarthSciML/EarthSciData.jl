@@ -253,3 +253,100 @@ end
     @test :dzdx ∈ eq_names
     @test :dzdy ∈ eq_names
 end
+
+# ---- Tests with Lambert Conformal Conic (LCC) projected domain ----
+
+@testsnippet USGS3DEPLCCSetup begin
+    using EarthSciData
+    using EarthSciMLBase
+    using ModelingToolkit
+    using Dates
+    using Proj
+
+    # LCC projection centered on Paradise, CA area.
+    lcc_sr = "+proj=lcc +lat_1=33 +lat_2=45 +lat_0=39.78 +lon_0=-121.6 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
+
+    # Transform the lon-lat domain corners to LCC coordinates.
+    lonlat_sr = "+proj=longlat +datum=WGS84 +no_defs"
+    to_lcc = Proj.Transformation(
+        "+proj=pipeline +step +inv " * lonlat_sr * " +step " * lcc_sr)
+    x_sw, y_sw = to_lcc(deg2rad(-121.65), deg2rad(39.73))
+    x_ne, y_ne = to_lcc(deg2rad(-121.55), deg2rad(39.83))
+
+    # Build a domain in LCC coordinates (~100m grid spacing).
+    dx = 100.0
+    lcc_domain = DomainInfo(
+        DateTime(2018, 11, 8),
+        DateTime(2018, 11, 9);
+        xrange=x_sw:dx:x_ne,
+        yrange=y_sw:dx:y_ne,
+        levrange=1:1,
+        spatial_ref=lcc_sr,
+    )
+end
+
+@testitem "USGS3DEP LCC FileSet construction" setup = [USGS3DEPLCCSetup] tags = [:usgs3dep] begin
+    fs = EarthSciData.USGS3DEPFileSet(lcc_domain; resolution=10.0)
+    @test EarthSciData.varnames(fs) == ["elevation"]
+    @test fs.width > 0
+    @test fs.height > 0
+    # Bounding box should be in lon-lat degrees and enclose the original region.
+    @test fs.bbox[1] <= -121.65
+    @test fs.bbox[3] >= -121.55
+    @test fs.bbox[2] <= 39.73
+    @test fs.bbox[4] >= 39.83
+end
+
+@testitem "USGS3DEP LCC data loading and interpolation" setup = [USGS3DEPLCCSetup] tags = [:usgs3dep] begin
+    fs = EarthSciData.USGS3DEPFileSet(lcc_domain; resolution=10.0)
+    ts, te = EarthSciMLBase.get_tspan_datetime(lcc_domain)
+
+    # The DataSetInterpolator should handle the coord_trans from LCC→lonlat.
+    itp = EarthSciData.DataSetInterpolator{Float32}(
+        fs, "elevation", ts, te, lcc_domain; stream=true)
+
+    # Interpolate at the LCC origin (0, 0) which corresponds to the projection centre.
+    val = EarthSciData.interp(itp, ts, Float32(0.0), Float32(0.0))
+    # Paradise, CA area elevation should be physically reasonable.
+    @test 50 < val < 3000
+end
+
+@testitem "USGS3DEP LCC System construction" setup = [USGS3DEPLCCSetup] tags = [:usgs3dep] begin
+    using Symbolics
+    # This should not error — previously it would fail because the data has
+    # dimnames ["lon", "lat"] but an LCC domain has pvars [:x, :y].
+    sys = USGS3DEP(lcc_domain; resolution=10.0)
+    @test sys isa ModelingToolkit.AbstractSystem
+    @test length(equations(sys)) == 3  # elevation + dzdx + dzdy
+    eq_names = [Symbolics.tosymbol(eq.lhs, escape=false) for eq in equations(sys)]
+    @test :elevation ∈ eq_names
+    @test :dzdx ∈ eq_names
+    @test :dzdy ∈ eq_names
+end
+
+@testitem "USGS3DEP LCC vs lonlat consistency" setup = [USGS3DEPLCCSetup, USGS3DEPSetup] tags = [:usgs3dep] begin
+    # Both domains cover approximately the same region.
+    # The elevation at the same physical location should match.
+    ts_ll, _ = EarthSciMLBase.get_tspan_datetime(domain)
+    ts_lcc, te_lcc = EarthSciMLBase.get_tspan_datetime(lcc_domain)
+
+    # Lon-lat interpolator
+    fs_ll = EarthSciData.USGS3DEPFileSet(domain; resolution=10.0)
+    itp_ll = EarthSciData.DataSetInterpolator{Float32}(
+        fs_ll, "elevation", ts_ll, ts_ll + Dates.Day(2), domain; stream=true)
+
+    # LCC interpolator
+    fs_lcc = EarthSciData.USGS3DEPFileSet(lcc_domain; resolution=10.0)
+    itp_lcc = EarthSciData.DataSetInterpolator{Float32}(
+        fs_lcc, "elevation", ts_lcc, te_lcc, lcc_domain; stream=true)
+
+    # Query both at the projection centre (Paradise, CA).
+    lon_c = deg2rad(-121.60)
+    lat_c = deg2rad(39.78)
+    val_ll = EarthSciData.interp(itp_ll, ts_ll, Float32(lon_c), Float32(lat_c))
+
+    val_lcc = EarthSciData.interp(itp_lcc, ts_lcc, Float32(0.0), Float32(0.0))
+
+    # Values should be close (not exact due to different grid resolutions).
+    @test abs(val_ll - val_lcc) / max(abs(val_ll), abs(val_lcc)) < 0.1
+end
