@@ -223,6 +223,39 @@ end
     end
 end
 
+@testitem "projected coordinate domain" begin
+    using EarthSciData
+    using Proj
+    using Dates: DateTime
+
+    # Verify that the +inv pipeline approach works correctly with projected CRS.
+    # Before the fix, the pipeline lacked +inv, causing a PROJError about
+    # mismatched units between steps when the domain used projected coordinates.
+    proj_string = "+proj=lcc +lat_1=30.0 +lat_2=60.0 +lat_0=39.0 +lon_0=-97.0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
+    native_sr = "+proj=longlat +datum=WGS84 +no_defs"
+
+    # This would throw PROJError without +inv in the pipeline.
+    trans = Proj.Transformation(
+        "+proj=pipeline +step +inv " * proj_string * " +step " * native_sr,
+    )
+
+    # A point at the projection origin (0,0 in LCC meters) should map to
+    # the projection center (~-97, ~39) in lon/lat radians.
+    lon, lat = trans(0.0, 0.0)
+    @test lon ≈ deg2rad(-97.0) atol=0.01
+    @test lat ≈ deg2rad(39.0) atol=0.01
+
+    # Verify the pipeline also works with longlat domain (backward compat).
+    lonlat_sr = "+proj=longlat +datum=WGS84 +no_defs"
+    lcc_native = "+proj=lcc +lat_1=33 +lat_2=45 +lat_0=40 +lon_0=-97 +x_0=0 +y_0=0 +a=6370997 +b=6370997 +to_meter=1"
+    trans2 = Proj.Transformation(
+        "+proj=pipeline +step +inv " * lonlat_sr * " +step " * lcc_native,
+    )
+    x, y = trans2(deg2rad(-97.0), deg2rad(40.0))
+    @test x ≈ 0.0 atol=1.0
+    @test y ≈ 0.0 atol=1.0
+end
+
 if !Sys.iswindows() # Allocation tests don't seem to work on windows.
     @testset "allocations" begin
         itp = EarthSciData.DataSetInterpolator{Float64}(fs, "U", t, te, domain)
