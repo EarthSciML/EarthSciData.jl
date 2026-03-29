@@ -274,11 +274,7 @@ end
 
 function couple2(mw::EarthSciMLBase.MeanWindCoupler, w::WRFCoupler)
     mw, w = mw.sys, w.sys
-    eqs = []
-    push!(eqs, mw.v_lon ~ w.hourly₊U)
-    length(unknowns(mw)) > 1 ? push!(eqs, mw.v_lat ~ w.hourly₊V) : nothing
-    length(unknowns(mw)) > 2 ? push!(eqs, mw.v_lev ~ w.hourly₊W) : nothing
-    ConnectorSystem(eqs, mw, w)
+    _couple_meanwind(mw, w, w.hourly₊U, w.hourly₊V, w.hourly₊W)
 end
 
 # Return grid staggering for the given variable,

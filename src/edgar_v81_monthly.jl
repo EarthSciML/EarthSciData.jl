@@ -278,11 +278,11 @@ function EDGARv81MonthlyEmis(
     starttime, endtime = get_tspan_datetime(domaininfo)
     fs = EDGARv81MonthlyEmisFileSet(substance, sector, starttime, endtime)
     pvdict = Dict([Symbol(v) => v for v in EarthSciMLBase.pvars(domaininfo)]...)
-    @assert :lon in keys(pvdict) "lon must be specified in the domaininfo"
-    @assert :lat in keys(pvdict) "lat must be specified in the domaininfo"
+    @assert :lon in keys(pvdict) || :x in keys(pvdict) "lon or x must be specified in the domaininfo"
+    @assert :lat in keys(pvdict) || :y in keys(pvdict) "lat or y must be specified in the domaininfo"
     @assert :lev in keys(pvdict) "lev must be specified in the domaininfo"
-    lon = pvdict[:lon]
-    lat = pvdict[:lat]
+    lon = :lon in keys(pvdict) ? pvdict[:lon] : pvdict[:x]
+    lat = :lat in keys(pvdict) ? pvdict[:lat] : pvdict[:y]
     lev = pvdict[:lev]
     @parameters(Δz=60.0,
         [unit = u"m", description = "Height of the first vertical grid layer"],)

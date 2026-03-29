@@ -437,12 +437,7 @@ function GEOSFP(
                 extrapolate_type = varname == "OMEGA" ? 0.0 : Flat()
             )
             dims = dimnames(itp)
-            coords = Num[]
-            for dim in dims
-                d = Symbol(dim)
-                @assert d ∈ keys(pvdict) "GEOSFP coordinate $d not found in domaininfo coordinates ($(pvs))."
-                push!(coords, pvdict[d])
-            end
+            coords = _match_domain_coords(dims, pvdict, pvs)
             eq, param = create_interp_equation(itp, filename, t, t_ref, coords)
             push!(eqs, eq)
             push!(params, param)
@@ -497,32 +492,44 @@ function GEOSFP(
     # ------------------------------------------------------------------------
 
     # Coordinate transforms.
-    @variables δxδlon(t) [
-        unit = u"m/rad",
-        description = "X gradient with respect to longitude"
-    ]
-    @variables δyδlat(t) [
-        unit = u"m/rad",
-        description = "Y gradient with respect to latitude"
-    ]
+    @constants lat2meters=111.32e3 * 180 / π [unit = u"m/rad"]
+    @constants lon2m=40075.0e3 / 2π [unit = u"m/rad"]
+    if :lat in keys(pvdict)
+        @variables δxδlon(t) [
+            unit = u"m/rad",
+            description = "X gradient with respect to longitude"
+        ]
+        @variables δyδlat(t) [
+            unit = u"m/rad",
+            description = "Y gradient with respect to latitude"
+        ]
+        lon_trans = δxδlon ~ lon2m * cos(pvdict[:lat])
+        lat_trans = δyδlat ~ lat2meters
+        push!(eqs, lon_trans, lat_trans)
+        push!(vars, δxδlon, δyδlat)
+    end
+
     @variables δPδlev(t) [
         unit = u"Pa",
         description = "Pressure gradient with respect to hybrid grid level"
     ]
-    @constants lat2meters=111.32e3 * 180 / π [unit = u"m/rad"]
-    @constants lon2m=40075.0e3 / 2π [unit = u"m/rad"]
-    lon_trans = δxδlon ~ lon2m * cos(pvdict[:lat])
-    lat_trans = δyδlat ~ lat2meters
     lev_trans = δPδlev ~ expand_derivatives(Differential(lev)(pressure_eq.rhs))
-    push!(eqs, lon_trans, lat_trans, lev_trans)
-    push!(vars, δxδlon, δyδlat, δPδlev)
+    push!(eqs, lev_trans)
+    push!(vars, δPδlev)
 
     @variables δZδlev(t) [unit = u"m", description = "∂Z_agl/∂lev"]
     eq_dZ_dlev = δZδlev ~ expand_derivatives(Differential(lev)(eq_Z_agl.rhs))
     push!(eqs, eq_dZ_dlev)
     push!(vars, δZδlev)
 
-    all_params = [pvdict[:lon], pvdict[:lat], lev, P_unit, Rd, g, lat2meters, lon2m, params...]
+    all_params = [
+        get(pvdict, :lon, get(pvdict, :x, nothing)),
+        get(pvdict, :lat, get(pvdict, :y, nothing)),
+        lev, P_unit, Rd, g,
+        (:lat in keys(pvdict) ? [lat2meters, lon2m] : [])...,
+        params...
+    ]
+    filter!(!isnothing, all_params)
     sys = System(
         eqs,
         t,
@@ -538,12 +545,7 @@ end
 
 function EarthSciMLBase.couple2(mw::EarthSciMLBase.MeanWindCoupler, g::GEOSFPCoupler)
     mw, g = mw.sys, g.sys
-    eqs = [mw.v_lon ~ g.A3dyn₊U]
-    # Only add the number of dimensions present in the mean wind system.
-    length(unknowns(mw)) > 1 ? push!(eqs, mw.v_lat ~ g.A3dyn₊V) : nothing
-    length(unknowns(mw)) > 2 ? push!(eqs, mw.v_lev ~ g.A3dyn₊OMEGA) : nothing
-
-    ConnectorSystem(eqs, mw, g)
+    _couple_meanwind(mw, g, g.A3dyn₊U, g.A3dyn₊V, g.A3dyn₊OMEGA)
 end
 
 """

@@ -95,6 +95,19 @@
         lonrange = deg2rad(-130.0f0):deg2rad(2.0):deg2rad(-60.0f0),
         levrange = 1:4,  # Corresponding to ERA5 levels: 1000, 975, 950, 925 hPa
     )
+
+    # Lambert Conformal Conic projection centered on the test data domain.
+    lcc_sr = "+proj=lcc +lat_0=35 +lon_0=-90 +lat_1=25 +lat_2=45 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
+
+    # xy domain covering approximately 200 km x 200 km centered on (lon=-90, lat=35)
+    xy_domain = DomainInfo(
+        DateTime(2022, 1, 1),
+        DateTime(2022, 1, 3);
+        xrange = -100_000.0:50_000.0:100_000.0,
+        yrange = -100_000.0:50_000.0:100_000.0,
+        levrange = 1:4,
+        spatial_ref = lcc_sr,
+    )
 end
 
 @testitem "ERA5 structure" setup=[ERA5Setup] tags=[:era5] begin
@@ -249,6 +262,97 @@ end
     end
 
     composed = couple(exsys, domain2, Advection(), era5)
+    pde_sys = convert(PDESystem, composed)
+    eqs = equations(pde_sys)
+    eqs_str = string.(eqs)
+    eqs_joined = join(eqs_str, " ")
+
+    # MeanWind should couple to ERA5's u, v, w wind components.
+    @test any(occursin("MeanWind", s) for s in eqs_str)
+    @test occursin("pl₊u", eqs_joined)
+    @test occursin("pl₊v", eqs_joined)
+    @test occursin("pl₊w", eqs_joined)
+end
+
+# ---- Tests with xy (projected) domains ----
+
+@testitem "ERA5 xy-domain structure" setup=[ERA5Setup] tags=[:era5] begin
+    using ModelingToolkit: t, D
+    using DynamicQuantities
+
+    era5 = ERA5(xy_domain; mirror=era5_mirror)
+
+    # Check that the system has x/y parameters (not lon/lat).
+    param_syms = Symbol.(parameters(era5))
+    @test :x in param_syms
+    @test :y in param_syms
+    @test :lev in param_syms
+    @test !(:lon in param_syms)
+    @test !(:lat in param_syms)
+
+    # Key variables should still be present.
+    var_syms = [Symbolics.tosymbol(v, escape=false) for v in unknowns(era5)]
+    @test :pl₊t in var_syms
+    @test :pl₊u in var_syms
+    @test :pl₊v in var_syms
+    @test :P in var_syms
+    @test :δPδlev in var_syms
+    # lon/lat coordinate transforms should NOT be present for xy domains.
+    @test !(:δxδlon in var_syms)
+    @test !(:δyδlat in var_syms)
+end
+
+@testitem "ERA5 xy-domain ODE integration" setup=[ERA5Setup] tags=[:era5] begin
+    using ModelingToolkit
+    using OrdinaryDiffEqTsit5
+
+    era5 = ERA5(xy_domain; mirror=era5_mirror)
+    x, y, lev = EarthSciMLBase.pvars(xy_domain)
+
+    sys = mtkcompile(era5)
+    prob = ODEProblem(
+        sys,
+        [x => 0.0, y => 0.0, lev => 1.0],
+        (0.0, 60.0),
+    )
+    sol = solve(prob, Tsit5())
+    @test length(sol.t) >= 2
+end
+
+@testitem "ERA5 xy-domain MeanWind coupling" setup=[ERA5Setup] tags=[:era5] begin
+    using ModelingToolkit
+    using DynamicQuantities
+    using EarthSciMLBase: Advection
+
+    era5 = ERA5(xy_domain; mirror=era5_mirror)
+
+    xy_domain2 = EarthSciMLBase.add_partial_derivative_func(
+        xy_domain,
+        partialderivatives_δPδlev_era5(),
+    )
+
+    x, y, _ = EarthSciMLBase.pvars(xy_domain2)
+    @variables c(ModelingToolkit.t) = 5.0 [unit = u"mol/m^3"]
+    @constants c_unit = 6.0 [unit = u"m", description = "constant to make units cancel out"]
+
+    struct ERA5XYTestCoupler
+        sys::Any
+    end
+
+    exsys = System(
+        [ModelingToolkit.D(c) ~ (sin(x / c_unit) + sin(y / c_unit)) * c / ModelingToolkit.t],
+        ModelingToolkit.t;
+        name = :TestSys,
+        metadata = Dict(EarthSciMLBase.CoupleType => ERA5XYTestCoupler),
+    )
+
+    function EarthSciMLBase.couple2(e::ERA5XYTestCoupler, g::EarthSciData.ERA5Coupler)
+        e, g = e.sys, g.sys
+        e = EarthSciMLBase.param_to_var(e, :x, :y)
+        ConnectorSystem([e.x ~ g.x, e.y ~ g.y], e, g)
+    end
+
+    composed = couple(exsys, xy_domain2, Advection(), era5)
     pde_sys = convert(PDESystem, composed)
     eqs = equations(pde_sys)
     eqs_str = string.(eqs)

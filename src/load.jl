@@ -1,5 +1,7 @@
 export interp, interp!, GridSpec
 
+const _LONLAT_SR = "+proj=longlat +datum=WGS84 +no_defs"
+
 function download_cache()
     ("EARTHSCIDATADIR" ∈ keys(ENV)) ? ENV["EARTHSCIDATADIR"] :
     @get_scratch!("earthsci_data")
@@ -685,4 +687,32 @@ Close resources associated with a DataSetInterpolator,
 including the underlying FileSet.
 """
 Base.close(itp::DataSetInterpolator) = close(itp.fs.fs)
+
+"""
+Map data dimension names to domain coordinate variables.
+
+For lon-lat domains the mapping is direct (lon→lon, lat→lat).
+For projected domains where the domain has `x` and `y` variables,
+`lon` maps to `x` and `lat` maps to `y`.  The coordinate transform
+between the domain CRS and the data CRS is handled by `coord_trans`
+inside `DataSetInterpolator`.
+
+Accepts both String and Symbol dimension names.
+"""
+function _match_domain_coords(dims, pvdict, pvs)
+    # Mapping from data dim names to possible domain variable names.
+    _DIM_MAP = Dict(:lon => [:lon, :x], :lat => [:lat, :y])
+    coords = Num[]
+    for dim in dims
+        dim_sym = dim isa Symbol ? dim : Symbol(dim)
+        candidates = get(_DIM_MAP, dim_sym, [dim_sym])
+        matched = findfirst(c -> c ∈ keys(pvdict), candidates)
+        if matched === nothing
+            error("Data coordinate '$(dim)' could not be matched to any domain " *
+                  "coordinate. Domain has: $(pvs). Expected one of: $(candidates).")
+        end
+        push!(coords, pvdict[candidates[matched]])
+    end
+    return coords
+end
 
