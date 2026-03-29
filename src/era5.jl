@@ -96,8 +96,41 @@ struct ERA5PressureLevelFileSet <: FileSet
             # CDS API download.
             api_key = cds_api_key()
             grid = EarthSciMLBase.grid(domaininfo, (false, false, false))
-            lonrange_deg = rad2deg.(extrema(grid[1]))
-            latrange_deg = rad2deg.(extrema(grid[2]))
+            domain_sr = _spatial_ref(domaininfo)
+            if domain_sr == _LONLAT_SR
+                # Domain is already in lon-lat radians.
+                lonrange_deg = rad2deg.(extrema(grid[1]))
+                latrange_deg = rad2deg.(extrema(grid[2]))
+            else
+                # Domain uses a projected CRS — transform corners to lon-lat.
+                to_lonlat = Proj.Transformation(
+                    "+proj=pipeline +step +inv " * domain_sr * " +step " * _LONLAT_SR)
+                xs, ys = grid[1], grid[2]
+                lon_vals = Float64[]
+                lat_vals = Float64[]
+                for x in (first(xs), last(xs))
+                    for y in (first(ys), last(ys))
+                        lo, la = to_lonlat(x, y)
+                        push!(lon_vals, rad2deg(lo))
+                        push!(lat_vals, rad2deg(la))
+                    end
+                end
+                # Also sample edges to capture curvature for large domains.
+                for x in xs
+                    lo, la = to_lonlat(x, first(ys))
+                    push!(lon_vals, rad2deg(lo)); push!(lat_vals, rad2deg(la))
+                    lo, la = to_lonlat(x, last(ys))
+                    push!(lon_vals, rad2deg(lo)); push!(lat_vals, rad2deg(la))
+                end
+                for y in ys
+                    lo, la = to_lonlat(first(xs), y)
+                    push!(lon_vals, rad2deg(lo)); push!(lat_vals, rad2deg(la))
+                    lo, la = to_lonlat(last(xs), y)
+                    push!(lon_vals, rad2deg(lo)); push!(lat_vals, rad2deg(la))
+                end
+                lonrange_deg = extrema(lon_vals)
+                latrange_deg = extrema(lat_vals)
+            end
             levrange = grid[3]
             plevels = ERA5_PRESSURE_LEVELS_HPA[round.(Int, levrange)]
             area = [
@@ -360,12 +393,10 @@ function ERA5(
             fs, varname, starttime, endtime, domaininfo; stream=stream
         )
         dims = dimnames(itp)
-        coords = Num[]
-        for dim in dims
-            mapped = get(ERA5_COORD_MAP, dim, Symbol(dim))
-            @assert mapped ∈ keys(pvdict) "ERA5 dimension $(dim) (mapped to $(mapped)) not in domaininfo coordinates ($(pvs))."
-            push!(coords, pvdict[mapped])
-        end
+        # Map ERA5 dimension names to domain coordinate names.
+        # For projected domains, lon→x and lat→y.
+        mapped_dims = [get(ERA5_COORD_MAP, dim, Symbol(dim)) for dim in dims]
+        coords = _match_domain_coords(mapped_dims, pvdict, pvs)
         eq, param = create_interp_equation(itp, "pl", t, t_ref, coords)
         push!(eqs, eq)
         push!(params, param)
@@ -399,10 +430,11 @@ function ERA5(
     end
 
     all_params = [
-        get(pvdict, :lon, nothing),
-        get(pvdict, :lat, nothing),
+        get(pvdict, :lon, get(pvdict, :x, nothing)),
+        get(pvdict, :lat, get(pvdict, :y, nothing)),
         get(pvdict, :lev, nothing),
-        hPa2Pa, lat2meters, lon2m,
+        hPa2Pa,
+        (:lat in keys(pvdict) ? [lat2meters, lon2m] : [])...,
         params...
     ]
     filter!(!isnothing, all_params)

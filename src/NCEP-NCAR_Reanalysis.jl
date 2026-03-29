@@ -314,8 +314,12 @@ function NCEPNCARReanalysis(
         push!(vars, δzδlev)
     end
 
-    all_params = [pvdict[xdim], pvdict[ydim], pvdict[:lev], lat2meters, lon2m, hPa2Pa, Rd, g,
-        params...]
+    all_params = [
+        pvdict[xdim], pvdict[ydim], pvdict[:lev],
+        (:lat in keys(pvdict) ? [lat2meters, lon2m] : [])...,
+        hPa2Pa, Rd, g,
+        params...
+    ]
     sys = System(
         eqs,
         t,
@@ -331,11 +335,7 @@ end
 
 function couple2(mw::EarthSciMLBase.MeanWindCoupler, w::NCEPNCARReanalysisCoupler)
     mw, w = mw.sys, w.sys
-    eqs = []
-    push!(eqs, mw.v_lon ~ w.uwnd)
-    length(unknowns(mw)) > 1 ? push!(eqs, mw.v_lat ~ w.vwnd) : nothing
-    length(unknowns(mw)) > 2 ? push!(eqs, mw.v_lev ~ w.wwnd) : nothing
-    ConnectorSystem(eqs, mw, w)
+    _couple_meanwind(mw, w, w.uwnd, w.vwnd, w.wwnd)
 end
 
 function build_pressure_expr(lev)

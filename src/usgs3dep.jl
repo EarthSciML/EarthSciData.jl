@@ -2,7 +2,6 @@ export USGS3DEP, USGS3DEPCoupler
 
 const USGS3DEP_MIRROR = "https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer"
 
-const _LONLAT_SR = "+proj=longlat +datum=WGS84 +no_defs"
 
 """
 $(SIGNATURES)
@@ -359,27 +358,4 @@ function USGS3DEP(domaininfo::DomainInfo; name=:USGS3DEP, resolution=1 / 3, stre
     return sys
 end
 
-"""
-Map data dimension names (e.g. ["lon", "lat"]) to domain coordinate variables.
-
-For lon-lat domains the mapping is direct (lon→lon, lat→lat).
-For projected domains where the domain has `x` and `y` variables,
-`lon` maps to `x` and `lat` maps to `y`.  The coordinate transform
-between the domain CRS and the data CRS is handled by `coord_trans`
-inside `DataSetInterpolator`.
-"""
-function _match_domain_coords(dims::Vector{String}, pvdict, pvs)
-    # Mapping from data dim names to possible domain variable names.
-    _DIM_MAP = Dict("lon" => [:lon, :x], "lat" => [:lat, :y])
-    coords = Num[]
-    for dim in dims
-        candidates = get(_DIM_MAP, dim, [Symbol(dim)])
-        matched = findfirst(c -> c ∈ keys(pvdict), candidates)
-        if matched === nothing
-            error("USGS3DEP coordinate '$dim' could not be matched to any domain " *
-                  "coordinate. Domain has: $(pvs). Expected one of: $(candidates).")
-        end
-        push!(coords, pvdict[candidates[matched]])
-    end
-    return coords
-end
+# _match_domain_coords is defined in load.jl and shared across data sources.

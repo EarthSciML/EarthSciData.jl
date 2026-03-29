@@ -321,11 +321,12 @@ function CEDS(
 
     starttime, endtime = get_tspan_datetime(domaininfo)
 
-    pvdict = Dict([Symbol(v) => v for v in EarthSciMLBase.pvars(domaininfo)]...)
-    @assert :lon in keys(pvdict) "lon must be specified in the domaininfo"
-    @assert :lat in keys(pvdict) "lat must be specified in the domaininfo"
-    lon = pvdict[:lon]
-    lat = pvdict[:lat]
+    pvs = EarthSciMLBase.pvars(domaininfo)
+    pvdict = Dict([Symbol(v) => v for v in pvs]...)
+    @assert :lon in keys(pvdict) || :x in keys(pvdict) "lon or x must be specified in the domaininfo"
+    @assert :lat in keys(pvdict) || :y in keys(pvdict) "lat or y must be specified in the domaininfo"
+    x = :lon in keys(pvdict) ? pvdict[:lon] : pvdict[:x]
+    y = :lat in keys(pvdict) ? pvdict[:lat] : pvdict[:y]
 
     @parameters t_ref=get_tref(domaininfo) [unit = u"s", description = "Reference time"]
     eqs = Equation[]
@@ -340,13 +341,13 @@ function CEDS(
         dt = EarthSciMLBase.eltype(domaininfo)
         itp = DataSetInterpolator{dt}(fs, varname, starttime, endtime, domaininfo;
             stream = stream)
-        eq, param = create_interp_equation(itp, "", t, t_ref, [lon, lat])
+        eq, param = create_interp_equation(itp, "", t, t_ref, [x, y])
         push!(eqs, eq)
         push!(params, param)
         push!(vars, eq.lhs)
     end
 
-    all_params = [lon, lat, params...]
+    all_params = [x, y, params...]
     sys = System(
         eqs,
         t,
