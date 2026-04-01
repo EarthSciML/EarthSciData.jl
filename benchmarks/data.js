@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1774808455510,
+  "lastUpdate": 1775082332675,
   "repoUrl": "https://github.com/EarthSciML/EarthSciData.jl",
   "entries": {
     "Julia benchmark result": [
@@ -3779,6 +3779,42 @@ window.BENCHMARK_DATA = {
             "value": 21959357016,
             "unit": "ns",
             "extra": "gctime=2387644826\nmemory=25675081944\nallocs=844635176\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "ctessum@gmail.com",
+            "name": "Christopher Tessum",
+            "username": "ctessum"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "360c8061e418bf8665fc2b74936b258da4949638",
+          "message": "Merge pull request #190 from ctessum-claude/add-sysdomaininfo-metadata\n\nAdd SysDomainInfo metadata to data source constructors",
+          "timestamp": "2026-04-01T16:59:22-05:00",
+          "tree_id": "b272c5e9c865cb554d09be01b44e3cf29aab7e67",
+          "url": "https://github.com/EarthSciML/EarthSciData.jl/commit/360c8061e418bf8665fc2b74936b258da4949638"
+        },
+        "date": 1775082331723,
+        "tool": "julia",
+        "benches": [
+          {
+            "name": "NEI Simulator/Serial",
+            "value": 42684138312,
+            "unit": "ns",
+            "extra": "gctime=1919052922\nmemory=25674056072\nallocs=844635232\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
+          },
+          {
+            "name": "NEI Simulator/Threads",
+            "value": 23375395249,
+            "unit": "ns",
+            "extra": "gctime=3360405109\nmemory=25675081944\nallocs=844635176\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
           }
         ]
       }
