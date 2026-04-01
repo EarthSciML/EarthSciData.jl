@@ -446,6 +446,7 @@ function ERA5(
         metadata=Dict(
             CoupleType => ERA5Coupler,
             SysDiscreteEvent => create_updater_sys_event(name, params, starttime),
+            SysDomainInfo => domaininfo,
         ),
     )
     return sys

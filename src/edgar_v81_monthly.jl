@@ -313,7 +313,8 @@ function EDGARv81MonthlyEmis(
         name = name,
         initial_conditions = _itp_defaults(all_params),
         metadata = Dict(CoupleType => EDGARv81MonthlyEmisCoupler,
-            SysDiscreteEvent => create_updater_sys_event(name, params, starttime))
+            SysDiscreteEvent => create_updater_sys_event(name, params, starttime),
+            SysDomainInfo => domaininfo)
     )
     return sys
 end
