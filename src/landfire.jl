@@ -272,7 +272,8 @@ function LANDFIRE(domaininfo::DomainInfo; name = :LANDFIRE,
         initial_conditions = _itp_defaults(params),
         metadata = Dict(
             CoupleType => LANDFIRECoupler,
-            SysDiscreteEvent => create_updater_sys_event(name, params, starttime)
+            SysDiscreteEvent => create_updater_sys_event(name, params, starttime),
+            SysDomainInfo => domaininfo,
         )
     )
     return sys

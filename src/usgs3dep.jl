@@ -353,6 +353,7 @@ function USGS3DEP(domaininfo::DomainInfo; name=:USGS3DEP, resolution=1 / 3, stre
         metadata=Dict(
             CoupleType => USGS3DEPCoupler,
             SysDiscreteEvent => create_updater_sys_event(name, params, starttime),
+            SysDomainInfo => domaininfo,
         ),
     )
     return sys
