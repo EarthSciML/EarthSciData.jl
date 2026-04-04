@@ -323,3 +323,101 @@ end
     @test EarthSciData.tuple_from_vals(2, 2, 1, 1, 3, 3) == (1, 2, 3)
     @test EarthSciData.tuple_from_vals(3, 3, 2, 2, 1, 1) == (1, 2, 3)
 end
+
+@testitem "knots2range singleton" begin
+    r = EarthSciData.knots2range([5.0])
+    @test length(r) == 1
+    @test first(r) == 5.0
+end
+
+@testitem "create_interpolator! with singleton dims" begin
+    using EarthSciData
+    using Interpolations: BSpline, Linear, interpolate!, scale
+    using Dates: DateTime, Hour, datetime2unix
+
+    # 2D spatial with one singleton dim + time
+    coords = (0.0:0.1:0.3, 0.0:1.0:0.0)  # dim 2 is singleton (length 1)
+    times = [DateTime(2024, 1, 1) + Hour(i) for i in 0:1]
+    data = ones(Float32, 4, 1, 2)
+    interp_cache = similar(data)
+
+    grid, itp = EarthSciData.create_interpolator!(interp_cache, data, coords, times)
+    @test length(grid) == 3
+    @test length(grid[2]) == 2  # singleton padded to 2
+
+    # Query should work — value should be 1.0 everywhere
+    @test itp(0.1, 0.5, datetime2unix(times[1])) ≈ 1.0f0
+end
+
+@testitem "DummyFileSet singleton dim" begin
+    using EarthSciMLBase: DomainInfo
+    using Dates: datetime2unix, DateTime, Second, Hour
+    using Interpolations: scale, interpolate, BSpline, Linear
+
+    domain = DomainInfo(
+        DateTime(2022, 5, 1),
+        DateTime(2022, 5, 3);
+        lonrange = deg2rad(-175.0):deg2rad(2.5):deg2rad(175.0),
+        latrange = deg2rad(-85.0):deg2rad(2):deg2rad(85.0),
+        levrange = 1:1  # singleton level dimension
+    )
+
+    struct SingletonDimFS <: EarthSciData.FileSet
+        start::DateTime
+        finish::DateTime
+    end
+
+    function EarthSciData.DataFrequencyInfo(
+            fs::SingletonDimFS,
+    )::EarthSciData.DataFrequencyInfo
+        frequency = Second(3 * 3600)
+        centerpoints = collect((fs.start + frequency / 2):frequency:(fs.finish))
+        EarthSciData.DataFrequencyInfo(fs.start, frequency, centerpoints)
+    end
+
+    tv(fs, t) = (t - fs.start) / (fs.finish - fs.start)
+
+    function EarthSciData.loadslice!(
+            cache::AbstractArray,
+            fs::SingletonDimFS,
+            t::DateTime,
+            varname
+    )
+        dfi = EarthSciData.DataFrequencyInfo(fs)
+        tt = dfi.centerpoints[EarthSciData.centerpoint_index(dfi, t)]
+        v = tv(fs, tt)
+        cache[:, :, 1] .= v  # Fill all lon/lat with same value, singleton lev
+    end
+
+    function EarthSciData.loadmetadata(fs::SingletonDimFS, varname)
+        return EarthSciData.MetaData(
+            [[0.0, 0.5, 1.0], [0.0, 1.0], [850.0]],  # 3 coords: lon, lat, lev (singleton)
+            "m",
+            "description",
+            ["lon", "lat", "lev"],
+            [3, 2, 1],  # varsize with singleton lev
+            "+proj=longlat +datum=WGS84 +no_defs",
+            1,  # xdim
+            2,  # ydim
+            3,  # zdim
+            (false, false, false)  # staggering
+        )
+    end
+
+    fs = SingletonDimFS(DateTime(2022, 4, 30), DateTime(2022, 5, 4))
+
+    # Should not throw an error during construction
+    itp = EarthSciData.DataSetInterpolator{Float32}(
+        fs,
+        "U",
+        DateTime(2022, 5, 1),
+        DateTime(2022, 5, 3),
+        domain;
+        stream = true
+    )
+
+    # Should be able to interpolate without error
+    val = EarthSciData.interp(itp, DateTime(2022, 5, 1, 1), deg2rad(0.25f0), deg2rad(0.5f0), 1.0f0)
+    @test !isnan(val)
+    @test isfinite(val)
+end

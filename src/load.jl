@@ -332,17 +332,32 @@ mutable struct DataSetInterpolator{To, N, N2, FT, ITPT, DomT, ET, FSRG}
             )
         end
 
+        # Compute actual model grid sizes so the dummy interpolator type matches
+        # what will be created when real data is loaded (including singleton dims).
+        computed_grid = _compute_grid(domain, metadata.staggering)
+        if length(metadata.varsize) == 2 && metadata.zdim <= 0
+            model_coords = tuple_from_vals(metadata.xdim, computed_grid[1], metadata.ydim, computed_grid[2])
+        elseif length(metadata.varsize) >= 3
+            model_coords = tuple_from_vals(
+                metadata.xdim, computed_grid[1], metadata.ydim, computed_grid[2],
+                metadata.zdim, computed_grid[3])
+        else
+            error("Invalid data size")
+        end
+        spatial_sizes = length.(model_coords)
+
         load_cache = zeros(To, repeat([1], length(metadata.varsize))...)
-        data = zeros(To, repeat([2], length(metadata.varsize))..., cache_size) # Add a dimension for time.
+        data = zeros(To, spatial_sizes..., cache_size) # Add a dimension for time.
         interp_cache = similar(data)
         N = ndims(data)
         N2 = N - 1
         times = [DateTime(0, 1, 1) + Hour(i) for i in 1:cache_size]
+        dummy_coords = [range(0.0, step=0.1, length=s) for s in spatial_sizes]
         _,
         itp2 = create_interpolator!(
             interp_cache,
             data,
-            repeat([0:0.1:0.1], length(metadata.varsize)),
+            dummy_coords,
             times
         )
         ITPT = typeof(itp2)
@@ -398,6 +413,9 @@ which is necessary to account for different numbers of days in each month
 and things like that.
 """
 function knots2range(knots, reltol = 0.05)
+    if length(knots) == 1
+        return knots[begin]:one(eltype(knots)):knots[begin]
+    end
     dx = diff(knots)
     dx_mean = sum(dx) / length(dx)
     #@assert all(abs.(1 .- dx ./ dx_mean) .<= reltol) "Knots ($knots) must be evenly spaced within reltol=$reltol."
@@ -407,14 +425,40 @@ function knots2range(knots, reltol = 0.05)
 end
 
 """
+Pad singleton dimensions in data and coords so that every axis has ≥ 2 elements,
+which is required by `BSpline(Linear())`.  Returns `(padded_data, padded_coords)`.
+"""
+function _pad_singletons(data, coords)
+    N = ndims(data)
+    needs_pad = ntuple(i -> size(data, i) == 1, N)
+    any(needs_pad) || return data, coords
+    pad_sizes = ntuple(i -> needs_pad[i] ? 2 : 1, N)
+    padded = repeat(data, pad_sizes...)
+    padded_coords = ntuple(N) do i
+        c = coords[i]
+        if needs_pad[i]
+            s = one(eltype(c))
+            first(c):s:(first(c) + s)
+        else
+            c
+        end
+    end
+    return padded, padded_coords
+end
+
+"""
 Create a new interpolator, overwriting `interp_cache`.
 """
 function create_interpolator!(interp_cache, data, coords, times)
     grid = tuple((knots2range(Float64.(c)) for c in coords)..., knots2range(datetime2unix.(times)))
-    copyto!(interp_cache, data)
+    padded, pad_grid = _pad_singletons(data, grid)
+    if size(interp_cache) != size(padded)
+        interp_cache = similar(padded)
+    end
+    copyto!(interp_cache, padded)
     itp = interpolate!(interp_cache, BSpline(Linear()))
-    itp = scale(itp, grid...)
-    return grid, itp
+    itp = scale(itp, pad_grid...)
+    return pad_grid, itp
 end
 
 function update_interpolator!(itp::DataSetInterpolator{To}) where {To}
@@ -424,7 +468,10 @@ function update_interpolator!(itp::DataSetInterpolator{To}) where {To}
     end
     coords = _model_grid(itp)
     grid, itp2 = create_interpolator!(tc.interp_cache, tc.data, coords, tc.times)
-    @assert all([length(g) for g in grid] .== size(tc.data)) "invalid data size: $([length(g) for g in grid]) != $(size(tc.data))"
+    # Grid may have been padded along singleton dimensions, so compare with
+    # the padded data size rather than tc.data.
+    padded_data, _ = _pad_singletons(tc.data, grid)
+    @assert all([length(g) for g in grid] .== size(padded_data)) "invalid data size: $([length(g) for g in grid]) != $(size(padded_data))"
     tc.itp = itp2
 end
 
