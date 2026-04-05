@@ -39,7 +39,8 @@ Create a USGS3DEPFileSet covering the spatial extent of the given domain.
 # Arguments
 - `domaininfo`: A `DomainInfo` or `GridSpec` providing the spatial domain.
 - `resolution`: Target resolution in arc-seconds (default 1/3 ≈ 10m).
-  The pixel count is capped at 4000×4000 to avoid excessive download sizes.
+  The pixel count is capped at 1000×1000 to avoid excessive download sizes
+  and API timeouts.
 """
 function USGS3DEPFileSet(domaininfo; resolution=1 / 3)
     grid = _compute_grid(domaininfo, (false, false, false))
@@ -95,8 +96,8 @@ function USGS3DEPFileSet(domaininfo; resolution=1 / 3)
     # Compute pixel dimensions from the requested resolution.
     width = ceil(Int, (bbox[3] - bbox[1]) * 3600 / resolution)
     height = ceil(Int, (bbox[4] - bbox[2]) * 3600 / resolution)
-    width = clamp(width, 1, 4000)
-    height = clamp(height, 1, 4000)
+    width = clamp(width, 1, 1000)
+    height = clamp(height, 1, 1000)
 
     # Static dataset: use two centerpoints bracketing the domain time range
     # so that any query time within the domain is interpolable.

@@ -127,10 +127,11 @@ end
 """
 Download a file with a progress bar, deleting the partial file on error.
 """
-function _download_with_progress(download_url::AbstractString, path::AbstractString)
+function _download_with_progress(download_url::AbstractString, path::AbstractString; timeout::Real=300)
     try
         prog = Progress(100; desc = "Downloading $(basename(download_url)):", dt = 0.1)
         Downloads.download(download_url, path,
+            timeout = timeout,
             progress = (
                 total::Integer, now::Integer) -> begin
                 prog.n = total

@@ -64,10 +64,10 @@ end
     @test rad2deg(first(md.coords[2])) > fs.bbox[2]
     @test rad2deg(last(md.coords[2])) < fs.bbox[4]
 
-    # Pixel clamping: very fine resolution should hit the 4000-pixel cap
+    # Pixel clamping: very fine resolution should hit the 1000-pixel cap
     fs_fine = EarthSciData.USGS3DEPFileSet(domain; resolution=0.001)
-    @test fs_fine.width == 4000
-    @test fs_fine.height == 4000
+    @test fs_fine.width == 1000
+    @test fs_fine.height == 1000
 
     # Invalid varname should error
     @test_throws AssertionError EarthSciData.loadmetadata(fs, "temperature")

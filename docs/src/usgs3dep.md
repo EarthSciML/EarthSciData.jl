@@ -65,7 +65,7 @@ eqs = equations(elev)
 
 1. **Bounding box**: The spatial extent of the domain is converted to a WGS84 (EPSG:4326) longitude/latitude bounding box with a one-pixel buffer.
 
-2. **Download**: A single GeoTIFF tile covering the bounding box is requested from the USGS ImageServer `exportImage` endpoint. Pixel dimensions are computed from the requested resolution, capped at 4000x4000 to limit download size. The tile is cached locally.
+2. **Download**: A single GeoTIFF tile covering the bounding box is requested from the USGS ImageServer `exportImage` endpoint. Pixel dimensions are computed from the requested resolution, capped at 1000x1000 to limit download size. The tile is cached locally.
 
 3. **Coordinate mapping**: Pixel-centre coordinates are computed analytically from the bounding box and pixel dimensions (no GeoTIFF metadata parsing needed). Coordinates are stored in radians for consistency with the EarthSciML coordinate system.
 
