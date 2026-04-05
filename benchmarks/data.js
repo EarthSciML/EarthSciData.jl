@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1775082429042,
+  "lastUpdate": 1775358681432,
   "repoUrl": "https://github.com/EarthSciML/EarthSciData.jl",
   "entries": {
     "Julia benchmark result": [
@@ -3851,6 +3851,42 @@ window.BENCHMARK_DATA = {
             "value": 22757454672,
             "unit": "ns",
             "extra": "gctime=2705082595\nmemory=25675081944\nallocs=844635176\nparams={\"gctrial\":true,\"time_tolerance\":0.05,\"evals_set\":false,\"samples\":10000,\"evals\":1,\"gcsample\":false,\"seconds\":5,\"overhead\":0,\"memory_tolerance\":0.01}"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "ctessum@gmail.com",
+            "name": "Christopher Tessum",
+            "username": "ctessum"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "fcadfc99aea69d9445600b6f2d14e4fbb4978e40",
+          "message": "Merge pull request #195 from ctessum-claude/fix-usgs3dep-pixel-cap-and-timeout\n\nReduce USGS 3DEP pixel cap to 1000x1000 and add download timeout",
+          "timestamp": "2026-04-04T21:46:01-05:00",
+          "tree_id": "d5ab8d59a6714a866d0cde25bf6a4fe9dd2a48ec",
+          "url": "https://github.com/EarthSciML/EarthSciData.jl/commit/fcadfc99aea69d9445600b6f2d14e4fbb4978e40"
+        },
+        "date": 1775358680480,
+        "tool": "julia",
+        "benches": [
+          {
+            "name": "NEI Simulator/Serial",
+            "value": 40618585793,
+            "unit": "ns",
+            "extra": "gctime=1902893740\nmemory=25674056072\nallocs=844635232\nparams={\"evals\":1,\"evals_set\":false,\"gcsample\":false,\"gctrial\":true,\"memory_tolerance\":0.01,\"overhead\":0,\"samples\":10000,\"seconds\":5,\"time_tolerance\":0.05}"
+          },
+          {
+            "name": "NEI Simulator/Threads",
+            "value": 24898637874,
+            "unit": "ns",
+            "extra": "gctime=2938661703\nmemory=25675081944\nallocs=844635176\nparams={\"evals\":1,\"evals_set\":false,\"gcsample\":false,\"gctrial\":true,\"memory_tolerance\":0.01,\"overhead\":0,\"samples\":10000,\"seconds\":5,\"time_tolerance\":0.05}"
           }
         ]
       }
