@@ -52,8 +52,9 @@ function interpolate_from!(dst::AbstractArray{T, N},
         src::AbstractArray{T, N}, mta::MetaData, model_grid, domain;
         extrapolate_type = Flat()) where {T, N}
     data_grid = Tuple(knots2range.(mta.coords))
-    itp = interpolate!(src, BSpline(Linear()))
-    itp = extrapolate(scale(itp, data_grid), extrapolate_type)
+    padded_src, padded_grid = _pad_singletons(src, data_grid)
+    itp = interpolate!(padded_src, BSpline(Linear()))
+    itp = extrapolate(scale(itp, padded_grid), extrapolate_type)
     ct = coord_trans(mta, domain)
     if N == 3
         for (i, x) in enumerate(model_grid[1])
