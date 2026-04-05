@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1775358681432,
+  "lastUpdate": 1775417649333,
   "repoUrl": "https://github.com/EarthSciML/EarthSciData.jl",
   "entries": {
     "Julia benchmark result": [
@@ -3887,6 +3887,42 @@ window.BENCHMARK_DATA = {
             "value": 24898637874,
             "unit": "ns",
             "extra": "gctime=2938661703\nmemory=25675081944\nallocs=844635176\nparams={\"evals\":1,\"evals_set\":false,\"gcsample\":false,\"gctrial\":true,\"memory_tolerance\":0.01,\"overhead\":0,\"samples\":10000,\"seconds\":5,\"time_tolerance\":0.05}"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "ctessum@gmail.com",
+            "name": "Christopher Tessum",
+            "username": "ctessum"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "b13a75982f07ed584e4c72c2e37db1dffb55560c",
+          "message": "Merge pull request #194 from ctessum-claude/fix-singleton-interpolation\n\nFix knots2range NaN with single-point coordinate vectors",
+          "timestamp": "2026-04-05T14:00:12-05:00",
+          "tree_id": "4dab4d92a03c0f385bab74720288a87a6a8e37bf",
+          "url": "https://github.com/EarthSciML/EarthSciData.jl/commit/b13a75982f07ed584e4c72c2e37db1dffb55560c"
+        },
+        "date": 1775417648586,
+        "tool": "julia",
+        "benches": [
+          {
+            "name": "NEI Simulator/Serial",
+            "value": 42763002165,
+            "unit": "ns",
+            "extra": "gctime=1884874715\nmemory=25674056072\nallocs=844635232\nparams={\"evals\":1,\"evals_set\":false,\"gcsample\":false,\"gctrial\":true,\"memory_tolerance\":0.01,\"overhead\":0,\"samples\":10000,\"seconds\":5,\"time_tolerance\":0.05}"
+          },
+          {
+            "name": "NEI Simulator/Threads",
+            "value": 22437521420,
+            "unit": "ns",
+            "extra": "gctime=2722621793\nmemory=25675081944\nallocs=844635176\nparams={\"evals\":1,\"evals_set\":false,\"gcsample\":false,\"gctrial\":true,\"memory_tolerance\":0.01,\"overhead\":0,\"samples\":10000,\"seconds\":5,\"time_tolerance\":0.05}"
           }
         ]
       }
