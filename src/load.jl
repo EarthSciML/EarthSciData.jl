@@ -332,32 +332,17 @@ mutable struct DataSetInterpolator{To, N, N2, FT, ITPT, DomT, ET, FSRG}
             )
         end
 
-        # Compute actual model grid sizes so the dummy interpolator type matches
-        # what will be created when real data is loaded (including singleton dims).
-        computed_grid = _compute_grid(domain, metadata.staggering)
-        if length(metadata.varsize) == 2 && metadata.zdim <= 0
-            model_coords = tuple_from_vals(metadata.xdim, computed_grid[1], metadata.ydim, computed_grid[2])
-        elseif length(metadata.varsize) >= 3
-            model_coords = tuple_from_vals(
-                metadata.xdim, computed_grid[1], metadata.ydim, computed_grid[2],
-                metadata.zdim, computed_grid[3])
-        else
-            error("Invalid data size")
-        end
-        spatial_sizes = length.(model_coords)
-
         load_cache = zeros(To, repeat([1], length(metadata.varsize))...)
-        data = zeros(To, spatial_sizes..., cache_size) # Add a dimension for time.
+        data = zeros(To, repeat([2], length(metadata.varsize))..., cache_size) # Add a dimension for time.
         interp_cache = similar(data)
         N = ndims(data)
         N2 = N - 1
         times = [DateTime(0, 1, 1) + Hour(i) for i in 1:cache_size]
-        dummy_coords = [range(0.0, step=0.1, length=s) for s in spatial_sizes]
         _,
         itp2 = create_interpolator!(
             interp_cache,
             data,
-            dummy_coords,
+            repeat([0:0.1:0.1], length(metadata.varsize)),
             times
         )
         ITPT = typeof(itp2)
