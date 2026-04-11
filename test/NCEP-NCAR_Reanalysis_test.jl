@@ -98,11 +98,11 @@ end
         "NCEPNCARReanalysis₊air(t, lon, lat, lev)",
         "NCEPNCARReanalysis₊omega(t, lon, lat, lev)",
         "NCEPNCARReanalysis₊hgt(t, lon, lat, lev)",
-        "NCEPNCARReanalysis₊uwnd_itp(NCEPNCARReanalysis₊t_ref + t, lon, lat, lev)",
-        "NCEPNCARReanalysis₊vwnd_itp(NCEPNCARReanalysis₊t_ref + t, lon, lat, lev)",
-        "NCEPNCARReanalysis₊air_itp(NCEPNCARReanalysis₊t_ref + t, lon, lat, lev)",
-        "NCEPNCARReanalysis₊omega_itp(NCEPNCARReanalysis₊t_ref + t, lon, lat, lev)",
-        "NCEPNCARReanalysis₊hgt_itp(NCEPNCARReanalysis₊t_ref + t, lon, lat, lev)",
+        "interp_unsafe(NCEPNCARReanalysis₊uwnd_data",
+        "interp_unsafe(NCEPNCARReanalysis₊vwnd_data",
+        "interp_unsafe(NCEPNCARReanalysis₊air_data",
+        "interp_unsafe(NCEPNCARReanalysis₊omega_data",
+        "interp_unsafe(NCEPNCARReanalysis₊hgt_data",
         "lon2m",
         "lat2meters",
         "Differential(lat, 1)(ExampleSys₊c(t, lon, lat, lev))",
@@ -124,19 +124,25 @@ end
 end
 
 @testsnippet NCEPProb begin
+    using ModelingToolkit: t, D
     using SymbolicIndexingInterface: setp, getsym, parameter_values
     using SciMLBase: ODEProblem
-    ncep_sys = mtkcompile(ncep_sys)
-    prob = ODEProblem(ncep_sys, [], (24.0 * 3600, 48.0 * 3600))
-    setter = setp(ncep_sys, [:lon, :lat, :lev])
-    ps = parameter_values(prob)
+    using OrdinaryDiffEqTsit5
+
+    # Wrap with a dummy state variable so init/solve work.
+    @variables _dummy(t) = 0.0
+    _sys = compose(System([D(_dummy) ~ 0], t; name = :_w), ncep_sys)
+    compiled = mtkcompile(_sys)
+    prob = ODEProblem(compiled, [], (24.0 * 3600, 48.0 * 3600))
+    integ = init(prob, Tsit5())
+    setter = setp(integ, [compiled.NCEPNCARReanalysis.lon, compiled.NCEPNCARReanalysis.lat, compiled.NCEPNCARReanalysis.lev])
 end
 
 @testitem "ncep vertical velocity wwnd" setup=[NCEPSetup, NCEPProb] begin
-    f = getsym(prob, :wwnd)
+    f = getsym(integ, compiled.NCEPNCARReanalysis.wwnd)
     W_val = map([1, 2, 5, 7.5, 12, 16]) do lev
-        setter(prob, [lonv, latv, lev])
-        f(prob)
+        setter(integ, [lonv, latv, lev])
+        f(integ)
     end
     W_val_want = [0.0019118377540854117, 0.0016255623000058477, -0.015113770574739198,
         -0.002477431693133608, 0.015227246265886294, -0.0]
@@ -144,20 +150,20 @@ end
 end
 
 @testitem "ncep pressure" setup=[NCEPSetup, NCEPProb] begin
-    f = getsym(prob, :p)
+    f = getsym(integ, compiled.NCEPNCARReanalysis.p)
     p_vals = map([1, 2, 5, 7.5, 12, 16]) do lev
-        setter(prob, [lonv, latv, lev])
-        f(prob)
+        setter(integ, [lonv, latv, lev])
+        f(integ)
     end
     p_want = [100000, 92500, 60000, 35000, 10000, 2000]
     @test p_vals≈p_want rtol=1e-2
 end
 
 @testitem "ncep δzδlev" setup=[NCEPSetup, NCEPProb] begin
-    f = getsym(prob, :δzδlev)
+    f = getsym(integ, compiled.NCEPNCARReanalysis.δzδlev)
     δzδlev_vals = map([1, 2, 5, 7.5, 12, 16]) do lev
-        setter(prob, [lonv, latv, lev])
-        f(prob)
+        setter(integ, [lonv, latv, lev])
+        f(integ)
     end
     δzδlev_want = [598, 649, 1358, 1583, 2232, 4410]
     @test δzδlev_vals≈δzδlev_want rtol=1e-3
@@ -165,10 +171,10 @@ end
 
 
 @testitem "ncep ground level vertical velocity" setup=[NCEPSetup, NCEPProb] begin
-    f = getsym(prob, :omega)
+    f = getsym(integ, compiled.NCEPNCARReanalysis.omega)
     omega_vals = map([0.5, 1]) do lev
-        setter(prob, [lonv, latv, lev])
-        f(prob)
+        setter(integ, [lonv, latv, lev])
+        f(integ)
     end
     omega_want = [0.0, -0.024750000797212124]
     @test omega_vals≈omega_want

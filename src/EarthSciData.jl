@@ -38,4 +38,8 @@ include("landfire.jl")
 # Coupling
 include("coupling.jl")
 
+function __init__()
+    _fix_ifelse_promote_shape()
+end
+
 end

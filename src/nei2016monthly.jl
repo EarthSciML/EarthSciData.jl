@@ -123,6 +123,14 @@ end
 @register_symbolic dayofweek_itp_NOx(t, lon)
 @register_symbolic delp_dry_surface_itp(lon, lat)
 
+# Tell SymbolicUtils these registered functions return scalars (needed for maketerm rebuild
+# during substitute to avoid Unknown(-1) shapes breaking ifelse).
+for f in (diurnal_itp, diurnal_itp_NOx, diurnal_itp_ISOP,
+          dayofweek_itp_CO, dayofweek_itp_NOx, delp_dry_surface_itp)
+    @eval Symbolics.SymbolicUtils.promote_shape(::typeof($f),
+        ::Symbolics.SymbolicUtils.ShapeT, ::Symbolics.SymbolicUtils.ShapeT) = _scalar_shape
+end
+
 # Dummy function for unit validation. ModelingToolkit will call this function
 # with a DynamicQuantities.Quantity to get information about the type and units of the output.
 diurnal_itp(t::DynamicQuantities.Quantity, lon) = 1.0
@@ -337,7 +345,7 @@ function NEI2016MonthlyEmis(
         domaininfo::DomainInfo;
         scale = 1.0,
         name = :NEI2016MonthlyEmis,
-        stream = true
+        stream = true,
 )
     starttime, endtime = get_tspan_datetime(domaininfo)
     _fs = NEI2016MonthlyEmisFileSet(sector, starttime, endtime)
@@ -350,6 +358,7 @@ function NEI2016MonthlyEmis(
     x = :x in keys(pvdict) ? pvdict[:x] : pvdict[:lon]
     y = :y in keys(pvdict) ? pvdict[:y] : pvdict[:lat]
     lev = pvdict[:lev]
+
     @parameters(Δz=1.0,
         [description = "Couldn't remove Δz without getting errors, so I set it to 1.0 without units"],)
     @parameters t_ref = get_tref(domaininfo) [unit = u"s", description = "Reference time"]
@@ -357,7 +366,10 @@ function NEI2016MonthlyEmis(
     @parameters g0_100 = 100.0 / 9.80665 [unit = u"kg/m^2"]
     eqs = Equation[]
     params = Any[t_ref, g0_100]
-    vars = Num[]
+    all_discretes = Any[]
+    all_constants = Any[]
+    interp_infos = []
+    lhs_vars = Num[]
 
     for varname in varnames(fs.fs)
         dt = EarthSciMLBase.eltype(domaininfo)
@@ -395,22 +407,24 @@ function NEI2016MonthlyEmis(
             wrapper_f = (eq) -> ifelse(lev < 2, eq / Δz * scale / (g0_100 * delp_dry_surface_itp(x, y)), zero_emis)
         end
 
-        eq, param = create_interp_equation(itp, "", t, t_ref, [x, y];
+        eq, discretes, constants, info = create_interp_equation(itp, "", t, t_ref, [x, y];
             wrapper_f = wrapper_f)
         push!(eqs, eq)
-        push!(params, param)
-        push!(vars, eq.lhs)
+        append!(all_discretes, discretes)
+        append!(all_constants, constants)
+        push!(interp_infos, info)
+        push!(lhs_vars, eq.lhs)
     end
-    all_params = [x, y, lev, Δz, params...]
+    all_params = [x, y, lev, Δz, all_constants..., all_discretes..., params...]
     sys = System(
         eqs,
         t,
-        vars,
+        lhs_vars,
         all_params;
         name = name,
         initial_conditions = _itp_defaults(all_params),
+        discrete_events = [build_interp_event(interp_infos, starttime)],
         metadata = Dict(CoupleType => NEI2016MonthlyEmisCoupler,
-            SysDiscreteEvent => create_updater_sys_event(name, params, starttime),
             SysDomainInfo => domaininfo)
     )
     return sys

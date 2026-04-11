@@ -331,7 +331,10 @@ function CEDS(
     @parameters t_ref=get_tref(domaininfo) [unit = u"s", description = "Reference time"]
     eqs = Equation[]
     params = Any[t_ref]
-    vars = Num[]
+    all_discretes = Any[]
+    all_constants = Any[]
+    interp_infos = []
+    lhs_vars = Num[]
 
     for sp in species
         fs = CEDSFileSet(sp, starttime, endtime;
@@ -341,22 +344,25 @@ function CEDS(
         dt = EarthSciMLBase.eltype(domaininfo)
         itp = DataSetInterpolator{dt}(fs, varname, starttime, endtime, domaininfo;
             stream = stream)
-        eq, param = create_interp_equation(itp, "", t, t_ref, [x, y])
+        eq, discretes, constants, info = create_interp_equation(
+            itp, "", t, t_ref, [x, y])
         push!(eqs, eq)
-        push!(params, param)
-        push!(vars, eq.lhs)
+        append!(all_discretes, discretes)
+        append!(all_constants, constants)
+        push!(interp_infos, info)
+        push!(lhs_vars, eq.lhs)
     end
 
-    all_params = [x, y, params...]
+    all_params = [x, y, all_constants..., all_discretes..., params...]
     sys = System(
         eqs,
         t,
-        vars,
+        lhs_vars,
         all_params;
         name = name,
         initial_conditions = _itp_defaults(all_params),
+        discrete_events = [build_interp_event(interp_infos, starttime)],
         metadata = Dict(CoupleType => CEDSCoupler,
-            SysDiscreteEvent => create_updater_sys_event(name, params, starttime),
             SysDomainInfo => domaininfo)
     )
     return sys

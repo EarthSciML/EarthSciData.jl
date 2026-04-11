@@ -404,7 +404,7 @@ function GEOSFP(
         domain::AbstractString,
         domaininfo::DomainInfo;
         name = :GEOSFP,
-        stream = true
+        stream = true,
 )
     starttime, endtime = get_tspan_datetime(domaininfo)
     filesets = Dict{String, GEOSFPFileSet}(
@@ -421,7 +421,10 @@ function GEOSFP(
     pvdict = Dict([Symbol(v) => v for v in pvs]...)
     eqs = Equation[]
     params = Any[t_ref]
-    vars = Num[]
+    all_discretes = Any[]
+    all_constants = Any[]
+    interp_infos = []
+    lhs_vars = Num[]
     for (filename, fs) in filesets
         for varname in varnames(fs)
             dt = eltype(domaininfo)
@@ -438,32 +441,35 @@ function GEOSFP(
             )
             dims = dimnames(itp)
             coords = _match_domain_coords(dims, pvdict, pvs)
-            eq, param = create_interp_equation(itp, filename, t, t_ref, coords)
+            eq, discretes, constants, info = create_interp_equation(
+                itp, filename, t, t_ref, coords)
             push!(eqs, eq)
-            push!(params, param)
-            push!(vars, eq.lhs)
+            append!(all_discretes, discretes)
+            append!(all_constants, constants)
+            push!(interp_infos, info)
+            push!(lhs_vars, eq.lhs)
         end
     end
 
     # Implement hybrid grid pressure: https://wiki.seas.harvard.edu/geos-chem/index.php/GEOS-Chem_vertical_grids
     @constants P_unit=1.0 [unit = u"Pa", description = "Unit pressure"]
     @variables P(t) [unit = u"Pa", description = "Pressure"]
-    i3ps = vars[findfirst(isequal(:I3₊PS), EarthSciMLBase.var2symbol.(vars))]
+    i3ps = lhs_vars[findfirst(isequal(:I3₊PS), EarthSciMLBase.var2symbol.(lhs_vars))]
     @assert :lev in keys(pvdict) "GEOSFP coordinate :lev not found in domaininfo coordinates ($(pvs))."
     lev = pvdict[:lev]
     pressure_eq = P ~ P_unit * Ap(lev) + Bp(lev) * i3ps
     push!(eqs, pressure_eq)
-    push!(vars, P)
+    push!(lhs_vars, P)
 
     # ------------------ Geopotential height via hypsometric relation ---------
     @constants Rd = 287.05 [unit = u"J/(kg*K)", description = "Dry-air gas constant"]
     @constants g = 9.80665 [unit = u"m/s^2", description = "Gravity"]
 
-    syms = EarthSciMLBase.var2symbol.(vars)
+    syms = EarthSciMLBase.var2symbol.(lhs_vars)
     getvar(sym::Symbol) = begin
         i = findfirst(isequal(sym), syms)
         @assert !isnothing(i) "Variable $(sym) not found!"
-        vars[i]
+        lhs_vars[i]
     end
 
     T = getvar(:I3₊T)
@@ -488,7 +494,7 @@ function GEOSFP(
     eq_Z_agl = Z_agl ~ (Rd * Tv̄ / g) * log(PS / Pmid)
 
     push!(eqs, eq_Tv, eq_Tv_sfc, eq_Tvbar, eq_Z_agl)
-    push!(vars, Tv, Tv_sfc, Tv̄, Z_agl)
+    push!(lhs_vars, Tv, Tv_sfc, Tv̄, Z_agl)
     # ------------------------------------------------------------------------
 
     # Coordinate transforms.
@@ -506,7 +512,7 @@ function GEOSFP(
         lon_trans = δxδlon ~ lon2m * cos(pvdict[:lat])
         lat_trans = δyδlat ~ lat2meters
         push!(eqs, lon_trans, lat_trans)
-        push!(vars, δxδlon, δyδlat)
+        push!(lhs_vars, δxδlon, δyδlat)
     end
 
     @variables δPδlev(t) [
@@ -515,30 +521,30 @@ function GEOSFP(
     ]
     lev_trans = δPδlev ~ expand_derivatives(Differential(lev)(pressure_eq.rhs))
     push!(eqs, lev_trans)
-    push!(vars, δPδlev)
+    push!(lhs_vars, δPδlev)
 
     @variables δZδlev(t) [unit = u"m", description = "∂Z_agl/∂lev"]
     eq_dZ_dlev = δZδlev ~ expand_derivatives(Differential(lev)(eq_Z_agl.rhs))
     push!(eqs, eq_dZ_dlev)
-    push!(vars, δZδlev)
+    push!(lhs_vars, δZδlev)
 
     all_params = [
         get(pvdict, :lon, get(pvdict, :x, nothing)),
         get(pvdict, :lat, get(pvdict, :y, nothing)),
         lev, P_unit, Rd, g,
         (:lat in keys(pvdict) ? [lat2meters, lon2m] : [])...,
-        params...
+        all_constants..., all_discretes..., params...
     ]
     filter!(!isnothing, all_params)
     sys = System(
         eqs,
         t,
-        vars,
+        lhs_vars,
         all_params;
         name = name,
         initial_conditions = _itp_defaults(all_params),
+        discrete_events = [build_interp_event(interp_infos, starttime)],
         metadata = Dict(CoupleType => GEOSFPCoupler,
-            SysDiscreteEvent => create_updater_sys_event(name, params, starttime),
             SysDomainInfo => domaininfo)
     )
     return sys

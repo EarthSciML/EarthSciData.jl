@@ -162,7 +162,10 @@ function WRF(domaininfo::DomainInfo; name = :WRF, stream = true)
     @parameters t_ref=get_tref(domaininfo) [unit = u"s", description = "Reference time"]
     eqs = Equation[]
     params = Any[t_ref]
-    vars = Num[]
+    all_discretes = Any[]
+    all_constants = Any[]
+    interp_infos = []
+    lhs_vars = Num[]
 
     xdim = :x in keys(pvdict) ? :x : :lon
     ydim = :y in keys(pvdict) ? :y : :lat
@@ -198,14 +201,17 @@ function WRF(domaininfo::DomainInfo; name = :WRF, stream = true)
             @assert translated_dim ∈ keys(pvdict) "Dimension $d (translated to $translated_dim) is not in the domaininfo coordinates ($(pvs))."
             push!(coords, pvdict[translated_dim])
         end
-        eq, param = create_interp_equation(itp, "", t, t_ref, coords)
+        eq, discretes, constants, info = create_interp_equation(
+            itp, "", t, t_ref, coords)
         push!(eqs, eq)
-        push!(params, param)
-        push!(vars, eq.lhs)
+        append!(all_discretes, discretes)
+        append!(all_constants, constants)
+        push!(interp_infos, info)
+        push!(lhs_vars, eq.lhs)
         if varname ∈ ["PH", "PHB"]
             # Special handling for PH and PHB to calculate the total pressure
             # as they are needed for geopotential height calculation.
-            z_params[varname] = param
+            z_params[varname] = info
             z_params[varname * "_coords"] = coords
         end
     end
@@ -216,7 +222,7 @@ function WRF(domaininfo::DomainInfo; name = :WRF, stream = true)
     PB = eqs[findfirst(x -> EarthSciMLBase.var2symbol(x.lhs) == :PB, eqs)].rhs
     pressure_eq = P_total ~ P + PB
     push!(eqs, pressure_eq)
-    push!(vars, P_total)
+    push!(lhs_vars, P_total)
 
     # Horizontal coordinate transforms
     if :lat in keys(pvdict)
@@ -233,7 +239,7 @@ function WRF(domaininfo::DomainInfo; name = :WRF, stream = true)
         lon_trans = δxδlon ~ lon2m * cos(pvdict[:lat])
         lat_trans = δyδlat ~ lat2meters
         push!(eqs, lon_trans, lat_trans)
-        push!(vars, δxδlon, δyδlat)
+        push!(lhs_vars, δxδlon, δyδlat)
         push!(params, lon2m, lat2meters)
     end
 
@@ -244,7 +250,7 @@ function WRF(domaininfo::DomainInfo; name = :WRF, stream = true)
     @constants g=9.80665 [unit = u"m/s^2", description = "Acceleration due to gravity"]
     z_expr = (PH + PHB) / g
     push!(eqs, z ~ z_expr)
-    push!(vars, z)
+    push!(lhs_vars, z)
     push!(params, g)
 
     # Height per level
@@ -252,22 +258,25 @@ function WRF(domaininfo::DomainInfo; name = :WRF, stream = true)
         unit = u"m",
         description = "Height derivative with respect to vertical level"
     ]
-    ph = z_params["PH"]
-    phb = z_params["PHB"]
+    ph_info = z_params["PH"]
+    phb_info = z_params["PHB"]
     phc = z_params["PH_coords"]
     phbc = z_params["PHB_coords"]
-    Δph = ph(t + t_ref, phc[1], phc[2], phc[3] + 1) - ph(t + t_ref, phc...)
-    Δphb = phb(t + t_ref, phbc[1], phbc[2], phbc[3] + 1) - phb(t + t_ref, phbc...)
+    Δph = build_interp_expr(ph_info, t + t_ref, [phc[1], phc[2], phc[3] + 1]) -
+          build_interp_expr(ph_info, t + t_ref, phc)
+    Δphb = build_interp_expr(phb_info, t + t_ref, [phbc[1], phbc[2], phbc[3] + 1]) -
+           build_interp_expr(phb_info, t + t_ref, phbc)
     lev_trans = δzδlev ~ (Δph + Δphb) / g
     push!(eqs, lev_trans)
-    push!(vars, δzδlev)
+    push!(lhs_vars, δzδlev)
 
-    all_params = [pvdict[xdim], pvdict[ydim], pvdict[:lev], params...]
-    sys = System(eqs, t, vars, all_params;
+    all_params = [pvdict[xdim], pvdict[ydim], pvdict[:lev],
+        all_constants..., all_discretes..., params...]
+    sys = System(eqs, t, lhs_vars, all_params;
         name = name,
         initial_conditions = _itp_defaults(all_params),
+        discrete_events = [build_interp_event(interp_infos, starttime)],
         metadata = Dict(CoupleType => WRFCoupler,
-            SysDiscreteEvent => create_updater_sys_event(name, params, starttime),
             SysDomainInfo => domaininfo)
     )
     return sys

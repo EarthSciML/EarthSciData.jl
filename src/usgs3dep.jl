@@ -312,7 +312,8 @@ domain = DomainInfo(
 elev = USGS3DEP(domain)
 ```
 """
-function USGS3DEP(domaininfo::DomainInfo; name=:USGS3DEP, resolution=1 / 3, stream=true)
+function USGS3DEP(domaininfo::DomainInfo; name=:USGS3DEP, resolution=1 / 3,
+        stream=true)
     starttime, endtime = get_tspan_datetime(domaininfo)
     fs = USGS3DEPFileSet(domaininfo; resolution=resolution)
 
@@ -331,9 +332,13 @@ function USGS3DEP(domaininfo::DomainInfo; name=:USGS3DEP, resolution=1 / 3, stre
     coords = _match_domain_coords(dims, pvdict, pvs)
 
     # Elevation equation.
-    eq_elev, p_elev = create_interp_equation(elev_itp, "", t, t_ref, coords)
-    params = Any[t_ref, p_elev]
-    vars = Num[eq_elev.lhs]
+    eq_elev, discretes_e, constants_e, info_e = create_interp_equation(
+        elev_itp, "", t, t_ref, coords)
+    params = Any[t_ref]
+    all_discretes = Any[discretes_e...]
+    all_constants = Any[constants_e...]
+    interp_infos = [info_e]
+    lhs_vars = Num[eq_elev.lhs]
     eqs = Equation[eq_elev]
 
     # Slope equations (dzdx and dzdy).
@@ -341,19 +346,23 @@ function USGS3DEP(domaininfo::DomainInfo; name=:USGS3DEP, resolution=1 / 3, stre
         slope_fs = USGS3DEPSlopeFileSet(fs, component)
         slope_itp = DataSetInterpolator{dt}(
             slope_fs, string(component), starttime, endtime, domaininfo; stream=stream)
-        eq_slope, p_slope = create_interp_equation(slope_itp, "", t, t_ref, coords)
+        eq_slope, discretes_s, constants_s, info_s = create_interp_equation(
+            slope_itp, "", t, t_ref, coords)
         push!(eqs, eq_slope)
-        push!(vars, eq_slope.lhs)
-        push!(params, p_slope)
+        push!(lhs_vars, eq_slope.lhs)
+        append!(all_discretes, discretes_s)
+        append!(all_constants, constants_s)
+        push!(interp_infos, info_s)
     end
 
+    all_params = Any[t_ref, all_constants..., all_discretes...]
     sys = System(
-        eqs, t, vars, params;
+        eqs, t, lhs_vars, all_params;
         name=name,
-        initial_conditions=_itp_defaults(params),
+        initial_conditions=_itp_defaults(all_params),
+        discrete_events = [build_interp_event(interp_infos, starttime)],
         metadata=Dict(
             CoupleType => USGS3DEPCoupler,
-            SysDiscreteEvent => create_updater_sys_event(name, params, starttime),
             SysDomainInfo => domaininfo,
         ),
     )

@@ -385,7 +385,10 @@ function ERA5(
     @parameters t_ref = get_tref(domaininfo) [unit = u"s", description = "Reference time"]
     eqs = Equation[]
     params = Any[t_ref]
-    vars = Num[]
+    all_discretes = Any[]
+    all_constants = Any[]
+    interp_infos = []
+    lhs_vars = Num[]
 
     for varname in varnames(fs)
         dt = EarthSciMLBase.eltype(domaininfo)
@@ -397,10 +400,13 @@ function ERA5(
         # For projected domains, lon→x and lat→y.
         mapped_dims = [get(ERA5_COORD_MAP, dim, Symbol(dim)) for dim in dims]
         coords = _match_domain_coords(mapped_dims, pvdict, pvs)
-        eq, param = create_interp_equation(itp, "pl", t, t_ref, coords)
+        eq, discretes, constants, info = create_interp_equation(
+            itp, "pl", t, t_ref, coords)
         push!(eqs, eq)
-        push!(params, param)
-        push!(vars, eq.lhs)
+        append!(all_discretes, discretes)
+        append!(all_constants, constants)
+        push!(interp_infos, info)
+        push!(lhs_vars, eq.lhs)
     end
 
     # Pressure from level index.
@@ -409,7 +415,7 @@ function ERA5(
     @variables P(t) [unit = u"Pa", description = "Pressure"]
     lev = pvdict[:lev]
     push!(eqs, P ~ hPa2Pa * era5_P_itp(lev))
-    push!(vars, P)
+    push!(lhs_vars, P)
 
     # Coordinate transforms.
     @constants lat2meters = 111.32e3 * 180 / π [unit = u"m/rad"]
@@ -419,14 +425,14 @@ function ERA5(
         @variables δyδlat(t) [unit = u"m/rad", description = "Y gradient with respect to latitude"]
         push!(eqs, δxδlon ~ lon2m * cos(pvdict[:lat]))
         push!(eqs, δyδlat ~ lat2meters)
-        push!(vars, δxδlon, δyδlat)
+        push!(lhs_vars, δxδlon, δyδlat)
     end
 
     # Vertical coordinate transform: δPδlev (change in pressure per level index).
     if :lev in keys(pvdict)
         @variables δPδlev(t) [unit = u"Pa", description = "Pressure gradient with respect to level index"]
         push!(eqs, δPδlev ~ hPa2Pa * DataInterpolations.derivative(era5_P_itp, lev))
-        push!(vars, δPδlev)
+        push!(lhs_vars, δPδlev)
     end
 
     all_params = [
@@ -435,17 +441,17 @@ function ERA5(
         get(pvdict, :lev, nothing),
         hPa2Pa,
         (:lat in keys(pvdict) ? [lat2meters, lon2m] : [])...,
-        params...
+        all_constants..., all_discretes..., params...
     ]
     filter!(!isnothing, all_params)
 
     sys = System(
-        eqs, t, vars, all_params;
+        eqs, t, lhs_vars, all_params;
         name=name,
         initial_conditions = _itp_defaults(all_params),
+        discrete_events = [build_interp_event(interp_infos, starttime)],
         metadata=Dict(
             CoupleType => ERA5Coupler,
-            SysDiscreteEvent => create_updater_sys_event(name, params, starttime),
             SysDomainInfo => domaininfo,
         ),
     )

@@ -640,12 +640,13 @@ function OpenAQ(
     itp = DataSetInterpolator{dt}(fswr, parameter, starttime, endtime, domaininfo;
         stream = stream)
 
-    eq, param = create_interp_equation(itp, "", t, t_ref, [x, y])
+    eq, discretes, constants, info = create_interp_equation(
+        itp, "", t, t_ref, [x, y])
 
-    params = Any[t_ref, param]
     vars = [eq.lhs]
 
-    all_params = [x, y, params...]
+    all_params = [x, y, t_ref, constants..., discretes...]
+    interp_infos = [info]
     sys = System(
         [eq],
         t,
@@ -653,9 +654,9 @@ function OpenAQ(
         all_params;
         name = name,
         initial_conditions = _itp_defaults(all_params),
+        discrete_events = [build_interp_event(interp_infos, starttime)],
         metadata = Dict(
             CoupleType => OpenAQCoupler,
-            SysDiscreteEvent => create_updater_sys_event(name, params, starttime),
             SysDomainInfo => domaininfo,
         ),
     )

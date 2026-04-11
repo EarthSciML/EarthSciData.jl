@@ -260,19 +260,21 @@ function LANDFIRE(domaininfo::DomainInfo; name = :LANDFIRE,
         fswr, "fuel_model", starttime, endtime, domaininfo; stream = stream)
     dims = dimnames(itp)
     coords = _match_domain_coords(dims, pvdict, pvs)
-    eq, param = create_interp_equation(itp, "", t, t_ref, coords)
+    eq, discretes, constants, info = create_interp_equation(
+        itp, "", t, t_ref, coords)
 
-    params = Any[t_ref, param]
-    vars = Num[eq.lhs]
+    all_params = Any[t_ref, constants..., discretes...]
+    interp_infos = [info]
+    lhs_vars = Num[eq.lhs]
     eqs = Equation[eq]
 
     sys = System(
-        eqs, t, vars, params;
+        eqs, t, lhs_vars, all_params;
         name = name,
-        initial_conditions = _itp_defaults(params),
+        initial_conditions = _itp_defaults(all_params),
+        discrete_events = [build_interp_event(interp_infos, starttime)],
         metadata = Dict(
             CoupleType => LANDFIRECoupler,
-            SysDiscreteEvent => create_updater_sys_event(name, params, starttime),
             SysDomainInfo => domaininfo,
         )
     )

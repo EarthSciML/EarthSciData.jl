@@ -273,7 +273,7 @@ function EDGARv81MonthlyEmis(
         domaininfo::DomainInfo;
         scale = 1.0,
         name = :EDGARv81MonthlyEmis,
-        stream = true
+        stream = true,
 )
     starttime, endtime = get_tspan_datetime(domaininfo)
     fs = EDGARv81MonthlyEmisFileSet(substance, sector, starttime, endtime)
@@ -284,12 +284,16 @@ function EDGARv81MonthlyEmis(
     lon = :lon in keys(pvdict) ? pvdict[:lon] : pvdict[:x]
     lat = :lat in keys(pvdict) ? pvdict[:lat] : pvdict[:y]
     lev = pvdict[:lev]
+
     @parameters(Δz=60.0,
         [unit = u"m", description = "Height of the first vertical grid layer"],)
     @parameters t_ref=get_tref(domaininfo) [unit = u"s", description = "Reference time"]
     eqs = Equation[]
     params = Any[t_ref]
-    vars = Num[]
+    all_discretes = Any[]
+    all_constants = Any[]
+    interp_infos = []
+    lhs_vars = Num[]
     for varname in varnames(fs)
         dt = EarthSciMLBase.eltype(domaininfo)
         itp = DataSetInterpolator{dt}(fs, varname, starttime, endtime, domaininfo;
@@ -298,22 +302,25 @@ function EDGARv81MonthlyEmis(
         zero_emis = only(@constants $(ze_name)=0 [unit = units(itp) / u"m"])
         zero_emis = ModelingToolkit.unwrap(zero_emis)
         wrapper_f = (eq) -> ifelse(lev < 2, eq / Δz * scale, zero_emis)
-        eq, param = create_interp_equation(itp, "", t, t_ref, [lon, lat];
+        eq, discretes, constants, info = create_interp_equation(itp, "", t, t_ref, [lon, lat];
             wrapper_f = wrapper_f)
         push!(eqs, eq)
-        push!(params, param, zero_emis)
-        push!(vars, eq.lhs)
+        append!(all_discretes, discretes)
+        append!(all_constants, constants)
+        push!(all_constants, zero_emis)
+        push!(interp_infos, info)
+        push!(lhs_vars, eq.lhs)
     end
-    all_params = [lon, lat, lev, Δz, params...]
+    all_params = [lon, lat, lev, Δz, all_constants..., all_discretes..., params...]
     sys = System(
         eqs,
         t,
-        vars,
+        lhs_vars,
         all_params;
         name = name,
         initial_conditions = _itp_defaults(all_params),
+        discrete_events = [build_interp_event(interp_infos, starttime)],
         metadata = Dict(CoupleType => EDGARv81MonthlyEmisCoupler,
-            SysDiscreteEvent => create_updater_sys_event(name, params, starttime),
             SysDomainInfo => domaininfo)
     )
     return sys

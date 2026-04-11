@@ -87,9 +87,9 @@ end
         "WRF₊V(t, lon, lat, lev)",
         "MeanWind₊v_lev(t, lon, lat, lev)",
         "WRF₊W(t, lon, lat, lev)",
-        "WRF₊U_itp(WRF₊t_ref + t, lon, lat, lev)",
-        "WRF₊V_itp(WRF₊t_ref + t, lon, lat, lev)",
-        "WRF₊W_itp(WRF₊t_ref + t, lon, lat, lev)",
+        "interp_unsafe(WRF₊U_data",
+        "interp_unsafe(WRF₊V_data",
+        "interp_unsafe(WRF₊W_data",
         "WRF₊T(t, lon, lat, lev)",
         "WRF₊P(t, lon, lat, lev)",
         "WRF₊PB(t, lon, lat, lev)",
@@ -115,18 +115,30 @@ end
     end
 end
 
-@testitem "wrf total pressures" setup=[WRFSetup] begin
+# Helper: wrap the WRF system with a dummy state variable so that
+# ODEProblem + init work (DiffEq requires at least one DV).
+# The `init` call fires the SymbolicDiscreteCallback's `initialize`
+# affect, which loads data at tspan[1].
+@testsnippet WRFSolvedSetup begin
+    using ModelingToolkit: t, D
+    using OrdinaryDiffEqTsit5
     using SymbolicIndexingInterface: setp, getsym, parameter_values
 
-    wrf_sys = mtkcompile(WRF(domain))
-    prob = ODEProblem(wrf_sys, [], get_tref(domain))
-    f = getsym(prob, wrf_sys.P_total)
-    setter = setp(wrf_sys, [wrf_sys.lon, wrf_sys.lat, wrf_sys.lev])
-    ps = parameter_values(prob)
+    wrf_raw = WRF(domain)
+    @variables _dummy(t) = 0.0
+    _sys = compose(System([D(_dummy) ~ 0], t; name = :_w), wrf_raw)
+    wrf_compiled = mtkcompile(_sys)
+end
+
+@testitem "wrf total pressures" setup=[WRFSetup, WRFSolvedSetup] begin
+    prob = ODEProblem(wrf_compiled, [], get_tref(domain))
+    integ = init(prob, Tsit5())
+    f = getsym(integ, wrf_compiled.WRF.P_total)
+    setter = setp(integ, [wrf_compiled.WRF.lon, wrf_compiled.WRF.lat, wrf_compiled.WRF.lev])
 
     p_levels = map([1, 1.5, 2, 21.5, 30, 31.5]) do lev
-        setter(prob, [deg2rad(-118.2707), deg2rad(34.0059), lev])
-        f(prob)
+        setter(integ, [deg2rad(-118.2707), deg2rad(34.0059), lev])
+        f(integ)
     end
 
     p_want = [100331.86015842063, 100235.71904432855, 100139.57793023644,
@@ -135,6 +147,8 @@ end
 end
 
 @testitem "wrf lambert projection" setup=[WRFSetup] begin
+    using ModelingToolkit: t, D
+    using OrdinaryDiffEqTsit5
     using SymbolicIndexingInterface: setp, getsym, parameter_values
 
     domain = DomainInfo(
@@ -156,36 +170,36 @@ end
     )
     xv, yv = trans(lonv, latv)
 
-    wrf_sys = mtkcompile(WRF(domain))
-    prob = ODEProblem(wrf_sys, [], get_tref(domain))
-    f = getsym(prob, wrf_sys.P_total)
-    setter = setp(wrf_sys, [wrf_sys.x, wrf_sys.y, wrf_sys.lev])
-    ps = parameter_values(prob)
+    wrf_raw = WRF(domain)
+    @variables _dummy(t) = 0.0
+    _sys = compose(System([D(_dummy) ~ 0], t; name = :_w), wrf_raw)
+    compiled = mtkcompile(_sys)
+    prob = ODEProblem(compiled, [], get_tref(domain))
+    integ = init(prob, Tsit5())
+    f = getsym(integ, compiled.WRF.P_total)
+    setter = setp(integ, [compiled.WRF.x, compiled.WRF.y, compiled.WRF.lev])
 
     p_levels = map([1, 1.5, 2, 21.5, 30, 31.5]) do lev
-        setter(prob, [xv, yv, lev])
-        f(prob)
+        setter(integ, [xv, yv, lev])
+        f(integ)
     end
     p_want = [100099.2143558437, 100003.30283880791, 99907.39132177213, 67693.99609309093,
         30617.55578737014, 28672.612298322314]
     @test p_levels ≈ p_want
 end
 
-@testitem "wrf total pressures at fractional-hour timestamps (minutes/seconds)" setup=[WRFSetup] begin
-    using SymbolicIndexingInterface: setp, getsym, parameter_values
-
+@testitem "wrf total pressures at fractional-hour timestamps (minutes/seconds)" setup=[WRFSetup, WRFSolvedSetup] begin
     tstart = 25.0 * 60 + 36
     tend = tstart + 1
 
-    wrf_sys = mtkcompile(WRF(domain))
-    prob = ODEProblem(wrf_sys, [], (tstart, tend))
-    f = getsym(prob, wrf_sys.P_total)
-    setter = setp(wrf_sys, [wrf_sys.lon, wrf_sys.lat, wrf_sys.lev])
-    ps = parameter_values(prob)
+    prob = ODEProblem(wrf_compiled, [], (tstart, tend))
+    integ = init(prob, Tsit5())
+    f = getsym(integ, wrf_compiled.WRF.P_total)
+    setter = setp(integ, [wrf_compiled.WRF.lon, wrf_compiled.WRF.lat, wrf_compiled.WRF.lev])
 
     p_levels = map([1, 1.5, 2, 21.5, 30, 31.5]) do lev
-        setter(prob, [deg2rad(-118.2707), deg2rad(34.0059), lev])
-        f(prob)
+        setter(integ, [deg2rad(-118.2707), deg2rad(34.0059), lev])
+        f(integ)
     end
 
     p_want = [100295.9284090799, 100199.12630285477, 100102.32419662959, 67826.4962347177,
@@ -193,18 +207,15 @@ end
     @test p_levels ≈ p_want
 end
 
-@testitem "wrf δzδlev" setup=[WRFSetup] begin
-    using SymbolicIndexingInterface: setp, getsym, parameter_values
-
-    wrf_sys = mtkcompile(WRF(domain))
-    prob = ODEProblem(wrf_sys, [], get_tref(domain))
-    f = getsym(prob, wrf_sys.δzδlev)
-    setter = setp(wrf_sys, [wrf_sys.lon, wrf_sys.lat, wrf_sys.lev])
-    ps = parameter_values(prob)
+@testitem "wrf δzδlev" setup=[WRFSetup, WRFSolvedSetup] begin
+    prob = ODEProblem(wrf_compiled, [], get_tref(domain))
+    integ = init(prob, Tsit5())
+    f = getsym(integ, wrf_compiled.WRF.δzδlev)
+    setter = setp(integ, [wrf_compiled.WRF.lon, wrf_compiled.WRF.lat, wrf_compiled.WRF.lev])
 
     δzδlevs = map([1, 1.5, 2, 21.5, 30, 31.5]) do lev
-        setter(prob, [deg2rad(-118.2707), deg2rad(34.0059), lev])
-        f(prob)
+        setter(integ, [deg2rad(-118.2707), deg2rad(34.0059), lev])
+        f(integ)
     end
 
     δzδlev_want = [10.605308519529093, 16.96470420154144, 23.33493331829344,
@@ -212,18 +223,15 @@ end
     @test δzδlevs ≈ δzδlev_want
 end
 
-@testitem "wrf ground level vertical velocity" setup=[WRFSetup] begin
-    using SymbolicIndexingInterface: setp, getsym, parameter_values
-
-    wrf_sys = mtkcompile(WRF(domain))
-    prob = ODEProblem(wrf_sys, [], get_tref(domain))
-    f = getsym(prob, wrf_sys.W)
-    setter = setp(wrf_sys, [wrf_sys.lon, wrf_sys.lat, wrf_sys.lev])
-    ps = parameter_values(prob)
+@testitem "wrf ground level vertical velocity" setup=[WRFSetup, WRFSolvedSetup] begin
+    prob = ODEProblem(wrf_compiled, [], get_tref(domain))
+    integ = init(prob, Tsit5())
+    f = getsym(integ, wrf_compiled.WRF.W)
+    setter = setp(integ, [wrf_compiled.WRF.lon, wrf_compiled.WRF.lat, wrf_compiled.WRF.lev])
 
     ws = map([0.5, 1, 1.5, 2, 21.5, 30, 31.5]) do lev
-        setter(prob, [deg2rad(-118.2707), deg2rad(34.0059), lev])
-        f(prob)
+        setter(integ, [deg2rad(-118.2707), deg2rad(34.0059), lev])
+        f(integ)
     end
 
     w_want = [0.0, 0.00520469831395109, 0.01040939662790218, 0.011643543143849931,
