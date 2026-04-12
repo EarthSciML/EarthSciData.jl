@@ -249,29 +249,74 @@ if !Sys.iswindows() # Allocation tests don't seem to work on windows.
     end
 end
 
-@testitem "create_interpolator! with Float32 coords" begin
+@testitem "Float32 DomainInfo → Float32 data buffer (no Float64 promotion)" begin
     using EarthSciData
-    using Interpolations: BSpline, Linear, interpolate!, scale
-    using Dates: DateTime, Hour, datetime2unix
+    using EarthSciMLBase
+    using ModelingToolkit
+    using ModelingToolkit: t, D
+    using Dates
+    using DynamicQuantities
+    using OrdinaryDiffEqTsit5
+    using SymbolicIndexingInterface: setp, getsym
 
-    # Float32 coords (as when DomainInfo uses Float32 u_proto)
-    coords_f32 = (
-        Float32(0.0):Float32(0.1):Float32(0.3), Float32(0.0):Float32(0.1):Float32(0.3))
-    times = [DateTime(2024, 1, 1) + Hour(i) for i in 0:1]
-    data = zeros(Float32, 4, 4, 2)
-    interp_cache = similar(data)
-    grid, itp = EarthSciData.create_interpolator!(interp_cache, data, coords_f32, times)
+    # DomainInfo with Float32 u_proto — forces the element type through every
+    # downstream allocation. This is the CPU-side dress rehearsal for GPU
+    # execution: `similar(domain.u_proto, ...)` should preserve element type
+    # without promoting to Float64, and the interpolation path should not
+    # allocate Float64 intermediates.
+    domain = DomainInfo(
+        DateTime(2022, 1, 1),
+        DateTime(2022, 1, 3);
+        latrange = deg2rad(-85.0f0):deg2rad(2):deg2rad(85.0f0),
+        lonrange = deg2rad(-180.0f0):deg2rad(2.5):deg2rad(175.0f0),
+        levrange = 1:73,
+        u_proto = zeros(Float32, 0)
+    )
+    @test eltype(domain.u_proto) === Float32
 
-    # All ranges in the grid should be Float64
-    for r in grid
-        @test eltype(r) == Float64
+    geosfp = GEOSFP("4x5", domain)
+
+    # The `getdefault` of every _data parameter should be a Float32 Array
+    # (MTK stores the raw default pre-conversion; the conversion to
+    # `DataBufferType{Array{Float32,N}}` happens when `MTKParameters` is
+    # built — verified below).
+    ps = parameters(geosfp)
+    data_ps = [p for p in ps if endswith(string(ModelingToolkit.getname(p)), "_data")]
+    @test !isempty(data_ps)
+    for p in data_ps
+        default = ModelingToolkit.getdefault(p)
+        @test default isa Array{Float32}
+        @test eltype(default) === Float32
     end
 
-    # A second call (simulating update_interpolator!) should produce the same type
-    data2 = ones(Float32, 4, 4, 2)
-    interp_cache2 = similar(data2)
-    grid2, itp2 = EarthSciData.create_interpolator!(interp_cache2, data2, coords_f32, times)
-    @test typeof(itp) == typeof(itp2)
+    # Build a trivial wrapper system so ODEProblem/init work (GEOSFP alone has
+    # no state variables) and verify the initialize callback loads data
+    # without promoting the buffer.
+    @variables _dummy(t) = 0.0f0
+    _sys = compose(System([D(_dummy) ~ 0], t; name = :_w), geosfp)
+    compiled = mtkcompile(_sys)
+    prob = ODEProblem(compiled, [], (24.0 * 3600, 48.0 * 3600))
+    integ = init(prob, Tsit5())
+
+    # The `@discretes`-declared data buffers live in `p.discrete`, split into
+    # sub-buffers by symtype (one bucket per distinct concrete
+    # `DataBufferType{Array{Float32, N}}` — separate buckets for 2D+t and
+    # 3D+t data arrays). After the initialize callback fires, the buffers
+    # should be populated with real data, still Float32, no promotion.
+    pbuf = integ.p
+    found_nonzero_f32 = false
+    for buf in pbuf.discrete
+        T = eltype(buf)
+        T <: EarthSciData.DataBufferType || continue
+        for entry in buf
+            @test entry.data isa Array{Float32}
+            @test eltype(entry.data) === Float32
+            if any(!iszero, entry.data)
+                found_nonzero_f32 = true
+            end
+        end
+    end
+    @test found_nonzero_f32
 end
 
 @testitem "interp_cache_times! boundary" begin

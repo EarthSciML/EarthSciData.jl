@@ -5,13 +5,27 @@
 # Custom symtype for data buffer discretes. Using a non-Real, non-AbstractArray
 # type gives scalar symbolic shape (so canonicalize_eq! works) while routing
 # values to MTK's nonnumeric parameter buffer (is_variable_floatingpoint returns false).
-# Concrete wrapper so that MTK's Vector{DataBufferType} buffer can hold array values
-# via convert(DataBufferType, array).
-struct DataBufferType
-    data::Any
+# Parameterized on the underlying array type so that dispatch resolves the
+# concrete element type and backend (CPU `Array` vs. device arrays like
+# `CuArray`). This is load-bearing for GPU execution: `interp_unsafe(data.data,
+# ...)` is only type-stable (and therefore kernel-compilable) when the array
+# type is known at compile time — not when `data.data::Any`.
+struct DataBufferType{A <: AbstractArray}
+    data::A
+end
+# Pass-through constructors for MTK's `narrow_buffer_type`, which broadcasts
+# the target type over each entry of the nonnumeric buffer. When an entry is
+# already wrapped we short-circuit; when given a raw array we wrap it.
+DataBufferType{A}(x::DataBufferType{A}) where {A <: AbstractArray} = x
+function DataBufferType{A}(x::DataBufferType) where {A <: AbstractArray}
+    DataBufferType{A}(convert(A, x.data))
 end
 Base.convert(::Type{DataBufferType}, x::DataBufferType) = x
-Base.convert(::Type{DataBufferType}, x) = DataBufferType(x)
+Base.convert(::Type{DataBufferType}, x::AbstractArray) = DataBufferType(x)
+Base.convert(::Type{DataBufferType{A}}, x::DataBufferType{A}) where {A} = x
+function Base.convert(::Type{DataBufferType{A}}, x::AbstractArray) where {A}
+    DataBufferType{A}(convert(A, x))
+end
 Base.copy(x::DataBufferType) = DataBufferType(copy(x.data))
 
 # Dummy functions for unit validation. ModelingToolkit calls the function with
@@ -52,12 +66,14 @@ end
 # Tell SymbolicUtils that interp_unsafe/interp_time_only always return a Real scalar.
 # promote_symtype: @register_symbolic generates promote_symtype dispatches for the
 # declared argument types, but DataBufferType needs explicit overrides since
-# the fallback may not handle it correctly.
+# the fallback may not handle it correctly. `Type{<:DataBufferType}` matches
+# any concrete parameterization (e.g. `DataBufferType{Array{Float64,4}}`,
+# `DataBufferType{Array{Float32,4}}`, `DataBufferType{CuArray{Float64,4}}`).
 for n_args in 4:6
     @eval Symbolics.SymbolicUtils.promote_symtype(::typeof(interp_unsafe),
-        ::Type{DataBufferType}, $(fill(:(::Type), n_args - 2)...), ::Type) = Real
+        ::Type{<:DataBufferType}, $(fill(:(::Type), n_args - 2)...), ::Type) = Real
     @eval Symbolics.SymbolicUtils.promote_symtype(::typeof(interp_time_only),
-        ::Type{DataBufferType}, $(fill(:(::Type), n_args - 2)...), ::Type) = Real
+        ::Type{<:DataBufferType}, $(fill(:(::Type), n_args - 2)...), ::Type) = Real
 end
 
 # Register zero derivatives. The data is updated discretely via callbacks
@@ -79,8 +95,22 @@ for n_args in 4:6
 end
 
 function _make_array_discrete(name::Symbol, init_data, ndims::Int, desc::String)
-    return only(@discretes $name(t)::DataBufferType = Float64.(init_data) [
-        description = desc])
+    # `init_data` is allocated by the caller via `similar(domain.u_proto, ...)`,
+    # so it already has the correct element type and array backend (CPU vs.
+    # device). Do NOT promote to Float64 here — that would break Float32
+    # simulations and force all data buffers onto the host.
+    #
+    # `@discretes` needs a concrete `DataType` for the `::T` annotation, and
+    # `DataBufferType` as a parameterized struct is a `UnionAll`.  Build the
+    # concrete parameterization `DataBufferType{typeof(init_data)}` at runtime
+    # and feed it into `@discretes` via `@eval` so the macro sees a concrete
+    # type.  This is called a handful of times at model construction — the
+    # `@eval` cost is in the noise compared to `mtkcompile`.
+    BT = DataBufferType{typeof(init_data)}
+    expr = quote
+        @discretes $name(t)::$BT = $init_data [description = $desc]
+    end
+    return only(Core.eval(@__MODULE__, expr))
 end
 
 """
@@ -123,12 +153,16 @@ function create_interp_equation(itp::DataSetInterpolator{To}, filename, t, t_ref
     cache_nt = size(itp.cache.data_buffer, ndims(itp.cache.data_buffer))
     data_dims = (grid_dims..., cache_nt)
 
-    # Data discrete — typed as AbstractArray so MTK stores it in the nonnumeric buffer
-    # while keeping scalar shape (avoids ifelse shape mismatch during substitute).
-    # Initial value is zeros; the discrete update event populates the buffer
-    # with real data at solve time.
+    # Data discrete — wrapped in `DataBufferType` so MTK stores it in the
+    # nonnumeric parameter buffer with scalar symbolic shape. Allocate via
+    # `similar(domain.u_proto, ...)` so the buffer inherits the array backend
+    # of the state vector (plain `Array` on CPU, `CuArray`/`ROCArray`/etc. on
+    # device). Element type comes from the interpolator's `To` parameter,
+    # which is derived from `eltype(domaininfo)`. Initial value is zeros; the
+    # discrete update event populates the buffer at solve time.
     n_data = Symbol(n, :_data)
-    init_data = zeros(To, data_dims...)
+    init_data = similar(itp.domain.u_proto, To, data_dims...)
+    fill!(init_data, zero(To))
     p_data = _make_array_discrete(n_data, init_data, length(data_dims),
         "Interpolation data for $(n)")
 
@@ -341,8 +375,15 @@ function build_interp_event(interp_infos, starttime::DateTime)
         for (ck, dsi) in pairs(ctx)
             lazyload!(dsi, integ.t + t_ref)
             km = key_map[ck]
-            result_vals[findfirst(==(km.data_key), mod_keys)] = DataBufferType(
-                copy(dsi.cache.data_buffer))
+            # Transfer the CPU-side `dsi.cache.data_buffer` into a buffer of
+            # the same backend as the state vector (`Array` on CPU,
+            # `CuArray`/etc. on device), preserving the element type of the
+            # domain's prototype array.  `copyto!` handles both same-device
+            # (memcpy) and cross-device (host→device) transfers.
+            src = dsi.cache.data_buffer
+            dst = similar(dsi.domain.u_proto, size(src)...)
+            copyto!(dst, src)
+            result_vals[findfirst(==(km.data_key), mod_keys)] = DataBufferType(dst)
             ts, tstep = get_time_grid_params(dsi)
             result_vals[findfirst(==(km.tstart_key), mod_keys)] = ts
             result_vals[findfirst(==(km.tstep_key), mod_keys)] = tstep
