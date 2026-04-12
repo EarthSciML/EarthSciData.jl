@@ -694,12 +694,23 @@ end
 # computed as: fi = 1 + (coord - grid_start) / grid_step
 # --------------------------------------------------------------------------
 
+# A `fit` (fractional time index) outside `[1, nt]` means the discrete
+# update event did not refresh the cache to cover `integrator.t` — this
+# indicates a bug in `build_interp_event`'s tstop computation, not a user
+# error.  We surface it as an assertion via `@boundscheck` so callers can
+# elide the check with `@inbounds` in performance-critical code, and the
+# `@noinline` keeps the throw path off the hot path.
+@noinline _throw_fit_oor(fit, nt) = throw(ArgumentError(
+    "Interpolation time index $fit outside loaded cache range [1, $nt]; " *
+    "the discrete update event did not refresh the cache for the current integrator time."))
+
 """
 Multilinear interpolation on a 2D array (1 spatial dim + time).
 `fit` and `fi1` are fractional 1-based indices.
 """
 function interp_unsafe(data::AbstractArray{T, 2}, fit, fi1, extrap) where {T}
     n1, nt = size(data)
+    @boundscheck (fit < one(T) || fit > T(nt)) && _throw_fit_oor(fit, nt)
 
     # Extrapolation check
     if extrap < one(T)
@@ -736,6 +747,7 @@ Multilinear interpolation on a 3D array (2 spatial dims + time).
 """
 function interp_unsafe(data::AbstractArray{T, 3}, fit, fi1, fi2, extrap) where {T}
     n1, n2, nt = size(data)
+    @boundscheck (fit < one(T) || fit > T(nt)) && _throw_fit_oor(fit, nt)
 
     # Extrapolation check
     if extrap < one(T)
@@ -781,6 +793,7 @@ Multilinear interpolation on a 4D array (3 spatial dims + time).
 """
 function interp_unsafe(data::AbstractArray{T, 4}, fit, fi1, fi2, fi3, extrap) where {T}
     n1, n2, n3, nt = size(data)
+    @boundscheck (fit < one(T) || fit > T(nt)) && _throw_fit_oor(fit, nt)
 
     # Extrapolation check
     if extrap < one(T)
