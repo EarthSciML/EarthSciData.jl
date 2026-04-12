@@ -61,20 +61,6 @@ for n_args in 4:6
         $(fill(:(::Symbolics.SymbolicUtils.ShapeT), n_args)...)) = _scalar_shape
 end
 
-# Fix SymbolicUtils bug: promote_shape for ifelse returns `true` (Bool) instead of the
-# shape when branches match, because `sht == shf || error(...)` returns `true`.
-# This causes parse_shape(::Bool) errors when maketerm rebuilds ifelse during substitute.
-# Must be done in __init__ because method overwriting is not allowed during precompilation.
-function _fix_ifelse_promote_shape()
-    @eval Symbolics.SymbolicUtils function promote_shape(::typeof(ifelse),
-            shc::ShapeT, sht::ShapeT, shf::ShapeT)
-        @nospecialize shc sht shf
-        is_array_shape(shc) && error("Condition of `ifelse` cannot be an array.")
-        sht == shf || error("Both branches of `ifelse` must have the same shape.")
-        return sht
-    end
-end
-
 function _make_array_discrete(name::Symbol, init_data, ndims::Int, desc::String)
     return only(@discretes $name(t)::DataBufferType = Float64.(init_data) [
         description = desc])
