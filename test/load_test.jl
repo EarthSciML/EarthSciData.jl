@@ -420,7 +420,7 @@ end
     )
 
     # Should be able to interpolate without error
-    val = EarthSciData.interp(
+    val = EarthSciData.interp!(
         itp, DateTime(2022, 5, 1, 1), deg2rad(0.25f0), deg2rad(0.5f0), 1.0f0)
     @test !isnan(val)
     @test isfinite(val)

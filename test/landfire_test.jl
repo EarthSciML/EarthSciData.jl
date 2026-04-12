@@ -88,7 +88,7 @@ end
         fswr, "fuel_model", ts, te, domain; stream = true)
     lon_c=deg2rad(-121.60)
     lat_c=deg2rad(39.78)
-    val=EarthSciData.interp(itp, ts, Float32(lon_c), Float32(lat_c))
+    val=EarthSciData.interp!(itp, ts, Float32(lon_c), Float32(lat_c))
     # Nearest-neighbour should produce integer-valued results
     @test val ≈ round(val)
     @test val >= 0

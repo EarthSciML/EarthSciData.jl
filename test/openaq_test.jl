@@ -460,13 +460,13 @@ $id,8001,$name,2024-06-15T14:00:00+00:00,$lat,$lon,pm25,µg/m³,300.0"""
     itp = EarthSciData.DataSetInterpolator{Float64}(fs, "pm25", starttime, endtime, domain)
 
     # Interpolate at grid center at hour 12: all stations report 100 µg/m³ = 100e-6 kg/m³
-    result = EarthSciData.interp(itp, DateTime(2024, 6, 15, 12),
+    result = EarthSciData.interp!(itp, DateTime(2024, 6, 15, 12),
         deg2rad(-73.5), deg2rad(40.0))
     @test result > 0
     @test result ≈ 100.0e-6 rtol=0.5
 
     # Interpolate at hour 13: all stations report 200 µg/m³
-    result2 = EarthSciData.interp(itp, DateTime(2024, 6, 15, 13),
+    result2 = EarthSciData.interp!(itp, DateTime(2024, 6, 15, 13),
         deg2rad(-73.5), deg2rad(40.0))
     @test result2 > result  # Should increase over time
 

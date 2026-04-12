@@ -65,11 +65,11 @@ end
     itp = EarthSciData.DataSetInterpolator{Float32}(fs, "SO2_em_anthro", ts, te, domain)
 
     # Test interpolation at a point in eastern China (known high SO2 area).
-    result = interp(itp, ts, deg2rad(116.0f0), deg2rad(39.0f0))
+    result = interp!(itp, ts, deg2rad(116.0f0), deg2rad(39.0f0))
     @test result > 0.0f0  # Should be positive emissions.
 
     # Test interpolation in the middle of the Pacific (should be very small).
-    result_ocean = interp(itp, ts, deg2rad(-170.0f0), deg2rad(0.0f0))
+    result_ocean = interp!(itp, ts, deg2rad(-170.0f0), deg2rad(0.0f0))
     @test result_ocean >= 0.0f0
     @test result_ocean < result  # Much less than eastern China.
 end
@@ -81,19 +81,19 @@ end
     fs_all = EarthSciData.CEDSFileSet("SO2", ts, te)
     itp_all = EarthSciData.DataSetInterpolator{Float32}(
         fs_all, "SO2_em_anthro", ts, te, domain)
-    val_all = interp(itp_all, ts, deg2rad(116.0f0), deg2rad(39.0f0))
+    val_all = interp!(itp_all, ts, deg2rad(116.0f0), deg2rad(39.0f0))
 
     # Energy sector only (index 1).
     fs_energy = EarthSciData.CEDSFileSet("SO2", ts, te; sectors = [1])
     itp_energy = EarthSciData.DataSetInterpolator{Float32}(
         fs_energy, "SO2_em_anthro", ts, te, domain)
-    val_energy = interp(itp_energy, ts, deg2rad(116.0f0), deg2rad(39.0f0))
+    val_energy = interp!(itp_energy, ts, deg2rad(116.0f0), deg2rad(39.0f0))
 
     # Energy + Industrial sectors (indices 1, 2).
     fs_multi = EarthSciData.CEDSFileSet("SO2", ts, te; sectors = [1, 2])
     itp_multi = EarthSciData.DataSetInterpolator{Float32}(
         fs_multi, "SO2_em_anthro", ts, te, domain)
-    val_multi = interp(itp_multi, ts, deg2rad(116.0f0), deg2rad(39.0f0))
+    val_multi = interp!(itp_multi, ts, deg2rad(116.0f0), deg2rad(39.0f0))
 
     # Single sector should be <= multi-sector <= total.
     @test val_energy <= val_multi || val_energy ≈ val_multi
@@ -121,12 +121,12 @@ end
 
     # Pin a quantitative value at a known high-emission location (eastern China).
     # SO2 emissions from power plants and industry in this region are well-documented.
-    val_china = interp(itp, ts, deg2rad(116.0f0), deg2rad(39.0f0))
+    val_china = interp!(itp, ts, deg2rad(116.0f0), deg2rad(39.0f0))
     @test val_china > 1.0f-12  # Should be a meaningful positive flux (kg/m²/s)
     @test val_china < 1.0f-6   # But not unreasonably large
 
     # Middle of the Sahara desert - should have very low SO2 emissions.
-    val_sahara = interp(itp, ts, deg2rad(10.0f0), deg2rad(25.0f0))
+    val_sahara = interp!(itp, ts, deg2rad(10.0f0), deg2rad(25.0f0))
     @test val_sahara >= 0.0f0
     @test val_sahara < val_china * 0.01f0  # Orders of magnitude less than China
 
@@ -134,7 +134,7 @@ end
     fs_co = EarthSciData.CEDSFileSet("CO", ts, te)
     itp_co = EarthSciData.DataSetInterpolator{Float32}(
         fs_co, "CO_em_anthro", ts, te, domain)
-    val_co = interp(itp_co, ts, deg2rad(116.0f0), deg2rad(39.0f0))
+    val_co = interp!(itp_co, ts, deg2rad(116.0f0), deg2rad(39.0f0))
     @test val_co > 0.0f0
     @test val_co != val_china  # Different species should have different values
 end
@@ -159,8 +159,8 @@ end
 
     # Continental US (high emissions) vs middle of Pacific (low emissions) -
     # if wrapping were wrong, these could be swapped.
-    val_us = interp(itp, ts, deg2rad(-90.0f0), deg2rad(35.0f0))
-    val_pacific = interp(itp, ts, deg2rad(170.0f0), deg2rad(35.0f0))
+    val_us = interp!(itp, ts, deg2rad(-90.0f0), deg2rad(35.0f0))
+    val_pacific = interp!(itp, ts, deg2rad(170.0f0), deg2rad(35.0f0))
     @test val_us > val_pacific  # US should have more SO2 than open Pacific
 end
 
@@ -234,7 +234,7 @@ end
     # approximately rate * time.
     fs = EarthSciData.CEDSFileSet("SO2", ts, te)
     itp = EarthSciData.DataSetInterpolator{Float32}(fs, "SO2_em_anthro", ts, te, domain)
-    rate = interp(itp, ts, deg2rad(116.0f0), deg2rad(40.0f0))
+    rate = interp!(itp, ts, deg2rad(116.0f0), deg2rad(40.0f0))
     expected_approx = Float64(rate) * 60.0
     @test sol.u[end][1] ≈ expected_approx rtol=0.1
 end

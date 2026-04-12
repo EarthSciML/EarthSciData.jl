@@ -50,7 +50,7 @@ end
 
     itp=EarthSciData.DataSetInterpolator{Float32}(fileset, varname, ts, te, domain)
     # Central Germany (high power plant density)
-    result=EarthSciData.interp(itp, sample_time, deg2rad(10.0f0), deg2rad(51.0f0))
+    result=EarthSciData.interp!(itp, sample_time, deg2rad(10.0f0), deg2rad(51.0f0))
     @test result >= 0.0f0
 end
 

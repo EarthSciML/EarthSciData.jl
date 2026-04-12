@@ -312,16 +312,20 @@ function build_interp_event(interp_infos, starttime::DateTime)
     end
 
     function update_data!(modified, observed, ctx, integ)
-        result = Dict{Symbol, Any}()
+        # Build result in the same order as mod_keys to guarantee the
+        # returned NamedTuple matches the `modified` declaration order.
+        # (Dict iteration order is not guaranteed in Julia.)
+        result_vals = Vector{Any}(undef, length(mod_keys))
         for (ck, dsi) in pairs(ctx)
             lazyload!(dsi, integ.t + t_ref)
             km = key_map[ck]
-            result[km.data_key] = DataBufferType(copy(dsi.cache.data_buffer))
+            result_vals[findfirst(==(km.data_key), mod_keys)] = DataBufferType(
+                copy(dsi.cache.data_buffer))
             ts, tstep = get_time_grid_params(dsi)
-            result[km.tstart_key] = ts
-            result[km.tstep_key] = tstep
+            result_vals[findfirst(==(km.tstart_key), mod_keys)] = ts
+            result_vals[findfirst(==(km.tstep_key), mod_keys)] = tstep
         end
-        NamedTuple{Tuple(keys(result))}(Tuple(values(result)))
+        NamedTuple{Tuple(mod_keys)}(Tuple(result_vals))
     end
 
     affect = ModelingToolkit.ImperativeAffect(
