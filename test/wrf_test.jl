@@ -188,7 +188,8 @@ end
     @test p_levels ≈ p_want
 end
 
-@testitem "wrf total pressures at fractional-hour timestamps (minutes/seconds)" setup=[WRFSetup, WRFSolvedSetup] begin
+@testitem "wrf total pressures at fractional-hour timestamps (minutes/seconds)" setup=[
+    WRFSetup, WRFSolvedSetup] begin
     tstart = 25.0 * 60 + 36
     tend = tstart + 1
 

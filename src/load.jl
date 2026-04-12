@@ -37,7 +37,7 @@ Subtypes with per-variable files should override this.
 """
 relpath(fs::FileSet, t::DateTime, ::Nothing) = relpath(fs, t)
 
-struct FileSetWithRegridder{FS,RF}
+struct FileSetWithRegridder{FS, RF}
     fs::FS
     regridder::RF
 end
@@ -71,6 +71,7 @@ Throws an error listing any missing methods. This is an opt-in check
 intended for use when implementing a new `FileSet` subtype.
 
 # Example
+
 ```julia
 struct MyFileSet <: EarthSciData.FileSet ... end
 # After defining all methods:
@@ -83,7 +84,7 @@ function verify_fileset_interface(::Type{T}) where {T <: FileSet}
         (loadmetadata, Tuple{T, String}, "loadmetadata(::$T, varname::String)"),
         (loadslice!, Tuple{AbstractArray, T, DateTime, String},
             "loadslice!(cache, ::$T, ::DateTime, varname)"),
-        (varnames, Tuple{T}, "varnames(::$T)"),
+        (varnames, Tuple{T}, "varnames(::$T)")
     ]
     missing_methods = String[]
     # relpath must have either a 2-arg or 3-arg method.
@@ -110,7 +111,9 @@ $(SIGNATURES)
 Return the URL for the file for the given `DateTime`.
 An optional `varname` can be provided for datasets with per-variable files.
 """
-url(fs::FileSet, t::DateTime, varname=nothing) = join([mirror(fs), relpath(fs, t, varname)], "/")
+function url(fs::FileSet, t::DateTime, varname = nothing)
+    join([mirror(fs), relpath(fs, t, varname)], "/")
+end
 
 """
 $(SIGNATURES)
@@ -118,7 +121,7 @@ $(SIGNATURES)
 Return the local path for the file for the given `DateTime`.
 An optional `varname` can be provided for datasets with per-variable files.
 """
-function localpath(fs::FileSet, t::DateTime, varname=nothing)
+function localpath(fs::FileSet, t::DateTime, varname = nothing)
     file = relpath(fs, t, varname)
     file = replace(file, ':' => '_')
     joinpath(download_cache(), replace(mirror(fs), "://" => "_"), file)
@@ -127,7 +130,7 @@ end
 """
 Download a file with a progress bar, deleting the partial file on error.
 """
-function _download_with_progress(download_url::AbstractString, path::AbstractString; timeout::Real=300)
+function _download_with_progress(download_url::AbstractString, path::AbstractString; timeout::Real = 300)
     try
         prog = Progress(100; desc = "Downloading $(basename(download_url)):", dt = 0.1)
         Downloads.download(download_url, path,
@@ -151,7 +154,7 @@ $(SIGNATURES)
 Check if the specified file exists locally. If not, download it.
 An optional `varname` can be provided for datasets with per-variable files.
 """
-function maybedownload(fs::FileSet, t::DateTime, varname=nothing)
+function maybedownload(fs::FileSet, t::DateTime, varname = nothing)
     p = localpath(fs, t, varname)
     if isfile(p)
         return p
@@ -304,7 +307,9 @@ mutable struct DataSetInterpolator{To, N, N2, FT, DomT, ET, FSRG}
             stream = true, extrapolate_type = Flat()) where {To <: Real}
         metadata = loadmetadata(fs, varname)
         model_grid = _compute_grid(domain, metadata.staggering)
-        regrid_f = (dst::AbstractArray, src::AbstractArray; extrapolate_type = extrapolate_type) -> begin
+        regrid_f = (dst::AbstractArray,
+            src::AbstractArray;
+            extrapolate_type = extrapolate_type) -> begin
             interpolate_from!(dst, src, metadata, model_grid, domain;
                 extrapolate_type = extrapolate_type)
         end
@@ -350,7 +355,7 @@ mutable struct DataSetInterpolator{To, N, N2, FT, DomT, ET, FSRG}
             metadata,
             domain,
             extrapolate_type,
-            ReentrantLock(),
+            ReentrantLock()
         )
         itp
     end
@@ -546,7 +551,7 @@ function update!(itp::DataSetInterpolator, t::DateTime)
             load_data_for_time!(itp, times[idx]) # Load data if not already loaded.
         end
         # Regrid results into the data buffer.
-        itp.fs.regridder(d, tc.load_cache; extrapolate_type=itp.extrapolate_type)
+        itp.fs.regridder(d, tc.load_cache; extrapolate_type = itp.extrapolate_type)
         # Start loading the next time point asynchronously.
         tc.loadtask = Threads.@spawn load_data_for_time!(
             itp, nexttimepoint(itp, times[idx]))
@@ -615,7 +620,9 @@ function interp_unsafe(
     grid_ranges = _model_grid(itp)
     # Compute fractional 1-based indices
     fit = one(T1) + T1((t_unix - t_start) / t_step)
-    fis = ntuple(i -> one(T1) + T1((locs[i] - first(grid_ranges[i])) / step(grid_ranges[i])), Val(N2))
+    fis = ntuple(
+        i -> one(T1) +
+             T1((locs[i] - first(grid_ranges[i])) / step(grid_ranges[i])), Val(N2))
     extrap = itp.extrapolate_type isa Real ? zero(T1) : one(T1)
     interp_unsafe(tc.data_buffer, fit, fis..., extrap)
 end
@@ -643,7 +650,6 @@ function interp!(itp::DataSetInterpolator, t::Real, locs::Vararg{T, N})::T where
     lazyload!(itp, Dates.unix2datetime(t))
     interp_unsafe(itp, t, locs...)
 end
-
 
 """
 Return the time grid parameters `(t_start, t_step)` from the current cache times
@@ -859,4 +865,3 @@ function _match_domain_coords(dims, pvdict, pvs)
     end
     return coords
 end
-

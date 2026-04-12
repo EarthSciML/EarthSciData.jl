@@ -2,12 +2,12 @@
 # Dynamically maps v_lon/v_x → u_wind, v_lat/v_y → v_wind, v_lev → w_wind.
 function _couple_meanwind(mw_sys, met_sys, u_wind, v_wind, w_wind)
     mw_unkn = unknowns(mw_sys)
-    mw_syms = Symbol.([split(string(Symbolics.tosymbol(v, escape=false)), "₊")[end]
-                        for v in mw_unkn])
+    mw_syms = Symbol.([split(string(Symbolics.tosymbol(v, escape = false)), "₊")[end]
+                       for v in mw_unkn])
     wind_targets = Dict(
         :v_lon => u_wind, :v_x => u_wind,
         :v_lat => v_wind, :v_y => v_wind,
-        :v_lev => w_wind,
+        :v_lev => w_wind
     )
     eqs = Equation[]
     for (i, sym) in enumerate(mw_syms)
@@ -33,16 +33,24 @@ function EarthSciMLBase.couple2(c::CEDSCoupler, g::GEOSFPCoupler)
 end
 
 # NEI + GEOSFP
-EarthSciMLBase.couple2(e::NEI2016MonthlyEmisCoupler, g::GEOSFPCoupler) = _couple_emis_to_met(e, g)
+function EarthSciMLBase.couple2(e::NEI2016MonthlyEmisCoupler, g::GEOSFPCoupler)
+    _couple_emis_to_met(e, g)
+end
 
 # EDGAR + GEOSFP
-EarthSciMLBase.couple2(e::EDGARv81MonthlyEmisCoupler, g::GEOSFPCoupler) = _couple_emis_to_met(e, g)
+function EarthSciMLBase.couple2(e::EDGARv81MonthlyEmisCoupler, g::GEOSFPCoupler)
+    _couple_emis_to_met(e, g)
+end
 
 # NEI + ERA5
-EarthSciMLBase.couple2(e::NEI2016MonthlyEmisCoupler, g::ERA5Coupler) = _couple_emis_to_met(e, g)
+function EarthSciMLBase.couple2(e::NEI2016MonthlyEmisCoupler, g::ERA5Coupler)
+    _couple_emis_to_met(e, g)
+end
 
 # EDGAR + ERA5
-EarthSciMLBase.couple2(e::EDGARv81MonthlyEmisCoupler, g::ERA5Coupler) = _couple_emis_to_met(e, g)
+function EarthSciMLBase.couple2(e::EDGARv81MonthlyEmisCoupler, g::ERA5Coupler)
+    _couple_emis_to_met(e, g)
+end
 
 # MeanWind + ERA5
 function EarthSciMLBase.couple2(mw::EarthSciMLBase.MeanWindCoupler, e::ERA5Coupler)

@@ -1,12 +1,19 @@
 export NEI2016MonthlyEmis
 
 # Diurnal scale factors for 24 hours (0-23) for UTC-0
-const DIURNAL_FACTORS = [0.45, 0.45, 0.6, 0.6, 0.6, 0.6, 1.45, 1.45, 1.45, 1.45, 1.4, 1.4, 1.4, 1.4, 1.45, 1.45, 1.45, 1.45, 0.65, 0.65, 0.65, 0.65, 0.45, 0.45]
-const DIURNAL_FACTORS_NOx = [0.39598674, 0.31852847, 0.30128068, 0.29590213, 0.33177775, 0.43871498, 0.9094625, 1.5850095, 1.6223788, 1.3429453, 1.2265036, 1.1937649, 1.254314, 1.3282939, 1.331211, 1.4135737, 1.6848333, 1.710925, 1.3491899, 1.0586671, 0.84439224, 0.761263, 0.72693235, 0.5741503]
-const DIURNAL_FACTORS_ISOP =[0,0,0,0,0,0, 0.2376,0.7224,1.2048,1.656,2.0496,2.3616,2.5728,2.6616,2.6184,2.4408,2.1288,1.6896,1.1448,0.5136, 0,0,0,0]
+const DIURNAL_FACTORS = [0.45, 0.45, 0.6, 0.6, 0.6, 0.6, 1.45, 1.45, 1.45, 1.45, 1.4, 1.4,
+    1.4, 1.4, 1.45, 1.45, 1.45, 1.45, 0.65, 0.65, 0.65, 0.65, 0.45, 0.45]
+const DIURNAL_FACTORS_NOx = [
+    0.39598674, 0.31852847, 0.30128068, 0.29590213, 0.33177775, 0.43871498,
+    0.9094625, 1.5850095, 1.6223788, 1.3429453, 1.2265036, 1.1937649,
+    1.254314, 1.3282939, 1.331211, 1.4135737, 1.6848333, 1.710925,
+    1.3491899, 1.0586671, 0.84439224, 0.761263, 0.72693235, 0.5741503]
+const DIURNAL_FACTORS_ISOP = [
+    0, 0, 0, 0, 0, 0, 0.2376, 0.7224, 1.2048, 1.656, 2.0496, 2.3616, 2.5728,
+    2.6616, 2.6184, 2.4408, 2.1288, 1.6896, 1.1448, 0.5136, 0, 0, 0, 0]
 
-const DayofWeekFactors_NOx = [1.0706,1.0706,1.0706,1.0706,1.0706,0.863,0.784]
-const DayofWeekFactors_CO = [1.076,1.1076,1.0706,1.0706,1.0706,0.779,0.683]
+const DayofWeekFactors_NOx = [1.0706, 1.0706, 1.0706, 1.0706, 1.0706, 0.863, 0.784]
+const DayofWeekFactors_CO = [1.076, 1.1076, 1.0706, 1.0706, 1.0706, 0.779, 0.683]
 
 # Load and create interpolator for delp_dry_surface
 const DELP_DRY_SURFACE_ITP = let
@@ -126,7 +133,7 @@ end
 # Tell SymbolicUtils these registered functions return scalars (needed for maketerm rebuild
 # during substitute to avoid Unknown(-1) shapes breaking ifelse).
 for f in (diurnal_itp, diurnal_itp_NOx, diurnal_itp_ISOP,
-          dayofweek_itp_CO, dayofweek_itp_NOx, delp_dry_surface_itp)
+    dayofweek_itp_CO, dayofweek_itp_NOx, delp_dry_surface_itp)
     @eval Symbolics.SymbolicUtils.promote_shape(::typeof($f),
         ::Symbolics.SymbolicUtils.ShapeT, ::Symbolics.SymbolicUtils.ShapeT) = _scalar_shape
 end
@@ -279,23 +286,24 @@ function loadmetadata(fs::NEI2016MonthlyEmisFileSet, varname)::MetaData
 end
 
 function get_geometry(fs::NEI2016MonthlyEmisFileSet, m::MetaData)
-    x₀,y₀,Δx,Δy,nx,ny = lock(nclock) do
+    x₀, y₀, Δx, Δy, nx, ny = lock(nclock) do
         x₀ = fs.ds.attrib["XORIG"]
         y₀ = fs.ds.attrib["YORIG"]
         Δx = fs.ds.attrib["XCELL"]
         Δy = fs.ds.attrib["YCELL"]
         nx = fs.ds.attrib["NCOLS"]
         ny = fs.ds.attrib["NROWS"]
-        x₀,y₀,Δx,Δy,nx,ny
+        x₀, y₀, Δx, Δy, nx, ny
     end
     # Create edges (nx+1 and ny+1 points) so we get nx*ny cells
-    x = range(start=x₀, step=Δx, length=nx+1)
-    y = range(start=y₀, step=Δy, length=ny+1)
+    x = range(start = x₀, step = Δx, length = nx+1)
+    y = range(start = y₀, step = Δy, length = ny+1)
     # Use column-major (x-fastest) ordering to match vec() on data arrays
     polys = Vector{Vector{NTuple{2, Float64}}}(undef, nx*ny)
     for j in 1:ny, i in 1:nx
-        polys[(j-1)*nx + i] = [(x[i], y[j]), (x[i+1], y[j]), (x[i+1], y[j+1]),
-            (x[i], y[j+1]), (x[i], y[j])]
+
+        polys[(j - 1) * nx + i] = [(x[i], y[j]), (x[i + 1], y[j]), (x[i + 1], y[j + 1]),
+            (x[i], y[j + 1]), (x[i], y[j])]
     end
     return polys
 end
@@ -311,7 +319,10 @@ function varnames(fs::NEI2016MonthlyEmisFileSet)
     end
 end
 
-Base.close(fs::NEI2016MonthlyEmisFileSet) = lock(nclock) do; close(fs.ds); end
+Base.close(fs::NEI2016MonthlyEmisFileSet) =
+    lock(nclock) do ;
+        close(fs.ds);
+    end
 
 struct NEI2016MonthlyEmisCoupler
     sys::Any
@@ -345,7 +356,7 @@ function NEI2016MonthlyEmis(
         domaininfo::DomainInfo;
         scale = 1.0,
         name = :NEI2016MonthlyEmis,
-        stream = true,
+        stream = true
 )
     starttime, endtime = get_tspan_datetime(domaininfo)
     _fs = NEI2016MonthlyEmisFileSet(sector, starttime, endtime)
@@ -389,25 +400,32 @@ function NEI2016MonthlyEmis(
         # The conversion is: mixing_ratio = flux / (g0_100 * delp_dry_surface(x, y))
         if varname in ["CO"]
             wrapper_f = (eq) -> ifelse(lev < 2,
-                eq / Δz * scale * dayofweek_itp_CO(t + t_ref, x) * diurnal_itp(t + t_ref, x) / (g0_100 * delp_dry_surface_itp(x, y)),
+                eq / Δz * scale * dayofweek_itp_CO(t + t_ref, x) *
+                diurnal_itp(t + t_ref, x) / (g0_100 * delp_dry_surface_itp(x, y)),
                 zero_emis)
         elseif varname in ["FORM"]
             wrapper_f = (eq) -> ifelse(lev < 2,
-                eq / Δz * scale * diurnal_itp(t + t_ref, x) / (g0_100 * delp_dry_surface_itp(x, y)),
+                eq / Δz * scale * diurnal_itp(t + t_ref, x) /
+                (g0_100 * delp_dry_surface_itp(x, y)),
                 zero_emis)
         elseif varname in ["ISOP"]
             wrapper_f = (eq) -> ifelse(lev < 2,
-                eq / Δz * scale * diurnal_itp_ISOP(t + t_ref, x) / (g0_100 * delp_dry_surface_itp(x, y)),
+                eq / Δz * scale * diurnal_itp_ISOP(t + t_ref, x) /
+                (g0_100 * delp_dry_surface_itp(x, y)),
                 zero_emis)
         elseif varname in ["NO2", "NO"]
             wrapper_f = (eq) -> ifelse(lev < 2,
-                eq / Δz * scale * dayofweek_itp_NOx(t + t_ref, x) * diurnal_itp_NOx(t + t_ref, x) / (g0_100 * delp_dry_surface_itp(x, y)),
+                eq / Δz * scale * dayofweek_itp_NOx(t + t_ref, x) *
+                diurnal_itp_NOx(t + t_ref, x) / (g0_100 * delp_dry_surface_itp(x, y)),
                 zero_emis)
         else
-            wrapper_f = (eq) -> ifelse(lev < 2, eq / Δz * scale / (g0_100 * delp_dry_surface_itp(x, y)), zero_emis)
+            wrapper_f = (eq) -> ifelse(
+                lev < 2, eq / Δz * scale / (g0_100 * delp_dry_surface_itp(x, y)), zero_emis)
         end
 
-        eq, discretes, constants, info = create_interp_equation(itp, "", t, t_ref, [x, y];
+        eq, discretes,
+        constants,
+        info = create_interp_equation(itp, "", t, t_ref, [x, y];
             wrapper_f = wrapper_f)
         push!(eqs, eq)
         append!(all_discretes, discretes)
@@ -429,4 +447,3 @@ function NEI2016MonthlyEmis(
     )
     return sys
 end
-

@@ -186,7 +186,8 @@ end
 
     interp!(itp, times[end], xs[end], xs[end])
     @test length(itp.cache.times) == 2
-    @test itp.cache.times == [DateTime("2022-05-02T22:30:00"), DateTime("2022-05-03T01:30:00")]
+    @test itp.cache.times ==
+          [DateTime("2022-05-02T22:30:00"), DateTime("2022-05-03T01:30:00")]
 
     uvals = zeros(Float32, length(times), length(xs))
     answers = zeros(Float32, length(times), length(xs))
@@ -254,7 +255,8 @@ end
     using Dates: DateTime, Hour, datetime2unix
 
     # Float32 coords (as when DomainInfo uses Float32 u_proto)
-    coords_f32 = (Float32(0.0):Float32(0.1):Float32(0.3), Float32(0.0):Float32(0.1):Float32(0.3))
+    coords_f32 = (
+        Float32(0.0):Float32(0.1):Float32(0.3), Float32(0.0):Float32(0.1):Float32(0.3))
     times = [DateTime(2024, 1, 1) + Hour(i) for i in 0:1]
     data = zeros(Float32, 4, 4, 2)
     interp_cache = similar(data)
@@ -294,7 +296,7 @@ end
         EarthSciData.MetaData(
             [[0.0, 1.0], [0.0, 1.0]],
             "m", "test", ["x", "y"], [2, 2],
-            "+proj=longlat +datum=WGS84 +no_defs", 1, 2, -1, (false, false, false),
+            "+proj=longlat +datum=WGS84 +no_defs", 1, 2, -1, (false, false, false)
         )
     end
 
@@ -302,10 +304,11 @@ end
         DateTime(2024, 1, 1), DateTime(2024, 1, 2);
         lonrange = deg2rad(0.0):deg2rad(1.0):deg2rad(1.0),
         latrange = deg2rad(0.0):deg2rad(1.0):deg2rad(1.0),
-        levrange = 1:1,
+        levrange = 1:1
     )
     fs = BoundaryCacheTestFS(DateTime(2024, 1, 1), DateTime(2024, 1, 2))
-    itp = EarthSciData.DataSetInterpolator{Float64}(fs, "X", DateTime(2024, 1, 1), DateTime(2024, 1, 2), domain)
+    itp = EarthSciData.DataSetInterpolator{Float64}(
+        fs, "X", DateTime(2024, 1, 1), DateTime(2024, 1, 2), domain)
 
     # At the last centerpoint, should not throw BoundsError
     times = EarthSciData.interp_cache_times!(itp, DateTime(2024, 1, 2))
@@ -417,7 +420,8 @@ end
     )
 
     # Should be able to interpolate without error
-    val = EarthSciData.interp(itp, DateTime(2022, 5, 1, 1), deg2rad(0.25f0), deg2rad(0.5f0), 1.0f0)
+    val = EarthSciData.interp(
+        itp, DateTime(2022, 5, 1, 1), deg2rad(0.25f0), deg2rad(0.5f0), 1.0f0)
     @test !isnan(val)
     @test isfinite(val)
 end

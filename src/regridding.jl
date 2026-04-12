@@ -4,8 +4,9 @@ function get_polygons(d::DomainInfo{T}) where {T}
     # Use column-major (x-fastest) ordering to match vec() on data arrays
     polys = Vector{Vector{NTuple{2, T}}}(undef, nx*ny)
     for j in 1:ny, i in 1:nx
-        polys[(j-1)*nx + i] = [(x[i], y[j]), (x[i+1], y[j]), (x[i+1], y[j+1]),
-            (x[i], y[j+1]), (x[i], y[j])]
+
+        polys[(j - 1) * nx + i] = [(x[i], y[j]), (x[i + 1], y[j]), (x[i + 1], y[j + 1]),
+            (x[i], y[j + 1]), (x[i], y[j])]
     end
     return polys
 end
@@ -93,13 +94,17 @@ when interpolation is selected.
 function regridder(fs::FileSet, metadata::MetaData, domain::DomainInfo)
     if any(metadata.staggering) # Are any of the dimensions staggered?
         model_grid = EarthSciMLBase.grid(domain, metadata.staggering)
-        regrid! = (dst::AbstractArray, src::AbstractArray; extrapolate_type = Flat()) -> begin
+        regrid! = (dst::AbstractArray,
+            src::AbstractArray;
+            extrapolate_type = Flat()) -> begin
             interpolate_from!(dst, src, metadata, model_grid, domain;
                 extrapolate_type = extrapolate_type)
         end
     else
         regridder = horizontal_regridder(fs, metadata, domain)
-        regrid! = (dst::AbstractArray, src::AbstractArray; extrapolate_type = Flat()) -> begin
+        regrid! = (dst::AbstractArray,
+            src::AbstractArray;
+            extrapolate_type = Flat()) -> begin
             regrid_horizontal!(dst, regridder, src, metadata)
         end
     end

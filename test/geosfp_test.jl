@@ -115,7 +115,8 @@ end
           [102340.37924047427, 101572.77264006894, 100805.16603966363, 2.0, 1.5, 1.0]
 end
 
-@testitem "GEOS-FP ground-level vertical velocity" setup=[GEOSFPDomainSetup, GEOSFPSolvedSetup] begin
+@testitem "GEOS-FP ground-level vertical velocity" setup=[
+    GEOSFPDomainSetup, GEOSFPSolvedSetup] begin
     prob = ODEProblem(compiled, [], (24.0 * 3600, 48.0 * 3600))
     integ = init(prob, Tsit5())
     f = getsym(integ, compiled.GEOSFP.A3dyn₊OMEGA)

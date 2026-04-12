@@ -189,7 +189,10 @@ function varnames(fs::GEOSFPFileSet)
     end
 end
 
-Base.close(fs::GEOSFPFileSet) = lock(nclock) do; close(fs.ds); end
+Base.close(fs::GEOSFPFileSet) =
+    lock(nclock) do ;
+        close(fs.ds);
+    end
 
 # Hybrid grid parameters from https://wiki.seas.harvard.edu/geos-chem/index.php/GEOS-Chem_vertical_grids
 const Ap = DataInterpolations.LinearInterpolation(
@@ -404,7 +407,7 @@ function GEOSFP(
         domain::AbstractString,
         domaininfo::DomainInfo;
         name = :GEOSFP,
-        stream = true,
+        stream = true
 )
     starttime, endtime = get_tspan_datetime(domaininfo)
     filesets = Dict{String, GEOSFPFileSet}(
@@ -441,7 +444,8 @@ function GEOSFP(
             )
             dims = dimnames(itp)
             coords = _match_domain_coords(dims, pvdict, pvs)
-            eq, discretes, constants, info = create_interp_equation(
+            eq, discretes,
+            constants, info = create_interp_equation(
                 itp, filename, t, t_ref, coords)
             push!(eqs, eq)
             append!(all_discretes, discretes)

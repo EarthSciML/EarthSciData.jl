@@ -135,7 +135,9 @@ end
     compiled = mtkcompile(_sys)
     prob = ODEProblem(compiled, [], (24.0 * 3600, 48.0 * 3600))
     integ = init(prob, Tsit5())
-    setter = setp(integ, [compiled.NCEPNCARReanalysis.lon, compiled.NCEPNCARReanalysis.lat, compiled.NCEPNCARReanalysis.lev])
+    setter = setp(integ,
+        [compiled.NCEPNCARReanalysis.lon, compiled.NCEPNCARReanalysis.lat,
+            compiled.NCEPNCARReanalysis.lev])
 end
 
 @testitem "ncep vertical velocity wwnd" setup=[NCEPSetup, NCEPProb] begin
@@ -168,7 +170,6 @@ end
     δzδlev_want = [598, 649, 1358, 1583, 2232, 4410]
     @test δzδlev_vals≈δzδlev_want rtol=1e-3
 end
-
 
 @testitem "ncep ground level vertical velocity" setup=[NCEPSetup, NCEPProb] begin
     f = getsym(integ, compiled.NCEPNCARReanalysis.omega)

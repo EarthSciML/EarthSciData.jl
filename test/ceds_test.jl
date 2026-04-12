@@ -8,7 +8,7 @@
         DateTime(2016, 5, 2);
         latrange = deg2rad(-85.0f0):deg2rad(2):deg2rad(85.0f0),
         lonrange = deg2rad(-180.0f0):deg2rad(2.5):deg2rad(175.0f0),
-        levrange = 1:10,
+        levrange = 1:10
     )
     lon, lat, lev = EarthSciMLBase.pvars(domain)
 
@@ -79,17 +79,20 @@ end
 
     # All sectors summed.
     fs_all = EarthSciData.CEDSFileSet("SO2", ts, te)
-    itp_all = EarthSciData.DataSetInterpolator{Float32}(fs_all, "SO2_em_anthro", ts, te, domain)
+    itp_all = EarthSciData.DataSetInterpolator{Float32}(
+        fs_all, "SO2_em_anthro", ts, te, domain)
     val_all = interp(itp_all, ts, deg2rad(116.0f0), deg2rad(39.0f0))
 
     # Energy sector only (index 1).
     fs_energy = EarthSciData.CEDSFileSet("SO2", ts, te; sectors = [1])
-    itp_energy = EarthSciData.DataSetInterpolator{Float32}(fs_energy, "SO2_em_anthro", ts, te, domain)
+    itp_energy = EarthSciData.DataSetInterpolator{Float32}(
+        fs_energy, "SO2_em_anthro", ts, te, domain)
     val_energy = interp(itp_energy, ts, deg2rad(116.0f0), deg2rad(39.0f0))
 
     # Energy + Industrial sectors (indices 1, 2).
     fs_multi = EarthSciData.CEDSFileSet("SO2", ts, te; sectors = [1, 2])
-    itp_multi = EarthSciData.DataSetInterpolator{Float32}(fs_multi, "SO2_em_anthro", ts, te, domain)
+    itp_multi = EarthSciData.DataSetInterpolator{Float32}(
+        fs_multi, "SO2_em_anthro", ts, te, domain)
     val_multi = interp(itp_multi, ts, deg2rad(116.0f0), deg2rad(39.0f0))
 
     # Single sector should be <= multi-sector <= total.
@@ -129,7 +132,8 @@ end
 
     # Multiple species should return independent, non-identical values at the same location.
     fs_co = EarthSciData.CEDSFileSet("CO", ts, te)
-    itp_co = EarthSciData.DataSetInterpolator{Float32}(fs_co, "CO_em_anthro", ts, te, domain)
+    itp_co = EarthSciData.DataSetInterpolator{Float32}(
+        fs_co, "CO_em_anthro", ts, te, domain)
     val_co = interp(itp_co, ts, deg2rad(116.0f0), deg2rad(39.0f0))
     @test val_co > 0.0f0
     @test val_co != val_china  # Different species should have different values
@@ -216,7 +220,7 @@ end
     prob = ODEProblem(
         sys,
         [lat_p => deg2rad(40.0), lon_p => deg2rad(116.0)],
-        (0.0, 60.0),
+        (0.0, 60.0)
     )
     sol = solve(prob, Tsit5())
     @test length(sol.t) > 1

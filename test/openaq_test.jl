@@ -33,7 +33,7 @@ end
         EarthSciData.OpenAQStation(1, "A", deg2rad(-73.0), deg2rad(40.0)),
         EarthSciData.OpenAQStation(2, "B", deg2rad(-73.5), deg2rad(40.5)),
         EarthSciData.OpenAQStation(3, "C", deg2rad(-73.0), deg2rad(40.0)),  # Same cell as A
-        EarthSciData.OpenAQStation(4, "D", deg2rad(-100.0), deg2rad(20.0)), # Outside grid
+        EarthSciData.OpenAQStation(4, "D", deg2rad(-100.0), deg2rad(20.0)) # Outside grid
     ]
 
     # Grid edges in radians: 2 cells in each direction
@@ -72,10 +72,13 @@ end
 @testitem "S3 URL construction" setup=[OpenAQSetup] begin
     d = Date(2024, 3, 15)
     url = EarthSciData._s3_url(12345, d)
-    @test url == "https://openaq-data-archive.s3.amazonaws.com/records/csv.gz/locationid=12345/year=2024/month=03/location-12345-20240315.csv.gz"
+    @test url ==
+          "https://openaq-data-archive.s3.amazonaws.com/records/csv.gz/locationid=12345/year=2024/month=03/location-12345-20240315.csv.gz"
 
     path = EarthSciData._s3_localpath(12345, d)
-    @test endswith(path, joinpath("openaq_data", "locationid=12345", "year=2024", "month=03", "location-12345-20240315.csv.gz"))
+    @test endswith(path,
+        joinpath("openaq_data", "locationid=12345", "year=2024",
+            "month=03", "location-12345-20240315.csv.gz"))
 end
 
 @testitem "loadmetadata" setup=[OpenAQSetup] begin
@@ -84,14 +87,14 @@ end
     lat_edges = deg2rad.([39.0, 40.0, 41.0])
     freq_info = EarthSciData.DataFrequencyInfo(
         DateTime(2024, 1, 1), Hour(1),
-        collect(DateTime(2024, 1, 1):Hour(1):DateTime(2024, 1, 2)),
+        collect(DateTime(2024, 1, 1):Hour(1):DateTime(2024, 1, 2))
     )
     fs = EarthSciData.OpenAQFileSet(
         "pm25", stations, freq_info,
         collect(lon_edges), collect(lat_edges), NaN, 1e-6,
-        Dict{Tuple{Int,Int}, Vector{Int}}(),
+        Dict{Tuple{Int, Int}, Vector{Int}}(),
         Dict{Tuple{Int, Date}, Vector{Tuple{DateTime, Float64}}}(),
-        ReentrantLock(),
+        ReentrantLock()
     )
 
     md = EarthSciData.loadmetadata(fs, "pm25")
@@ -116,7 +119,7 @@ end
     stations = [
         EarthSciData.OpenAQStation(1001, "StationA", deg2rad(-73.5), deg2rad(40.2)),
         EarthSciData.OpenAQStation(1002, "StationB", deg2rad(-73.5), deg2rad(40.2)),
-        EarthSciData.OpenAQStation(1003, "StationC", deg2rad(-72.5), deg2rad(40.8)),
+        EarthSciData.OpenAQStation(1003, "StationC", deg2rad(-72.5), deg2rad(40.8))
     ]
 
     d = Date(2024, 6, 15)
@@ -149,7 +152,7 @@ end
 
     freq_info = EarthSciData.DataFrequencyInfo(
         DateTime(2024, 6, 15), Hour(1),
-        collect(DateTime(2024, 6, 15):Hour(1):DateTime(2024, 6, 16)),
+        collect(DateTime(2024, 6, 15):Hour(1):DateTime(2024, 6, 16))
     )
 
     cell_stations = EarthSciData._build_cell_station_map(stations, collect(lon_edges), collect(lat_edges))
@@ -158,7 +161,7 @@ end
         collect(lon_edges), collect(lat_edges), NaN, 1e-6,
         cell_stations,
         Dict{Tuple{Int, Date}, Vector{Tuple{DateTime, Float64}}}(),
-        ReentrantLock(),
+        ReentrantLock()
     )
 
     data = zeros(Float64, 2, 2)
@@ -186,7 +189,7 @@ end
         collect(lon_edges), collect(lat_edges), 0.0, 1e-6,
         cell_stations,
         Dict{Tuple{Int, Date}, Vector{Tuple{DateTime, Float64}}}(),
-        ReentrantLock(),
+        ReentrantLock()
     )
     data2 = zeros(Float64, 2, 2)
     EarthSciData.loadslice!(data2, fs_zero, DateTime(2024, 6, 15, 12), "pm25")
@@ -200,14 +203,14 @@ end
     stations = EarthSciData.OpenAQStation[]
     freq_info = EarthSciData.DataFrequencyInfo(
         DateTime(2024, 1, 1), Hour(1),
-        collect(DateTime(2024, 1, 1):Hour(1):DateTime(2024, 1, 2)),
+        collect(DateTime(2024, 1, 1):Hour(1):DateTime(2024, 1, 2))
     )
     fs = EarthSciData.OpenAQFileSet(
         "o3", stations, freq_info,
         [0.0, 1.0], [0.0, 1.0], NaN, 1e-6,
-        Dict{Tuple{Int,Int}, Vector{Int}}(),
+        Dict{Tuple{Int, Int}, Vector{Int}}(),
         Dict{Tuple{Int, Date}, Vector{Tuple{DateTime, Float64}}}(),
-        ReentrantLock(),
+        ReentrantLock()
     )
     @test EarthSciData.varnames(fs) == ["o3"]
 end
@@ -216,16 +219,16 @@ end
     stations = EarthSciData.OpenAQStation[]
     freq_info = EarthSciData.DataFrequencyInfo(
         DateTime(2024, 1, 1), Hour(1),
-        collect(DateTime(2024, 1, 1):Hour(1):DateTime(2024, 1, 2)),
+        collect(DateTime(2024, 1, 1):Hour(1):DateTime(2024, 1, 2))
     )
     lon_edges = [0.0, 1.0, 2.0]
     lat_edges = [0.0, 1.0, 2.0]
     fs = EarthSciData.OpenAQFileSet(
         "pm25", stations, freq_info,
         lon_edges, lat_edges, NaN, 1e-6,
-        Dict{Tuple{Int,Int}, Vector{Int}}(),
+        Dict{Tuple{Int, Int}, Vector{Int}}(),
         Dict{Tuple{Int, Date}, Vector{Tuple{DateTime, Float64}}}(),
-        ReentrantLock(),
+        ReentrantLock()
     )
     md = EarthSciData.loadmetadata(fs, "pm25")
     polys = EarthSciData.get_geometry(fs, md)
@@ -242,13 +245,16 @@ end
     # Create a fake cached station JSON file with 3 stations
     cache_dir = joinpath(tmpdir, "openaq_stations")
     mkpath(cache_dir)
-    bbox = (lon_min=-74.0, lat_min=39.0, lon_max=-72.0, lat_max=41.0)
+    bbox = (lon_min = -74.0, lat_min = 39.0, lon_max = -72.0, lat_max = 41.0)
     bbox_str = "$(bbox.lon_min)_$(bbox.lat_min)_$(bbox.lon_max)_$(bbox.lat_max)"
     cache_file = joinpath(cache_dir, "pm25_$(bbox_str).json")
     raw_stations = [
-        Dict("id" => 1, "name" => "Good Station", "coordinates" => Dict("longitude" => -73.0, "latitude" => 40.0)),
-        Dict("id" => 2, "name" => "Bad Station", "coordinates" => Dict("longitude" => -73.5, "latitude" => 40.5)),
-        Dict("id" => 3, "name" => "Good Station 2", "coordinates" => Dict("longitude" => -72.5, "latitude" => 40.8)),
+        Dict("id" => 1, "name" => "Good Station",
+            "coordinates" => Dict("longitude" => -73.0, "latitude" => 40.0)),
+        Dict("id" => 2, "name" => "Bad Station",
+            "coordinates" => Dict("longitude" => -73.5, "latitude" => 40.5)),
+        Dict("id" => 3, "name" => "Good Station 2",
+            "coordinates" => Dict("longitude" => -72.5, "latitude" => 40.8))
     ]
     open(cache_file, "w") do io
         JSON3.write(io, raw_stations)
@@ -261,7 +267,7 @@ end
     # Test with filter: exclude "Bad Station"
     stations_filtered = EarthSciData.discover_stations(
         "pm25", bbox, "fake_key",
-        s -> !occursin("Bad", s.name),
+        s -> !occursin("Bad", s.name)
     )
     @test length(stations_filtered) == 2
     @test all(s -> !occursin("Bad", s.name), stations_filtered)
@@ -310,7 +316,7 @@ end
 
     freq_info = EarthSciData.DataFrequencyInfo(
         DateTime(2024, 6, 15), Hour(1),
-        collect(DateTime(2024, 6, 15):Hour(1):DateTime(2024, 6, 16)),
+        collect(DateTime(2024, 6, 15):Hour(1):DateTime(2024, 6, 16))
     )
 
     cell_stations = EarthSciData._build_cell_station_map(stations, collect(lon_edges), collect(lat_edges))
@@ -319,7 +325,7 @@ end
         collect(lon_edges), collect(lat_edges), NaN, 1e-6,
         cell_stations,
         Dict{Tuple{Int, Date}, Vector{Tuple{DateTime, Float64}}}(),
-        ReentrantLock(),
+        ReentrantLock()
     )
 
     # At hour 12 UTC: should get average of 100.0 and 200.0 (the +05:30 values mapped to UTC 12:00 and 12:30)
@@ -362,7 +368,7 @@ end
     lat_edges = deg2rad.([39.5, 40.5])
     freq_info = EarthSciData.DataFrequencyInfo(
         DateTime(2024, 6, 15), Hour(1),
-        collect(DateTime(2024, 6, 15):Hour(1):DateTime(2024, 6, 16)),
+        collect(DateTime(2024, 6, 15):Hour(1):DateTime(2024, 6, 16))
     )
     cell_stations = EarthSciData._build_cell_station_map(stations, collect(lon_edges), collect(lat_edges))
 
@@ -372,7 +378,7 @@ end
         collect(lon_edges), collect(lat_edges), NaN, 1e-6,
         cell_stations,
         Dict{Tuple{Int, Date}, Vector{Tuple{DateTime, Float64}}}(),
-        ReentrantLock(),
+        ReentrantLock()
     )
     data = zeros(Float64, 1, 1)
     EarthSciData.loadslice!(data, fs_pm25, DateTime(2024, 6, 15, 12), "pm25")
@@ -384,7 +390,7 @@ end
         collect(lon_edges), collect(lat_edges), NaN, 1e-6,
         cell_stations,
         Dict{Tuple{Int, Date}, Vector{Tuple{DateTime, Float64}}}(),
-        ReentrantLock(),
+        ReentrantLock()
     )
     data_o3 = zeros(Float64, 1, 1)
     EarthSciData.loadslice!(data_o3, fs_o3, DateTime(2024, 6, 15, 12), "o3")
@@ -405,15 +411,15 @@ end
         EarthSciData.OpenAQStation(4001, "SW", deg2rad(-73.5), deg2rad(40.0)),
         EarthSciData.OpenAQStation(4002, "NW", deg2rad(-73.5), deg2rad(40.7)),
         EarthSciData.OpenAQStation(4003, "SE", deg2rad(-72.5), deg2rad(40.0)),
-        EarthSciData.OpenAQStation(4004, "NE", deg2rad(-72.5), deg2rad(40.7)),
+        EarthSciData.OpenAQStation(4004, "NE", deg2rad(-72.5), deg2rad(40.7))
     ]
 
     d = Date(2024, 6, 15)
     csv_header = "location_id,sensor_id,location,datetime,lat,lon,parameter,unit,value"
 
     # All stations report the same values so interpolation result is uniform
-    for (id, name, lat, lon) in [(4001,"SW",40.0,-73.5), (4002,"NW",40.7,-73.5),
-                                  (4003,"SE",40.0,-72.5), (4004,"NE",40.7,-72.5)]
+    for (id, name, lat, lon) in [(4001, "SW", 40.0, -73.5), (4002, "NW", 40.7, -73.5),
+        (4003, "SE", 40.0, -72.5), (4004, "NE", 40.7, -72.5)]
         csv_content = """$csv_header
 $id,8001,$name,2024-06-15T12:00:00+00:00,$lat,$lon,pm25,µg/m³,100.0
 $id,8001,$name,2024-06-15T13:00:00+00:00,$lat,$lon,pm25,µg/m³,200.0
@@ -430,7 +436,7 @@ $id,8001,$name,2024-06-15T14:00:00+00:00,$lat,$lon,pm25,µg/m³,300.0"""
     lat_edges = deg2rad.([39.5, 40.5, 41.0])
     freq_info = EarthSciData.DataFrequencyInfo(
         DateTime(2024, 6, 15), Hour(1),
-        collect(DateTime(2024, 6, 15):Hour(1):DateTime(2024, 6, 16)),
+        collect(DateTime(2024, 6, 15):Hour(1):DateTime(2024, 6, 16))
     )
     cell_stations = EarthSciData._build_cell_station_map(stations, collect(lon_edges), collect(lat_edges))
     fs = EarthSciData.OpenAQFileSet(
@@ -438,7 +444,7 @@ $id,8001,$name,2024-06-15T14:00:00+00:00,$lat,$lon,pm25,µg/m³,300.0"""
         collect(lon_edges), collect(lat_edges), NaN, 1e-6,
         cell_stations,
         Dict{Tuple{Int, Date}, Vector{Tuple{DateTime, Float64}}}(),
-        ReentrantLock(),
+        ReentrantLock()
     )
 
     # Create a DomainInfo matching our 2x2 grid
@@ -447,7 +453,7 @@ $id,8001,$name,2024-06-15T14:00:00+00:00,$lat,$lon,pm25,µg/m³,300.0"""
         DateTime(2024, 6, 15, 15);
         lonrange = deg2rad(-74.0):deg2rad(1.0):deg2rad(-72.0),
         latrange = deg2rad(39.5):deg2rad(0.75):deg2rad(41.0),
-        levrange = 1:1,
+        levrange = 1:1
     )
     starttime, endtime = get_tspan_datetime(domain)
 
@@ -482,7 +488,7 @@ end
         DateTime(2024, 6, 15, 14);
         lonrange = deg2rad(lon_min):deg2rad(1.0):deg2rad(lon_max),
         latrange = deg2rad(lat_min):deg2rad(1.0):deg2rad(lat_max),
-        levrange = 1:1,
+        levrange = 1:1
     )
 
     # The OpenAQ constructor computes bbox from grid edges, which uses staggered=true.
@@ -499,7 +505,8 @@ end
     cache_file = joinpath(cache_dir, "pm25_$(bbox_str).json")
 
     raw_stations = [
-        Dict("id" => 5001, "name" => "TestStation", "coordinates" => Dict("longitude" => -73.0, "latitude" => 40.0)),
+        Dict("id" => 5001, "name" => "TestStation",
+        "coordinates" => Dict("longitude" => -73.0, "latitude" => 40.0)),
     ]
     open(cache_file, "w") do io
         JSON3.write(io, raw_stations)
@@ -519,7 +526,7 @@ end
     end
 
     # Call the actual OpenAQ() constructor
-    sys = OpenAQ("pm25", domain; api_key="fake_key_for_test")
+    sys = OpenAQ("pm25", domain; api_key = "fake_key_for_test")
 
     # Verify it returns a System with expected structure
     @test sys isa ModelingToolkit.System

@@ -27,7 +27,7 @@ domain = DomainInfo(
     DateTime(2020, 6, 1), DateTime(2020, 7, 1);
     lonrange = deg2rad(-10.0):deg2rad(2.5):deg2rad(30.0),
     latrange = deg2rad(40.0):deg2rad(2):deg2rad(60.0),
-    levrange = 1:10,
+    levrange = 1:10
 )
 
 emis = EDGARv81MonthlyEmis("NOx", "POWER_INDUSTRY", domain)

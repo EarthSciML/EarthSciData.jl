@@ -26,20 +26,25 @@ function _domain_bbox_wgs84(domaininfo)
         for x in (first(xs), last(xs))
             for y in (first(ys), last(ys))
                 lo, la = to_lonlat(x, y)
-                push!(lon_vals, rad2deg(lo)); push!(lat_vals, rad2deg(la))
+                push!(lon_vals, rad2deg(lo));
+                push!(lat_vals, rad2deg(la))
             end
         end
         for x in xs
             lo, la = to_lonlat(x, first(ys))
-            push!(lon_vals, rad2deg(lo)); push!(lat_vals, rad2deg(la))
+            push!(lon_vals, rad2deg(lo));
+            push!(lat_vals, rad2deg(la))
             lo, la = to_lonlat(x, last(ys))
-            push!(lon_vals, rad2deg(lo)); push!(lat_vals, rad2deg(la))
+            push!(lon_vals, rad2deg(lo));
+            push!(lat_vals, rad2deg(la))
         end
         for y in ys
             lo, la = to_lonlat(first(xs), y)
-            push!(lon_vals, rad2deg(lo)); push!(lat_vals, rad2deg(la))
+            push!(lon_vals, rad2deg(lo));
+            push!(lat_vals, rad2deg(la))
             lo, la = to_lonlat(last(xs), y)
-            push!(lon_vals, rad2deg(lo)); push!(lat_vals, rad2deg(la))
+            push!(lon_vals, rad2deg(lo));
+            push!(lat_vals, rad2deg(la))
         end
         lon_min, lon_max = extrema(lon_vals)
         lat_min, lat_max = extrema(lat_vals)
@@ -275,7 +280,7 @@ function LANDFIRE(domaininfo::DomainInfo; name = :LANDFIRE,
         discrete_events = [build_interp_event(interp_infos, starttime)],
         metadata = Dict(
             CoupleType => LANDFIRECoupler,
-            SysDomainInfo => domaininfo,
+            SysDomainInfo => domaininfo
         )
     )
     return sys

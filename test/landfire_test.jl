@@ -129,7 +129,7 @@ end
 end
 
 @testitem "LANDFIRE LCC bbox helper" setup=[LANDFIRELCCSetup] tags=[:landfire] begin
-    lon_min, lat_min, lon_max, lat_max = EarthSciData._domain_bbox_wgs84(domain_lcc)
+    lon_min, lat_min, lon_max, lat_max=EarthSciData._domain_bbox_wgs84(domain_lcc)
     @test lon_min < -121.6 < lon_max
     @test lat_min < 39.78 < lat_max
     # Bbox should be reasonable (not huge)
@@ -138,7 +138,7 @@ end
 end
 
 @testitem "LANDFIRE LCC FileSet construction" setup=[LANDFIRELCCSetup] tags=[:landfire] begin
-    fs = EarthSciData.LANDFIREFileSet(domain_lcc)
+    fs=EarthSciData.LANDFIREFileSet(domain_lcc)
     @test fs.product == "FBFM13"
     @test fs.bbox[1] < -121.6 < fs.bbox[3]
     @test fs.bbox[2] < 39.78 < fs.bbox[4]
@@ -147,22 +147,22 @@ end
 end
 
 @testitem "LANDFIRE LCC data loading" setup=[LANDFIRELCCSetup] tags=[:landfire] begin
-    fs = EarthSciData.LANDFIREFileSet(domain_lcc; resolution = 10.0)
-    md = EarthSciData.loadmetadata(fs, "fuel_model")
-    data = zeros(Float32, md.varsize...)
-    ts, _ = EarthSciMLBase.get_tspan_datetime(domain_lcc)
+    fs=EarthSciData.LANDFIREFileSet(domain_lcc; resolution = 10.0)
+    md=EarthSciData.loadmetadata(fs, "fuel_model")
+    data=zeros(Float32, md.varsize...)
+    ts, _=EarthSciMLBase.get_tspan_datetime(domain_lcc)
     EarthSciData.loadslice!(data, fs, ts, "fuel_model")
-    valid_codes = Set([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13,
+    valid_codes=Set([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13,
         91, 92, 93, 98, 99])
-    unique_vals = Set(round.(Int, unique(data)))
+    unique_vals=Set(round.(Int, unique(data)))
     @test length(unique_vals) > 1
     @test all(v -> v in valid_codes, unique_vals)
 end
 
 @testitem "LANDFIRE LCC System" setup=[LANDFIRELCCSetup] tags=[:landfire] begin
-    sys = LANDFIRE(domain_lcc; resolution = 10.0)
+    sys=LANDFIRE(domain_lcc; resolution = 10.0)
     @test sys isa ModelingToolkit.AbstractSystem
     @test length(equations(sys)) >= 1
-    eq_names = [Symbolics.tosymbol(eq.lhs, escape = false) for eq in equations(sys)]
+    eq_names=[Symbolics.tosymbol(eq.lhs, escape = false) for eq in equations(sys)]
     @test :fuel_model ∈ eq_names
 end

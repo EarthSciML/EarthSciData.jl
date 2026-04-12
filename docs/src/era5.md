@@ -18,9 +18,10 @@ ERA5
 
 To download ERA5 data automatically, you need a free CDS account:
 
-1. Register at [https://cds.climate.copernicus.eu/](https://cds.climate.copernicus.eu/)
-2. Accept the ERA5 data licence
-3. Create `~/.cdsapirc` with:
+ 1. Register at [https://cds.climate.copernicus.eu/](https://cds.climate.copernicus.eu/)
+ 2. Accept the ERA5 data licence
+ 3. Create `~/.cdsapirc` with:
+
 ```
 url: https://cds.climate.copernicus.eu/api
 key: <your-api-key>
@@ -69,10 +70,11 @@ era5_vars = Dict( # hide
     "clwc" => ("kg kg**-1", "Specific cloud liquid water content", 0.0, 1e-5), # hide
     "crwc" => ("kg kg**-1", "Specific rain water content", 0.0, 1e-5), # hide
     "cswc" => ("kg kg**-1", "Specific snow water content", 0.0, 1e-5), # hide
-    "pv" => ("K m**2 kg**-1 s**-1", "Potential vorticity", -1e-5, 1e-5), # hide
+    "pv" => ("K m**2 kg**-1 s**-1", "Potential vorticity", -1e-5, 1e-5) # hide
 ) # hide
 NCDataset(joinpath(era5_dir, "era5_pl_2022_01.nc"), "c") do ds # hide
-    nlon, nlat, nplev, ntime = length(lon_vals), length(lat_vals), length(plev_vals), length(time_vals) # hide
+    nlon, nlat,
+    nplev, ntime = length(lon_vals), length(lat_vals), length(plev_vals), length(time_vals) # hide
     defDim(ds, "longitude", nlon) # hide
     defDim(ds, "latitude", nlat) # hide
     defDim(ds, "pressure_level", nplev) # hide
@@ -82,13 +84,14 @@ NCDataset(joinpath(era5_dir, "era5_pl_2022_01.nc"), "c") do ds # hide
     defVar(ds, "pressure_level", Float64, ("pressure_level",))[:] = plev_vals # hide
     nctime = defVar(ds, "valid_time", Float64, ("valid_time",), # hide
         attrib = Dict("units" => "hours since 1900-01-01 00:00:00", # hide
-                      "calendar" => "proleptic_gregorian")) # hide
+            "calendar" => "proleptic_gregorian")) # hide
     nctime[:] = time_vals # hide
     for (vname, (units, long_name, vmin, vmax)) in era5_vars # hide
         ncvar = defVar(ds, vname, Float32, # hide
             ("longitude", "latitude", "pressure_level", "valid_time"), # hide
             attrib = Dict("units" => units, "long_name" => long_name)) # hide
-        data = [Float32(vmin + (vmax - vmin) * (i + j + k + ti) / (nlon + nlat + nplev + ntime)) # hide
+        data = [Float32(vmin +
+                        (vmax - vmin) * (i + j + k + ti) / (nlon + nlat + nplev + ntime)) # hide
                 for i in 1:nlon, j in 1:nlat, k in 1:nplev, ti in 1:ntime] # hide
         ncvar[:, :, :, :] = data # hide
     end # hide
@@ -107,10 +110,10 @@ using DynamicQuantities: dimension
 domain = DomainInfo(DateTime(2022, 1, 1), DateTime(2022, 1, 3);
     latrange = deg2rad(20.0f0):deg2rad(5.0):deg2rad(50.0f0),
     lonrange = deg2rad(-130.0f0):deg2rad(5.0):deg2rad(-60.0f0),
-    levrange = 1:4,
+    levrange = 1:4
 )
 
-era5 = ERA5(domain; mirror="file://$(era5_dir)")
+era5 = ERA5(domain; mirror = "file://$(era5_dir)")
 ```
 
 ### State Variables
@@ -134,47 +137,47 @@ eqs = equations(era5)
 
 ERA5 pressure-level variables include:
 
-| Short Name | Long Name | Units |
-|:-----------|:----------|:------|
-| t | Temperature | K |
-| u | U component of wind | m s⁻¹ |
-| v | V component of wind | m s⁻¹ |
-| w | Vertical velocity | Pa s⁻¹ |
-| q | Specific humidity | kg kg⁻¹ |
-| r | Relative humidity | % |
-| z | Geopotential | m² s⁻² |
-| d | Divergence | s⁻¹ |
-| vo | Vorticity | s⁻¹ |
-| o3 | Ozone mass mixing ratio | kg kg⁻¹ |
-| cc | Fraction of cloud cover | (0-1) |
-| ciwc | Specific cloud ice water content | kg kg⁻¹ |
-| clwc | Specific cloud liquid water content | kg kg⁻¹ |
-| crwc | Specific rain water content | kg kg⁻¹ |
-| cswc | Specific snow water content | kg kg⁻¹ |
-| pv | Potential vorticity | K m² kg⁻¹ s⁻¹ |
+| Short Name | Long Name                           | Units         |
+|:---------- |:----------------------------------- |:------------- |
+| t          | Temperature                         | K             |
+| u          | U component of wind                 | m s⁻¹         |
+| v          | V component of wind                 | m s⁻¹         |
+| w          | Vertical velocity                   | Pa s⁻¹        |
+| q          | Specific humidity                   | kg kg⁻¹       |
+| r          | Relative humidity                   | %             |
+| z          | Geopotential                        | m² s⁻²        |
+| d          | Divergence                          | s⁻¹           |
+| vo         | Vorticity                           | s⁻¹           |
+| o3         | Ozone mass mixing ratio             | kg kg⁻¹       |
+| cc         | Fraction of cloud cover             | (0-1)         |
+| ciwc       | Specific cloud ice water content    | kg kg⁻¹       |
+| clwc       | Specific cloud liquid water content | kg kg⁻¹       |
+| crwc       | Specific rain water content         | kg kg⁻¹       |
+| cswc       | Specific snow water content         | kg kg⁻¹       |
+| pv         | Potential vorticity                 | K m² kg⁻¹ s⁻¹ |
 
 ## Pressure Levels
 
 ERA5 provides data on 37 pressure levels from 1000 hPa (surface) to 1 hPa (stratosphere). The level index maps to pressure as follows:
 
 | Index | Pressure (hPa) | Index | Pressure (hPa) |
-|:------|:---------------|:------|:---------------|
-| 1 | 1000 | 20 | 300 |
-| 2 | 975 | 21 | 250 |
-| 3 | 950 | 22 | 225 |
-| 4 | 925 | 23 | 200 |
-| 5 | 900 | 24 | 175 |
-| 6 | 875 | 25 | 150 |
-| 7 | 850 | 26 | 125 |
-| 8 | 825 | 27 | 100 |
-| 9 | 800 | 28 | 70 |
-| 10 | 775 | 29 | 50 |
-| 11 | 750 | 30 | 30 |
-| 12 | 700 | 31 | 20 |
-| 13 | 650 | 32 | 10 |
-| 14 | 600 | 33 | 7 |
-| 15 | 550 | 34 | 5 |
-| 16 | 500 | 35 | 3 |
-| 17 | 450 | 36 | 2 |
-| 18 | 400 | 37 | 1 |
-| 19 | 350 | | |
+|:----- |:-------------- |:----- |:-------------- |
+| 1     | 1000           | 20    | 300            |
+| 2     | 975            | 21    | 250            |
+| 3     | 950            | 22    | 225            |
+| 4     | 925            | 23    | 200            |
+| 5     | 900            | 24    | 175            |
+| 6     | 875            | 25    | 150            |
+| 7     | 850            | 26    | 125            |
+| 8     | 825            | 27    | 100            |
+| 9     | 800            | 28    | 70             |
+| 10    | 775            | 29    | 50             |
+| 11    | 750            | 30    | 30             |
+| 12    | 700            | 31    | 20             |
+| 13    | 650            | 32    | 10             |
+| 14    | 600            | 33    | 7              |
+| 15    | 550            | 34    | 5              |
+| 16    | 500            | 35    | 3              |
+| 17    | 450            | 36    | 2              |
+| 18    | 400            | 37    | 1              |
+| 19    | 350            |       |                |

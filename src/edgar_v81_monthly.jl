@@ -31,7 +31,7 @@ end
 # Internal: find NC files in extract_dir filtered by year range, sorted by year.
 function _find_edgar_nc_files(extract_dir, start_year, end_year)
     all_files = filter(f -> endswith(f, ".nc"), readdir(extract_dir, join = true))
-    pairs = Tuple{Int,String}[]
+    pairs = Tuple{Int, String}[]
     for f in all_files
         yr = _parse_edgar_nc_year(f)
         isnothing(yr) && continue
@@ -92,7 +92,7 @@ struct EDGARv81MonthlyEmisFileSet <: FileSet
     mirror::String
     substance::String
     sector::String
-    ds::Union{NCDataset,NCDatasets.MFDataset}
+    ds::Union{NCDataset, NCDatasets.MFDataset}
     freq_info::DataFrequencyInfo
     extract_dir::String
 
@@ -242,7 +242,10 @@ function varnames(fs::EDGARv81MonthlyEmisFileSet)
     end
 end
 
-Base.close(fs::EDGARv81MonthlyEmisFileSet) = lock(nclock) do; close(fs.ds); end
+Base.close(fs::EDGARv81MonthlyEmisFileSet) =
+    lock(nclock) do ;
+        close(fs.ds);
+    end
 
 struct EDGARv81MonthlyEmisCoupler
     sys::Any
@@ -273,7 +276,7 @@ function EDGARv81MonthlyEmis(
         domaininfo::DomainInfo;
         scale = 1.0,
         name = :EDGARv81MonthlyEmis,
-        stream = true,
+        stream = true
 )
     starttime, endtime = get_tspan_datetime(domaininfo)
     fs = EDGARv81MonthlyEmisFileSet(substance, sector, starttime, endtime)
@@ -302,7 +305,9 @@ function EDGARv81MonthlyEmis(
         zero_emis = only(@constants $(ze_name)=0 [unit = units(itp) / u"m"])
         zero_emis = ModelingToolkit.unwrap(zero_emis)
         wrapper_f = (eq) -> ifelse(lev < 2, eq / Δz * scale, zero_emis)
-        eq, discretes, constants, info = create_interp_equation(itp, "", t, t_ref, [lon, lat];
+        eq, discretes,
+        constants,
+        info = create_interp_equation(itp, "", t, t_ref, [lon, lat];
             wrapper_f = wrapper_f)
         push!(eqs, eq)
         append!(all_discretes, discretes)

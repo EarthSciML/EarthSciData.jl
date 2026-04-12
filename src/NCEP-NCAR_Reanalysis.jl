@@ -186,12 +186,13 @@ function get_geometry(::NCEPNCARReanalysisFileSet, m::MetaData)
     nx, ny = length(lon), length(lat)
     polys = Vector{Vector{NTuple{2, Float64}}}(undef, nx * ny)
     for j in 1:ny, i in 1:nx
+
         polys[(j - 1) * nx + i] = [
             (lon_edges[i], lat_edges[j]),
             (lon_edges[i + 1], lat_edges[j]),
             (lon_edges[i + 1], lat_edges[j + 1]),
             (lon_edges[i], lat_edges[j + 1]),
-            (lon_edges[i], lat_edges[j]),
+            (lon_edges[i], lat_edges[j])
         ]
     end
     return polys
@@ -213,7 +214,7 @@ function NCEPNCARReanalysis(
         mirror::String,
         domaininfo::DomainInfo;
         name = :NCEPNCARReanalysis,
-        stream = true,
+        stream = true
 )
     starttime, endtime = get_tspan_datetime(domaininfo)
     fs = NCEPNCARReanalysisFileSet(mirror, domaininfo)

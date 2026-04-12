@@ -9,12 +9,12 @@ const CEDS_SECTORS = [
     "Residential, Commercial, Other",
     "Solvents production and application",
     "Waste",
-    "International Shipping",
+    "International Shipping"
 ]
 
 # Default bulk emission species available in CEDS.
 const CEDS_SPECIES = [
-    "BC", "CH4", "CO", "CO2", "N2O", "NH3", "NMVOC", "NOx", "OC", "SO2",
+    "BC", "CH4", "CO", "CO2", "N2O", "NH3", "NMVOC", "NOx", "OC", "SO2"
 ]
 
 # Time ranges for the gn (native grid) files as (start_year, end_year) pairs.
@@ -24,7 +24,7 @@ const CEDS_GN_CHUNKS = [
     (1850, 1899),
     (1900, 1949),
     (1950, 1999),
-    (2000, 2023),
+    (2000, 2023)
 ]
 
 """
@@ -111,7 +111,8 @@ struct CEDSFileSet <: FileSet
         filepaths = [maybedownload(fs_temp, DateTime(y1, 1, 1)) for (y1, _) in chunks]
 
         # Open all files as an aggregated dataset and read metadata.
-        ds, lons_deg, lats_rad, dims, fill_val, cftimes = lock(nclock) do
+        ds, lons_deg, lats_rad, dims,
+        fill_val, cftimes = lock(nclock) do
             ds = NCDataset(filepaths, aggdim = "time")
             lons_deg = Float64.(ds["lon"][:])
             lats_rad = deg2rad.(Float64.(ds["lat"][:]))
@@ -133,14 +134,14 @@ struct CEDSFileSet <: FileSet
         time_dim = findfirst(isequal("time"), dims)
         sector_dim_orig = findfirst(isequal("sector"), dims)
         sector_dim = isnothing(sector_dim_orig) ? 0 :
-            sector_dim_orig - (time_dim < sector_dim_orig ? 1 : 0)
+                     sector_dim_orig - (time_dim < sector_dim_orig ? 1 : 0)
         lon_dim_orig = findfirst(isequal("lon"), dims)
         lon_dim = lon_dim_orig - (time_dim < lon_dim_orig ? 1 : 0)
         if sector_dim > 0 && sector_dim < lon_dim
             lon_dim -= 1
         end
         times = [DateTime(Dates.year(ct), Dates.month(ct), Dates.day(ct),
-                          Dates.hour(ct), Dates.minute(ct), Dates.second(ct))
+                     Dates.hour(ct), Dates.minute(ct), Dates.second(ct))
                  for ct in cftimes]
         frequency = Month(1)
         dfi = DataFrequencyInfo(times[1], frequency, times)
@@ -172,7 +173,7 @@ $(SIGNATURES)
 Local cache path for CEDS data files, using a short directory structure
 to avoid exceeding Windows' 260-character MAX_PATH limit.
 """
-function localpath(fs::CEDSFileSet, t::DateTime, varname=nothing)
+function localpath(fs::CEDSFileSet, t::DateTime, varname = nothing)
     year = Dates.year(t)
     y1, y2 = _ceds_chunk_for_year(year)
     filename = "$(fs.species)-em-anthro_$(fs.version)_gn_$(lpad(y1,4,'0'))01-$(lpad(y2,4,'0'))12.nc"
@@ -214,7 +215,7 @@ function loadslice!(
         if fs.sector_dim == 0
             data .= selectdim(raw, fs.lon_dim, fs.lon_perm)
         elseif isnothing(fs.sectors)
-            result = dropdims(sum(raw; dims=fs.sector_dim); dims=fs.sector_dim)
+            result = dropdims(sum(raw; dims = fs.sector_dim); dims = fs.sector_dim)
             data .= selectdim(result, fs.lon_dim, fs.lon_perm)
         else
             # Sum selected sectors directly into data.
@@ -272,9 +273,10 @@ function varnames(fs::CEDSFileSet)
     ["$(fs.species)_em_anthro"]
 end
 
-Base.close(fs::CEDSFileSet) = lock(nclock) do
-    close(fs.ds)
-end
+Base.close(fs::CEDSFileSet) =
+    lock(nclock) do
+        close(fs.ds)
+    end
 
 struct CEDSCoupler
     sys::Any
@@ -297,13 +299,13 @@ Sectors (0-7): $(join(["$i: $(CEDS_SECTORS[i+1])" for i in 0:7], "; ")).
 
 ## Keyword Arguments
 
-- `species`: Vector of species to load. Default is all: `$(CEDS_SPECIES)`.
-- `sectors`: Vector of sector indices (0-7) to include, or `nothing` for all (default).
-- `mirror`: Base URL for data download. Default is the ORNL ESGF THREDDS server.
-- `version`: CEDS source version. Default is `"CEDS-CMIP-2025-04-18"`.
-- `data_version`: Data version string. Default is `"v20250421"`.
-- `name`: System name. Default is `:CEDS`.
-- `stream`: Whether to stream data on demand. Default is `true`.
+  - `species`: Vector of species to load. Default is all: `$(CEDS_SPECIES)`.
+  - `sectors`: Vector of sector indices (0-7) to include, or `nothing` for all (default).
+  - `mirror`: Base URL for data download. Default is the ORNL ESGF THREDDS server.
+  - `version`: CEDS source version. Default is `"CEDS-CMIP-2025-04-18"`.
+  - `data_version`: Data version string. Default is `"v20250421"`.
+  - `name`: System name. Default is `:CEDS`.
+  - `stream`: Whether to stream data on demand. Default is `true`.
 """
 function CEDS(
         domaininfo::DomainInfo;
@@ -313,7 +315,7 @@ function CEDS(
         version::AbstractString = "CEDS-CMIP-2025-04-18",
         data_version::AbstractString = "v20250421",
         name = :CEDS,
-        stream = true,
+        stream = true
 )
     for sp in species
         @assert sp in CEDS_SPECIES "Unknown CEDS species '$sp'. Valid: $CEDS_SPECIES"

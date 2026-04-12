@@ -18,7 +18,9 @@ Base.copy(x::DataBufferType) = DataBufferType(copy(x.data))
 # a DynamicQuantities.Quantity or an integer to get information about the type
 # and units of the output. The array-based interp_unsafe is unitless, so we
 # return a dimensionless value (units are applied via a separate @constants multiplier).
-interp_unsafe(data::Union{DynamicQuantities.AbstractQuantity, Real}, fit, args...) = one(Float64)
+function interp_unsafe(data::Union{DynamicQuantities.AbstractQuantity, Real}, fit, args...)
+    one(Float64)
+end
 
 # Runtime unwrap: when MTK calls interp_unsafe with a DataBufferType wrapper,
 # forward to the actual array-based implementation.
@@ -87,9 +89,10 @@ Create an equation that interpolates the given dataset at the given time and loc
 to divide the interpolated value by 2.
 
 Returns `(equation, discretes, constants, interp_info)` where:
-- `discretes`: vector of discrete symbolic variables [data, t_start, t_step]
-- `constants`: vector of constant symbolic variables [spatial grid params..., extrap, unit_scale]
-- `interp_info`: named tuple with all symbolic pieces needed to build interpolation expressions
+
+  - `discretes`: vector of discrete symbolic variables [data, t_start, t_step]
+  - `constants`: vector of constant symbolic variables [spatial grid params..., extrap, unit_scale]
+  - `interp_info`: named tuple with all symbolic pieces needed to build interpolation expressions
 """
 function create_interp_equation(itp::DataSetInterpolator{To}, filename, t, t_ref, coords;
         wrapper_f = v -> v) where {To}
@@ -115,8 +118,10 @@ function create_interp_equation(itp::DataSetInterpolator{To}, filename, t, t_ref
     n_tstart = Symbol(n, :_tstart)
     n_tstep = Symbol(n, :_tstep)
     ts_default, tstep_default = get_time_grid_params(itp)
-    p_tstart = only(@discretes $n_tstart(t) = ts_default [unit = u"s", description = "Time grid start for $(n)"])
-    p_tstep = only(@discretes $n_tstep(t) = tstep_default [unit = u"s", description = "Time grid step for $(n)"])
+    p_tstart = only(@discretes $n_tstart(t) = ts_default [
+        unit = u"s", description = "Time grid start for $(n)"])
+    p_tstep = only(@discretes $n_tstep(t) = tstep_default [
+        unit = u"s", description = "Time grid step for $(n)"])
 
     # Spatial grid constants (fixed for the lifetime of the simulation).
     # Each constant gets the same unit as the corresponding coordinate variable
@@ -127,12 +132,14 @@ function create_interp_equation(itp::DataSetInterpolator{To}, filename, t, t_ref
         coord_unit = ModelingToolkit.get_unit(coords[i])
         sn_start = Symbol(n, :_s, i, :start)
         sn_step = Symbol(n, :_s, i, :step)
-        push!(spatial_consts, only(@constants $sn_start = first(r) [
-            unit = coord_unit,
-            description = "Spatial grid start dim $(i) for $(n)"]))
-        push!(spatial_consts, only(@constants $sn_step = step(r) [
-            unit = coord_unit,
-            description = "Spatial grid step dim $(i) for $(n)"]))
+        push!(spatial_consts,
+            only(@constants $sn_start = first(r) [
+                unit = coord_unit,
+                description = "Spatial grid start dim $(i) for $(n)"]))
+        push!(spatial_consts,
+            only(@constants $sn_step = step(r) [
+                unit = coord_unit,
+                description = "Spatial grid step dim $(i) for $(n)"]))
     end
 
     # Extrapolation type constant: 1.0 = Flat (clamp), 0.0 = zero outside bounds.
@@ -149,7 +156,7 @@ function create_interp_equation(itp::DataSetInterpolator{To}, filename, t, t_ref
 
     # Compute fractional 1-based indices symbolically: fi = 1 + (coord - start) / step
     fit = 1 + (t_ref + t - p_tstart) / p_tstep
-    fis = [1 + (coords[i] - spatial_consts[2i-1]) / spatial_consts[2i]
+    fis = [1 + (coords[i] - spatial_consts[2i - 1]) / spatial_consts[2i]
            for i in 1:length(coords)]
 
     # Build RHS: interp_unsafe(data, fit, fi1, ..., extrap) * unit_scale
@@ -177,7 +184,7 @@ function create_interp_equation(itp::DataSetInterpolator{To}, filename, t, t_ref
     # Collect default values for constants (needed for initial_conditions in System).
     const_defaults = Dict{Any, Any}()
     for (i, r) in enumerate(grid_ranges)
-        const_defaults[spatial_consts[2i-1]] = first(r)
+        const_defaults[spatial_consts[2i - 1]] = first(r)
         const_defaults[spatial_consts[2i]] = step(r)
     end
     const_defaults[p_extrap] = extrap_val
@@ -202,7 +209,7 @@ the interpolation at modified coordinates (e.g., `lev + 1` for finite difference
 function build_interp_expr(info, t_expr, coord_exprs)
     fit = 1 + (t_expr - info.tstart_sym) / info.tstep_sym
     n_spatial = length(coord_exprs)
-    fis = [1 + (coord_exprs[i] - info.spatial_consts[2i-1]) / info.spatial_consts[2i]
+    fis = [1 + (coord_exprs[i] - info.spatial_consts[2i - 1]) / info.spatial_consts[2i]
            for i in 1:n_spatial]
     interp_unsafe(info.data_sym, fit, fis..., info.extrap_const) * info.unit_const
 end
@@ -298,9 +305,9 @@ function build_interp_event(interp_infos, starttime::DateTime)
     for (i, info) in enumerate(interp_infos)
         ck = Symbol(:itp_, info.var_sym)
         key_map[ck] = (
-            data_key = mod_keys[3*(i-1)+1],
-            tstart_key = mod_keys[3*(i-1)+2],
-            tstep_key = mod_keys[3*(i-1)+3],
+            data_key = mod_keys[3 * (i - 1) + 1],
+            tstart_key = mod_keys[3 * (i - 1) + 2],
+            tstep_key = mod_keys[3 * (i - 1) + 3]
         )
     end
 
