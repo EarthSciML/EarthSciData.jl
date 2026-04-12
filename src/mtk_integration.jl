@@ -167,9 +167,23 @@ function create_interp_equation(itp::DataSetInterpolator{To}, filename, t, t_ref
         "Interpolation data for $(n)")
 
     # Time grid discretes — scalar defaults work fine in MTK.
+    #
+    # Choose initial defaults such that the computed fractional time index
+    # `fit = 1 + (t_ref + t - p_tstart) / p_tstep` lands at `1.0` when
+    # `t = 0`.  This matters because ODE solvers evaluate the RHS *once*
+    # during `init(prob, alg)` BEFORE firing the discrete callback's
+    # `initialize` affect (the Tsit5 FSAL call in `Tsit5Cache.initialize!`
+    # runs first).  At that point the data buffer is still zeros, but we
+    # need `fit` to be in `[1, nt]` so `@boundscheck` doesn't fire on an
+    # uninitialized interpolator.  Setting `p_tstart = t_ref` yields
+    # `fit = 1` and `interp_unsafe` returns zero from the zero buffer —
+    # same behaviour as before the bounds check was added.  The callback's
+    # initialize affect subsequently overwrites both defaults with real
+    # values from the loaded cache.
     n_tstart = Symbol(n, :_tstart)
     n_tstep = Symbol(n, :_tstep)
-    ts_default, tstep_default = get_time_grid_params(itp)
+    ts_default = EarthSciMLBase.get_tref(itp.domain)
+    tstep_default = 1.0
     p_tstart = only(@discretes $n_tstart(t) = ts_default [
         unit = u"s", description = "Time grid start for $(n)"])
     p_tstep = only(@discretes $n_tstep(t) = tstep_default [

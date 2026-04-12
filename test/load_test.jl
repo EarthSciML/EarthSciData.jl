@@ -249,6 +249,61 @@ if !Sys.iswindows() # Allocation tests don't seem to work on windows.
     end
 end
 
+@testitem "interp_unsafe / interp_time_only are type-stable and non-allocating" begin
+    using EarthSciData
+    using Test: @inferred
+
+    # The RHS of every MTK-generated simulation calls these functions millions
+    # of times per solve.  They must be both type-stable (so the compiler can
+    # emit efficient code) and allocation-free (so the GC doesn't thrash).
+    #
+    # The `DataBufferType` wrapper is the load-bearing part: `interp_unsafe`
+    # runs a forward through `data.data`, and if that access ever boxes
+    # (because `data::Any` or `data::AbstractArray`) the whole thing becomes
+    # dynamic and allocations go up.
+    for T in (Float64, Float32)
+        # ----- 4D (3 spatial + time) — atmospheric data -----
+        data4 = rand(T, 10, 10, 10, 2)
+        db4 = EarthSciData.DataBufferType(data4)
+        fit = T(1.5)
+        fi1, fi2, fi3 = T(5.3), T(5.7), T(5.2)
+        extrap = T(1.0)
+
+        # Type stability: @inferred throws if the return type is not concrete.
+        @test @inferred(EarthSciData.interp_unsafe(db4, fit, fi1, fi2, fi3, extrap)) isa T
+        @test @inferred(EarthSciData.interp_time_only(db4, fit, fi1, fi2, fi3, extrap)) isa
+              T
+
+        # Allocation: zero heap allocations after warmup.
+        EarthSciData.interp_unsafe(db4, fit, fi1, fi2, fi3, extrap)  # warmup
+        EarthSciData.interp_time_only(db4, fit, fi1, fi2, fi3, extrap)
+        @test (@allocated EarthSciData.interp_unsafe(
+            db4, fit, fi1, fi2, fi3, extrap)) == 0
+        @test (@allocated EarthSciData.interp_time_only(
+            db4, fit, fi1, fi2, fi3, extrap)) == 0
+
+        # ----- 3D (2 spatial + time) — emissions -----
+        data3 = rand(T, 10, 10, 2)
+        db3 = EarthSciData.DataBufferType(data3)
+        @test @inferred(EarthSciData.interp_unsafe(db3, fit, fi1, fi2, extrap)) isa T
+        @test @inferred(EarthSciData.interp_time_only(db3, fit, fi1, fi2, extrap)) isa T
+        EarthSciData.interp_unsafe(db3, fit, fi1, fi2, extrap)
+        EarthSciData.interp_time_only(db3, fit, fi1, fi2, extrap)
+        @test (@allocated EarthSciData.interp_unsafe(db3, fit, fi1, fi2, extrap)) == 0
+        @test (@allocated EarthSciData.interp_time_only(db3, fit, fi1, fi2, extrap)) == 0
+
+        # ----- 2D (1 spatial + time) -----
+        data2 = rand(T, 10, 2)
+        db2 = EarthSciData.DataBufferType(data2)
+        @test @inferred(EarthSciData.interp_unsafe(db2, fit, fi1, extrap)) isa T
+        @test @inferred(EarthSciData.interp_time_only(db2, fit, fi1, extrap)) isa T
+        EarthSciData.interp_unsafe(db2, fit, fi1, extrap)
+        EarthSciData.interp_time_only(db2, fit, fi1, extrap)
+        @test (@allocated EarthSciData.interp_unsafe(db2, fit, fi1, extrap)) == 0
+        @test (@allocated EarthSciData.interp_time_only(db2, fit, fi1, extrap)) == 0
+    end
+end
+
 @testitem "Float32 DomainInfo → Float32 data buffer (no Float64 promotion)" begin
     using EarthSciData
     using EarthSciMLBase
