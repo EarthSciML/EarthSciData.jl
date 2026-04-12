@@ -267,6 +267,10 @@ Data spans 2000-2022 and is available from: https://edgar.jrc.ec.europa.eu/datas
 
 `stream` specifies whether the data should be streamed in as needed or loaded all at once.
 
+`spatial_interp = :linear` (default) does full multilinear interpolation; `:nearest` does
+spatial nearest-neighbour + time-only linear interpolation for ~8x speedup when queries
+are always at grid points.
+
 Note: emissions are applied only at the surface level (lev < 2) and converted from
 flux (kg m⁻² s⁻¹) to volumetric rate (kg m⁻³ s⁻¹) by dividing by the first-layer height Δz.
 """
@@ -276,7 +280,8 @@ function EDGARv81MonthlyEmis(
         domaininfo::DomainInfo;
         scale = 1.0,
         name = :EDGARv81MonthlyEmis,
-        stream = true
+        stream = true,
+        spatial_interp::Symbol = :linear
 )
     starttime, endtime = get_tspan_datetime(domaininfo)
     fs = EDGARv81MonthlyEmisFileSet(substance, sector, starttime, endtime)
@@ -308,7 +313,8 @@ function EDGARv81MonthlyEmis(
         eq, discretes,
         constants,
         info = create_interp_equation(itp, "", t, t_ref, [lon, lat];
-            wrapper_f = wrapper_f)
+            wrapper_f = wrapper_f,
+            spatial_interp = spatial_interp)
         push!(eqs, eq)
         append!(all_discretes, discretes)
         append!(all_constants, constants)

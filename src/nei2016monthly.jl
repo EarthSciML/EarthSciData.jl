@@ -347,6 +347,10 @@ that varies spatially across the domain.
 
 `stream` specifies whether the data should be streamed in as needed or loaded all at once.
 
+`spatial_interp = :linear` (default) does full multilinear interpolation; `:nearest` does
+spatial nearest-neighbour + time-only linear interpolation for ~8x speedup when queries
+are always at grid points.
+
 Conservative regridding (via ConservativeRegridding.jl) is used by default to map emissions
 from the native NEI Lambert Conformal Conic grid to the simulation domain grid, preserving
 total emissions mass.
@@ -356,7 +360,8 @@ function NEI2016MonthlyEmis(
         domaininfo::DomainInfo;
         scale = 1.0,
         name = :NEI2016MonthlyEmis,
-        stream = true
+        stream = true,
+        spatial_interp::Symbol = :linear
 )
     starttime, endtime = get_tspan_datetime(domaininfo)
     _fs = NEI2016MonthlyEmisFileSet(sector, starttime, endtime)
@@ -426,7 +431,8 @@ function NEI2016MonthlyEmis(
         eq, discretes,
         constants,
         info = create_interp_equation(itp, "", t, t_ref, [x, y];
-            wrapper_f = wrapper_f)
+            wrapper_f = wrapper_f,
+            spatial_interp = spatial_interp)
         push!(eqs, eq)
         append!(all_discretes, discretes)
         append!(all_constants, constants)

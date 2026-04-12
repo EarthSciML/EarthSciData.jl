@@ -306,6 +306,9 @@ Note that 3DEP coverage is limited to the United States
   - `name`: System name (default `:USGS3DEP`).
   - `resolution`: Target resolution in arc-seconds (default 1/3 ≈ 10m).
   - `stream`: Whether to stream data lazily (default `true`).
+  - `spatial_interp = :linear` (default) does full multilinear interpolation; `:nearest` does
+    spatial nearest-neighbour + time-only linear interpolation for ~8x speedup when queries
+    are always at grid points.
 
 # Example
 
@@ -321,7 +324,7 @@ elev = USGS3DEP(domain)
 ```
 """
 function USGS3DEP(domaininfo::DomainInfo; name = :USGS3DEP, resolution = 1 / 3,
-        stream = true)
+        stream = true, spatial_interp::Symbol = :linear)
     starttime, endtime = get_tspan_datetime(domaininfo)
     fs = USGS3DEPFileSet(domaininfo; resolution = resolution)
 
@@ -341,8 +344,10 @@ function USGS3DEP(domaininfo::DomainInfo; name = :USGS3DEP, resolution = 1 / 3,
 
     # Elevation equation.
     eq_elev, discretes_e,
-    constants_e, info_e = create_interp_equation(
-        elev_itp, "", t, t_ref, coords)
+    constants_e,
+    info_e = create_interp_equation(
+        elev_itp, "", t, t_ref, coords;
+        spatial_interp = spatial_interp)
     params = Any[t_ref]
     all_discretes = Any[discretes_e...]
     all_constants = Any[constants_e...]
@@ -356,8 +361,10 @@ function USGS3DEP(domaininfo::DomainInfo; name = :USGS3DEP, resolution = 1 / 3,
         slope_itp = DataSetInterpolator{dt}(
             slope_fs, string(component), starttime, endtime, domaininfo; stream = stream)
         eq_slope, discretes_s,
-        constants_s, info_s = create_interp_equation(
-            slope_itp, "", t, t_ref, coords)
+        constants_s,
+        info_s = create_interp_equation(
+            slope_itp, "", t, t_ref, coords;
+            spatial_interp = spatial_interp)
         push!(eqs, eq_slope)
         push!(lhs_vars, eq_slope.lhs)
         append!(all_discretes, discretes_s)

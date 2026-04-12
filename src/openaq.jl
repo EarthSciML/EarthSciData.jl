@@ -587,6 +587,10 @@ observations for the given parameter.
 `fill_value` is used for grid cells with no stations (default `0.0`).
 
 `stream` specifies whether data should be streamed or loaded all at once.
+
+`spatial_interp = :linear` (default) does full multilinear interpolation; `:nearest` does
+spatial nearest-neighbour + time-only linear interpolation for ~8x speedup when queries
+are always at grid points.
 """
 function OpenAQ(
         parameter::AbstractString,
@@ -598,7 +602,8 @@ function OpenAQ(
         # because DataSetInterpolator's BSpline propagates NaN to the entire field.
         fill_value::Real = 0.0,
         name::Symbol = :OpenAQ,
-        stream::Bool = true
+        stream::Bool = true,
+        spatial_interp::Symbol = :linear
 )
     starttime, endtime = get_tspan_datetime(domaininfo)
 
@@ -642,8 +647,11 @@ function OpenAQ(
     itp = DataSetInterpolator{dt}(fswr, parameter, starttime, endtime, domaininfo;
         stream = stream)
 
-    eq, discretes, constants, info = create_interp_equation(
-        itp, "", t, t_ref, [x, y])
+    eq, discretes,
+    constants,
+    info = create_interp_equation(
+        itp, "", t, t_ref, [x, y];
+        spatial_interp = spatial_interp)
 
     vars = [eq.lhs]
 

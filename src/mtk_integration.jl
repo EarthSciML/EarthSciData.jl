@@ -14,17 +14,24 @@ Base.convert(::Type{DataBufferType}, x::DataBufferType) = x
 Base.convert(::Type{DataBufferType}, x) = DataBufferType(x)
 Base.copy(x::DataBufferType) = DataBufferType(copy(x.data))
 
-# Dummy function for unit validation. ModelingToolkit calls the function with
+# Dummy functions for unit validation. ModelingToolkit calls the function with
 # a DynamicQuantities.Quantity or an integer to get information about the type
 # and units of the output. The array-based interp_unsafe is unitless, so we
 # return a dimensionless value (units are applied via a separate @constants multiplier).
 function interp_unsafe(data::Union{DynamicQuantities.AbstractQuantity, Real}, fit, args...)
     one(Float64)
 end
+function interp_time_only(
+        data::Union{DynamicQuantities.AbstractQuantity, Real}, fit, args...)
+    one(Float64)
+end
 
-# Runtime unwrap: when MTK calls interp_unsafe with a DataBufferType wrapper,
-# forward to the actual array-based implementation.
+# Runtime unwrap: when MTK calls interp_unsafe/interp_time_only with a
+# DataBufferType wrapper, forward to the actual array-based implementation.
 interp_unsafe(data::DataBufferType, fit, args...) = interp_unsafe(data.data, fit, args...)
+function interp_time_only(data::DataBufferType, fit, args...)
+    interp_time_only(data.data, fit, args...)
+end
 
 # Symbolic tracing for array-based interp_unsafe.
 # Arguments are: data, fit (fractional time index), fi1..fiN (fractional spatial indices), extrap.
@@ -37,27 +44,37 @@ interp_unsafe(data::DataBufferType, fit, args...) = interp_unsafe(data.data, fit
 # 1 spatial dim + time (2D array): data, fit, fi1, extrap = 4 args
 @register_symbolic interp_unsafe(data::DataBufferType, fit, fi1, extrap) false
 
-# Tell SymbolicUtils that interp_unsafe always returns a Real scalar.
+# Same registrations for interp_time_only (spatial nearest, time linear).
+@register_symbolic interp_time_only(data::DataBufferType, fit, fi1, fi2, fi3, extrap) false
+@register_symbolic interp_time_only(data::DataBufferType, fit, fi1, fi2, extrap) false
+@register_symbolic interp_time_only(data::DataBufferType, fit, fi1, extrap) false
+
+# Tell SymbolicUtils that interp_unsafe/interp_time_only always return a Real scalar.
 # promote_symtype: @register_symbolic generates promote_symtype dispatches for the
 # declared argument types, but DataBufferType needs explicit overrides since
 # the fallback may not handle it correctly.
 for n_args in 4:6
     @eval Symbolics.SymbolicUtils.promote_symtype(::typeof(interp_unsafe),
         ::Type{DataBufferType}, $(fill(:(::Type), n_args - 2)...), ::Type) = Real
+    @eval Symbolics.SymbolicUtils.promote_symtype(::typeof(interp_time_only),
+        ::Type{DataBufferType}, $(fill(:(::Type), n_args - 2)...), ::Type) = Real
 end
 
-# Register zero derivatives for interp_unsafe. The data is updated discretely via
-# callbacks (not continuously), so the symbolic derivative is zero for all arguments.
+# Register zero derivatives. The data is updated discretely via callbacks
+# (not continuously), so the symbolic derivative is zero for all arguments.
 # Without this, calculate_tgrad creates unevaluated Differential terms with symtype Any,
 # which causes *(::Type{Any}, ::Type{Real}) errors in the IMEX solver path.
 @register_derivative interp_unsafe(args...) I Symbolics.SConst(zero(Float64))
+@register_derivative interp_time_only(args...) I Symbolics.SConst(zero(Float64))
 
-# Tell SymbolicUtils that interp_unsafe always returns a scalar shape.
+# Tell SymbolicUtils that interp_unsafe/interp_time_only always return a scalar shape.
 # Without this, maketerm's default promote_shape returns Unknown(-1) when rebuilding
 # during substitute, which breaks ifelse shape checks.
 const _scalar_shape = Symbolics.SymbolicUtils.ShapeVecT()
 for n_args in 4:6
     @eval Symbolics.SymbolicUtils.promote_shape(::typeof(interp_unsafe),
+        $(fill(:(::Symbolics.SymbolicUtils.ShapeT), n_args)...)) = _scalar_shape
+    @eval Symbolics.SymbolicUtils.promote_shape(::typeof(interp_time_only),
         $(fill(:(::Symbolics.SymbolicUtils.ShapeT), n_args)...)) = _scalar_shape
 end
 
@@ -74,6 +91,17 @@ Create an equation that interpolates the given dataset at the given time and loc
 `wrapper_f` can specify a function to wrap the interpolated value, for example `eq -> eq / 2`
 to divide the interpolated value by 2.
 
+`spatial_interp` selects the spatial interpolation mode:
+
+  - `:linear` (default) — full multilinear interpolation (2^(1+dim) corners).
+    Safe for arbitrary query points; the classic behavior.
+  - `:nearest` — nearest-neighbour spatial indexing combined with linear time
+    interpolation (2 corners). Used when the caller knows every query is at a
+    grid point that matches the data grid exactly — e.g., a PDE simulation on
+    the same grid the data is regridded to. `interp_unsafe` is replaced with
+    `interp_time_only` at the symbolic level, eliminating the wasted corner
+    loads/multiplies.
+
 Returns `(equation, discretes, constants, interp_info)` where:
 
   - `discretes`: vector of discrete symbolic variables [data, t_start, t_step]
@@ -81,7 +109,11 @@ Returns `(equation, discretes, constants, interp_info)` where:
   - `interp_info`: named tuple with all symbolic pieces needed to build interpolation expressions
 """
 function create_interp_equation(itp::DataSetInterpolator{To}, filename, t, t_ref, coords;
-        wrapper_f = v -> v) where {To}
+        wrapper_f = v -> v, spatial_interp::Symbol = :linear) where {To}
+    spatial_interp in (:linear, :nearest) ||
+        throw(ArgumentError("spatial_interp must be :linear or :nearest, got $spatial_interp"))
+    interp_f = spatial_interp === :nearest ? interp_time_only : interp_unsafe
+
     n = length(filename) > 0 ? Symbol("$(filename)₊$(itp.varname)") :
         Symbol("$(itp.varname)")
 
@@ -145,8 +177,9 @@ function create_interp_equation(itp::DataSetInterpolator{To}, filename, t, t_ref
     fis = [1 + (coords[i] - spatial_consts[2i - 1]) / spatial_consts[2i]
            for i in 1:length(coords)]
 
-    # Build RHS: interp_unsafe(data, fit, fi1, ..., extrap) * unit_scale
-    rhs_interp = interp_unsafe(p_data, fit, fis..., p_extrap) * unit_scale
+    # Build RHS: interp_f(data, fit, fi1, ..., extrap) * unit_scale
+    # where interp_f is either interp_unsafe (linear) or interp_time_only (nearest).
+    rhs_interp = interp_f(p_data, fit, fis..., p_extrap) * unit_scale
 
     # Apply wrapper (e.g., NEI scaling).
     rhs = wrapper_f(rhs_interp)
@@ -180,7 +213,7 @@ function create_interp_equation(itp::DataSetInterpolator{To}, filename, t, t_ref
         spatial_consts = spatial_consts, extrap_const = p_extrap,
         unit_const = unit_scale, itp = itp, var_sym = n,
         data_dims = data_dims, data_eltype = To,
-        const_defaults = const_defaults)
+        const_defaults = const_defaults, spatial_interp = spatial_interp)
 
     return eq, discretes, constants, interp_info
 end
@@ -191,13 +224,16 @@ $(SIGNATURES)
 Build a symbolic interpolation expression for the given `interp_info` at the given
 time expression and coordinate expressions. This is useful when you need to evaluate
 the interpolation at modified coordinates (e.g., `lev + 1` for finite differences).
+Uses the same `spatial_interp` mode that was configured on `interp_info`.
 """
 function build_interp_expr(info, t_expr, coord_exprs)
     fit = 1 + (t_expr - info.tstart_sym) / info.tstep_sym
     n_spatial = length(coord_exprs)
     fis = [1 + (coord_exprs[i] - info.spatial_consts[2i - 1]) / info.spatial_consts[2i]
            for i in 1:n_spatial]
-    interp_unsafe(info.data_sym, fit, fis..., info.extrap_const) * info.unit_const
+    interp_f = get(info, :spatial_interp, :linear) === :nearest ? interp_time_only :
+               interp_unsafe
+    interp_f(info.data_sym, fit, fis..., info.extrap_const) * info.unit_const
 end
 
 # In MTK v11, parameter defaults set via `@parameters x = val` are stored as

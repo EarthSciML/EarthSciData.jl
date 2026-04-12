@@ -377,13 +377,18 @@ divergence, vorticity, ozone, cloud fractions, potential vorticity.
 The native data type for this dataset is Float32.
 
 `stream` specifies whether the data should be streamed in as needed or loaded all at once.
+
+`spatial_interp = :linear` (default) does full multilinear interpolation; `:nearest` does
+spatial nearest-neighbour + time-only linear interpolation for ~8x speedup when queries
+are always at grid points.
 """
 function ERA5(
         domaininfo::DomainInfo;
         name = :ERA5,
         mirror::AbstractString = CDS_API_URL,
         variables::Vector{String} = collect(keys(ERA5_VARIABLES)),
-        stream = true
+        stream = true,
+        spatial_interp::Symbol = :linear
 )
     starttime, endtime = get_tspan_datetime(domaininfo)
     fs = ERA5PressureLevelFileSet(domaininfo; mirror = mirror, variables = variables)
@@ -409,8 +414,11 @@ function ERA5(
         # For projected domains, lon→x and lat→y.
         mapped_dims = [get(ERA5_COORD_MAP, dim, Symbol(dim)) for dim in dims]
         coords = _match_domain_coords(mapped_dims, pvdict, pvs)
-        eq, discretes, constants, info = create_interp_equation(
-            itp, "pl", t, t_ref, coords)
+        eq, discretes,
+        constants,
+        info = create_interp_equation(
+            itp, "pl", t, t_ref, coords;
+            spatial_interp = spatial_interp)
         push!(eqs, eq)
         append!(all_discretes, discretes)
         append!(all_constants, constants)

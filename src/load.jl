@@ -700,7 +700,8 @@ end
 # error.  We surface it as an assertion via `@boundscheck` so callers can
 # elide the check with `@inbounds` in performance-critical code, and the
 # `@noinline` keeps the throw path off the hot path.
-@noinline _throw_fit_oor(fit, nt) = throw(ArgumentError(
+@noinline _throw_fit_oor(fit,
+    nt) = throw(ArgumentError(
     "Interpolation time index $fit outside loaded cache range [1, $nt]; " *
     "the discrete update event did not refresh the cache for the current integrator time."))
 
@@ -837,6 +838,83 @@ function interp_unsafe(data::AbstractArray{T, 4}, fit, fi1, fi2, fi3, extrap) wh
         end
     end
     return result
+end
+
+# --------------------------------------------------------------------------
+# Fast path: time-only interpolation with nearest-neighbour spatial indexing.
+#
+# Used when the data grid matches the model grid exactly and the caller
+# evaluates at grid points. `fi1..fiN` are assumed to be approximately
+# integer-valued; we round to the nearest index and perform interpolation
+# only in time. This reduces the corner count from 2^(1+dim) to 2.
+# --------------------------------------------------------------------------
+
+"""
+Nearest-neighbour spatial + linear time interpolation on a 2D array.
+`fit` is a fractional 1-based time index; `fi1` is assumed (approximately)
+integer-valued at a grid point.
+"""
+function interp_time_only(data::AbstractArray{T, 2}, fit, fi1, extrap) where {T}
+    n1, nt = size(data)
+    @boundscheck (fit < one(T) || fit > T(nt)) && _throw_fit_oor(fit, nt)
+
+    # Extrapolation check (zero outside range if extrap < 1)
+    if extrap < one(T)
+        if fi1 < one(T) || fi1 > T(n1)
+            return zero(T)
+        end
+    end
+
+    i1 = clamp(unsafe_trunc(Int, fi1 + T(0.5)), 1, n1)
+    it = clamp(unsafe_trunc(Int, fit), 1, nt)
+    wt = fit - T(it)
+    jt = min(it + 1, nt)
+    return (one(T) - wt) * data[i1, it] + wt * data[i1, jt]
+end
+
+"""
+Nearest-neighbour spatial + linear time interpolation on a 3D array.
+"""
+function interp_time_only(data::AbstractArray{T, 3}, fit, fi1, fi2, extrap) where {T}
+    n1, n2, nt = size(data)
+    @boundscheck (fit < one(T) || fit > T(nt)) && _throw_fit_oor(fit, nt)
+
+    if extrap < one(T)
+        if fi1 < one(T) || fi1 > T(n1) || fi2 < one(T) || fi2 > T(n2)
+            return zero(T)
+        end
+    end
+
+    i1 = clamp(unsafe_trunc(Int, fi1 + T(0.5)), 1, n1)
+    i2 = clamp(unsafe_trunc(Int, fi2 + T(0.5)), 1, n2)
+    it = clamp(unsafe_trunc(Int, fit), 1, nt)
+    wt = fit - T(it)
+    jt = min(it + 1, nt)
+    return (one(T) - wt) * data[i1, i2, it] + wt * data[i1, i2, jt]
+end
+
+"""
+Nearest-neighbour spatial + linear time interpolation on a 4D array.
+"""
+function interp_time_only(
+        data::AbstractArray{T, 4}, fit, fi1, fi2, fi3, extrap) where {T}
+    n1, n2, n3, nt = size(data)
+    @boundscheck (fit < one(T) || fit > T(nt)) && _throw_fit_oor(fit, nt)
+
+    if extrap < one(T)
+        if fi1 < one(T) || fi1 > T(n1) || fi2 < one(T) || fi2 > T(n2) ||
+           fi3 < one(T) || fi3 > T(n3)
+            return zero(T)
+        end
+    end
+
+    i1 = clamp(unsafe_trunc(Int, fi1 + T(0.5)), 1, n1)
+    i2 = clamp(unsafe_trunc(Int, fi2 + T(0.5)), 1, n2)
+    i3 = clamp(unsafe_trunc(Int, fi3 + T(0.5)), 1, n3)
+    it = clamp(unsafe_trunc(Int, fit), 1, nt)
+    wt = fit - T(it)
+    jt = min(it + 1, nt)
+    return (one(T) - wt) * data[i1, i2, i3, it] + wt * data[i1, i2, i3, jt]
 end
 
 """

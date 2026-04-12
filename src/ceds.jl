@@ -306,6 +306,9 @@ Sectors (0-7): $(join(["$i: $(CEDS_SECTORS[i+1])" for i in 0:7], "; ")).
   - `data_version`: Data version string. Default is `"v20250421"`.
   - `name`: System name. Default is `:CEDS`.
   - `stream`: Whether to stream data on demand. Default is `true`.
+  - `spatial_interp = :linear` (default) does full multilinear interpolation; `:nearest` does
+    spatial nearest-neighbour + time-only linear interpolation for ~8x speedup when queries
+    are always at grid points.
 """
 function CEDS(
         domaininfo::DomainInfo;
@@ -315,7 +318,8 @@ function CEDS(
         version::AbstractString = "CEDS-CMIP-2025-04-18",
         data_version::AbstractString = "v20250421",
         name = :CEDS,
-        stream = true
+        stream = true,
+        spatial_interp::Symbol = :linear
 )
     for sp in species
         @assert sp in CEDS_SPECIES "Unknown CEDS species '$sp'. Valid: $CEDS_SPECIES"
@@ -346,8 +350,11 @@ function CEDS(
         dt = EarthSciMLBase.eltype(domaininfo)
         itp = DataSetInterpolator{dt}(fs, varname, starttime, endtime, domaininfo;
             stream = stream)
-        eq, discretes, constants, info = create_interp_equation(
-            itp, "", t, t_ref, [x, y])
+        eq, discretes,
+        constants,
+        info = create_interp_equation(
+            itp, "", t, t_ref, [x, y];
+            spatial_interp = spatial_interp)
         push!(eqs, eq)
         append!(all_discretes, discretes)
         append!(all_constants, constants)

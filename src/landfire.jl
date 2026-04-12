@@ -226,6 +226,9 @@ for categorical data).
   - `version`: LANDFIRE version (default `"LF2022"`).
   - `resolution`: Target resolution in arc-seconds (default 1.0 ≈ 30m).
   - `stream`: Whether to stream data lazily (default `true`).
+  - `spatial_interp = :linear` (default) does full multilinear interpolation; `:nearest` does
+    spatial nearest-neighbour + time-only linear interpolation for ~8x speedup when queries
+    are always at grid points.
 
 # Example
 
@@ -241,7 +244,8 @@ fuel = LANDFIRE(domain)
 ```
 """
 function LANDFIRE(domaininfo::DomainInfo; name = :LANDFIRE,
-        product = "FBFM13", version = "LF2022", resolution = 1.0, stream = true)
+        product = "FBFM13", version = "LF2022", resolution = 1.0, stream = true,
+        spatial_interp::Symbol = :linear)
     starttime, endtime = get_tspan_datetime(domaininfo)
     fs = LANDFIREFileSet(domaininfo; product = product, version = version,
         resolution = resolution)
@@ -265,8 +269,11 @@ function LANDFIRE(domaininfo::DomainInfo; name = :LANDFIRE,
         fswr, "fuel_model", starttime, endtime, domaininfo; stream = stream)
     dims = dimnames(itp)
     coords = _match_domain_coords(dims, pvdict, pvs)
-    eq, discretes, constants, info = create_interp_equation(
-        itp, "", t, t_ref, coords)
+    eq, discretes,
+    constants,
+    info = create_interp_equation(
+        itp, "", t, t_ref, coords;
+        spatial_interp = spatial_interp)
 
     all_params = Any[t_ref, constants..., discretes...]
     interp_infos = [info]

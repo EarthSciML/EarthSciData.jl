@@ -210,11 +210,23 @@ struct NCEPNCARReanalysisCoupler
     sys::Any
 end
 
+"""
+$(SIGNATURES)
+
+A data loader for NCEP/NCAR Reanalysis data.
+
+`stream` specifies whether the data should be streamed in as needed or loaded all at once.
+
+`spatial_interp = :linear` (default) does full multilinear interpolation; `:nearest` does
+spatial nearest-neighbour + time-only linear interpolation for ~8x speedup when queries
+are always at grid points.
+"""
 function NCEPNCARReanalysis(
         mirror::String,
         domaininfo::DomainInfo;
         name = :NCEPNCARReanalysis,
-        stream = true
+        stream = true,
+        spatial_interp::Symbol = :linear
 )
     starttime, endtime = get_tspan_datetime(domaininfo)
     fs = NCEPNCARReanalysisFileSet(mirror, domaininfo)
@@ -256,8 +268,11 @@ function NCEPNCARReanalysis(
             @assert translated_dim ∈ keys(pvdict) "Dimension $d (translated to $translated_dim) is not in the domaininfo coordinates ($(pvs))."
             push!(coords, pvdict[translated_dim])
         end
-        eq, discretes, constants, info = create_interp_equation(
-            itp, "", t, t_ref, coords)
+        eq, discretes,
+        constants,
+        info = create_interp_equation(
+            itp, "", t, t_ref, coords;
+            spatial_interp = spatial_interp)
         push!(eqs, eq)
         append!(all_discretes, discretes)
         append!(all_constants, constants)

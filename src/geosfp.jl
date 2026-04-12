@@ -401,13 +401,18 @@ The native data type for this dataset is Float32.
 
 `stream` specifies whether the data should be streamed in as needed or loaded all at once.
 
+`spatial_interp = :linear` (default) does full multilinear interpolation; `:nearest` does
+spatial nearest-neighbour + time-only linear interpolation for ~8x speedup when queries
+are always at grid points.
+
 See http://geoschemdata.wustl.edu/ExtData/ for current data domain options.
 """
 function GEOSFP(
         domain::AbstractString,
         domaininfo::DomainInfo;
         name = :GEOSFP,
-        stream = true
+        stream = true,
+        spatial_interp::Symbol = :linear
 )
     starttime, endtime = get_tspan_datetime(domaininfo)
     filesets = Dict{String, GEOSFPFileSet}(
@@ -445,8 +450,10 @@ function GEOSFP(
             dims = dimnames(itp)
             coords = _match_domain_coords(dims, pvdict, pvs)
             eq, discretes,
-            constants, info = create_interp_equation(
-                itp, filename, t, t_ref, coords)
+            constants,
+            info = create_interp_equation(
+                itp, filename, t, t_ref, coords;
+                spatial_interp = spatial_interp)
             push!(eqs, eq)
             append!(all_discretes, discretes)
             append!(all_constants, constants)
