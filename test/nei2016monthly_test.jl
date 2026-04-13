@@ -102,11 +102,19 @@ end
 
 @testitem "run" setup=[NEISetup] begin
     using ModelingToolkit
+    using ModelingToolkit: t, D
     using OrdinaryDiffEqTsit5
-    sys = mtkcompile(emis)
+
+    # NEI has no state variables; wrap with a trivial dummy to satisfy
+    # the ODE solver (same pattern as the GEOSFP/WRF/NCEP/EDGAR tests).
+    @variables _dummy(t) = 0.0
+    _sys = compose(System([D(_dummy) ~ 0], t; name = :_w), emis)
+    sys = mtkcompile(_sys)
     prob = ODEProblem(
         sys,
-        [lat => deg2rad(40.0), lon => deg2rad(-97.5), lev => 1.0],
+        [sys.NEI2016MonthlyEmis.lat => deg2rad(40.0),
+            sys.NEI2016MonthlyEmis.lon => deg2rad(-97.5),
+            sys.NEI2016MonthlyEmis.lev => 1.0],
         (0.0, 60.0)
     )
     solve(prob, Tsit5())

@@ -71,12 +71,22 @@ end
 
 @testitem "EDGAR ODE Run" setup=[EDGARSetup] tags=[:edgar] begin
     using ModelingToolkit
+    using ModelingToolkit: t, D
     using OrdinaryDiffEqTsit5
 
-    sys=mtkcompile(emis)
+    # `EDGARv81MonthlyEmis` has no state variables (only parameters and
+    # observed equations), so `ODEProblem` on it directly produces a
+    # DAE with `u0 = Nothing` which errors during solver initialization.
+    # Wrap with a trivial `D(_dummy) ~ 0` state so `solve` has something
+    # to integrate — same pattern used in the GEOSFP/WRF/NCEP tests.
+    @variables _dummy(t)=0.0
+    _sys=compose(System([D(_dummy)~0], t; name = :_w), emis)
+    sys=mtkcompile(_sys)
     prob=ODEProblem(
         sys,
-        [lat=>deg2rad(51.0), lon=>deg2rad(10.0), lev=>1.0],
+        [sys.EDGARv81MonthlyEmis.lat=>deg2rad(51.0),
+            sys.EDGARv81MonthlyEmis.lon=>deg2rad(10.0),
+            sys.EDGARv81MonthlyEmis.lev=>1.0],
         (0.0, 60.0)
     )
     sol=solve(prob, Tsit5())

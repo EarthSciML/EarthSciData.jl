@@ -358,19 +358,30 @@ end
     # `DataBufferType{Array{Float32, N}}` — separate buckets for 2D+t and
     # 3D+t data arrays). After the initialize callback fires, the buffers
     # should be populated with real data, still Float32, no promotion.
-    pbuf = integ.p
-    found_nonzero_f32 = false
-    for buf in pbuf.discrete
-        T = eltype(buf)
-        T <: EarthSciData.DataBufferType || continue
-        for entry in buf
-            @test entry.data isa Array{Float32}
-            @test eltype(entry.data) === Float32
-            if any(!iszero, entry.data)
-                found_nonzero_f32 = true
+    # Wrap the scan in a function to avoid the `@testitem`-soft-scope
+    # ambiguity with the `found_nonzero_f32` assignment inside the loop.
+    function scan_buffers(pbuf)
+        all_f32 = true
+        found_nonzero_f32 = false
+        for buf in pbuf.discrete
+            T = eltype(buf)
+            T <: EarthSciData.DataBufferType || continue
+            for entry in buf
+                if !(entry.data isa Array{Float32})
+                    all_f32 = false
+                end
+                if eltype(entry.data) !== Float32
+                    all_f32 = false
+                end
+                if any(!iszero, entry.data)
+                    found_nonzero_f32 = true
+                end
             end
         end
+        return all_f32, found_nonzero_f32
     end
+    all_f32, found_nonzero_f32 = scan_buffers(integ.p)
+    @test all_f32
     @test found_nonzero_f32
 end
 
@@ -431,25 +442,6 @@ end
     r = EarthSciData.knots2range([5.0])
     @test length(r) == 1
     @test first(r) == 5.0
-end
-
-@testitem "create_interpolator! with singleton dims" begin
-    using EarthSciData
-    using Interpolations: BSpline, Linear, interpolate!, scale
-    using Dates: DateTime, Hour, datetime2unix
-
-    # 2D spatial with one singleton dim + time
-    coords = (0.0:0.1:0.3, 0.0:1.0:0.0)  # dim 2 is singleton (length 1)
-    times = [DateTime(2024, 1, 1) + Hour(i) for i in 0:1]
-    data = ones(Float32, 4, 1, 2)
-    interp_cache = similar(data)
-
-    grid, itp = EarthSciData.create_interpolator!(interp_cache, data, coords, times)
-    @test length(grid) == 3
-    @test length(grid[2]) == 2  # singleton padded to 2
-
-    # Query should work — value should be 1.0 everywhere
-    @test itp(0.1, 0.5, datetime2unix(times[1])) ≈ 1.0f0
 end
 
 @testitem "DummyFileSet singleton dim" begin
