@@ -408,8 +408,16 @@ function build_interp_event(interp_infos, starttime::DateTime)
     affect = ModelingToolkit.ImperativeAffect(
         update_data!; modified = modified_nt, observed = NamedTuple(), ctx = ctx_nt)
 
+    # `initialize_save_discretes = false`: the data buffer parameters are
+    # internal bookkeeping, not user-visible state, so we don't need MTK to
+    # save them on the initialize affect.  This avoids a spurious
+    # `sol.t == [tspan[1], tspan[1], ...]` duplicate at the start of the
+    # solution.  Note: `save_positions` on the underlying `PresetTimeCallback`
+    # may still produce extra entries; downstream code should use
+    # `sol(saveat)` rather than `sol.u` indexing for fixed-size sampling.
     return ModelingToolkit.SymbolicDiscreteCallback(
-        all_tstops, affect; initialize = affect)
+        all_tstops, affect; initialize = affect,
+        initialize_save_discretes = false)
 end
 
 Latexify.@latexrecipe function f(itp::EarthSciData.DataSetInterpolator)

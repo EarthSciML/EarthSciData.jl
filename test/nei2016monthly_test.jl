@@ -197,30 +197,29 @@ end
 @testitem "allocations" setup=[NEISetup] begin
     using AllocCheck
     if !Sys.iswindows() # Allocation tests don't seem to work on windows.
+        # Verify that the MTK-hot-path `interp_unsafe(data::DataBufferType,
+        # fit, fi1, fi2, extrap)` is statically allocation-free. This is
+        # the exact entry point used by the RHS function that MTK generates;
+        # everything else (coordinate-to-index conversion, DateTime to unix,
+        # etc.) is folded into the symbolic equation at codegen time, so the
+        # runtime call receives pre-computed fractional indices.
         AllocCheck.@check_allocs checkf(
-            itp, t, loc1, loc2) = EarthSciData.interp_unsafe(itp, t, loc1, loc2)
+            db, fit, fi1, fi2, extrap) = EarthSciData.interp_unsafe(
+            db, fit, fi1, fi2, extrap)
 
-        sample_time = DateTime(2016, 5, 1)
-        itp = EarthSciData.DataSetInterpolator{Float32}(fileset, "NOX", ts, te, domain)
-        interp!(itp, sample_time, deg2rad(-97.0f0), deg2rad(40.0f0))
-        # If there is an error, it should occur in the proj library.
-        # https://github.com/JuliaGeo/Proj.jl/issues/104
-        try
-            checkf(itp, sample_time, deg2rad(-97.0f0), deg2rad(40.0f0))
-        catch err
-            @warn "Allocation errors:\n$(err.errors)"
-            @test length(err.errors) <= 3
-            @test all([contains(string(s), "jl_get_pgcstack_static") for s in err.errors])
-        end
-
-        itp2 = EarthSciData.DataSetInterpolator{Float64}(fileset, "NOX", ts, te, domain)
-        interp!(itp2, sample_time, deg2rad(-97.0), deg2rad(40.0))
-        try # If there is an error, it should occur in the proj library.
-            checkf(itp2, sample_time, deg2rad(-97.0), deg2rad(40.0))
-        catch err
-            @warn "Allocation errors:\n$(err.errors)"
-            @test length(err.errors) <= 3
-            @test all([contains(string(s), "jl_get_pgcstack_static") for s in err.errors])
+        for T in (Float32, Float64)
+            sample_time = DateTime(2016, 5, 1)
+            itp = EarthSciData.DataSetInterpolator{T}(fileset, "NOX", ts, te, domain)
+            EarthSciData.lazyload!(itp, sample_time)
+            db = EarthSciData.DataBufferType(itp.cache.data_buffer)
+            # Warm up then check: no catch needed — this MUST be alloc-free.
+            checkf(db, T(1.5), T(5.3), T(5.7), T(1.0))
+            try
+                checkf(db, T(1.5), T(5.3), T(5.7), T(1.0))
+            catch err
+                @warn "Allocation errors ($T):\n$(err.errors)"
+                @test length(err.errors) == 0
+            end
         end
     end
 end
@@ -356,7 +355,10 @@ end
                 tspan)
 
             sol = solve(prob, Tsit5(), saveat = saveat)
-            NO_map[i, j, :] = getindex.(sol.u, 1)
+            # Use the interpolant: the data-update discrete callback fires at
+            # tspan[1] and `save_positions=(true,true)` adds an extra entry
+            # at t=0, so `length(sol.u)` may exceed `length(saveat)`.
+            NO_map[i, j, :] = [u[1] for u in sol(saveat).u]
         end
     end
 
@@ -409,7 +411,10 @@ end
                 tspan)
 
             sol = solve(prob, Tsit5(), saveat = saveat)
-            ACET_map[i, j, :] = getindex.(sol.u, 1)
+            # Use the interpolant: the data-update discrete callback fires at
+            # tspan[1] and `save_positions=(true,true)` adds an extra entry
+            # at t=0, so `length(sol.u)` may exceed `length(saveat)`.
+            ACET_map[i, j, :] = [u[1] for u in sol(saveat).u]
         end
     end
 

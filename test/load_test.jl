@@ -1,4 +1,5 @@
 @testsnippet LoadSetup begin
+    using EarthSciData
     using EarthSciMLBase
     using Dates
 
@@ -84,6 +85,7 @@ end
 end
 
 @testitem "DummyFileSet" begin
+    using EarthSciData
     using EarthSciMLBase: DomainInfo
     using Dates: datetime2unix, DateTime, Second, Hour
     using Interpolations: scale, interpolate, BSpline, Linear
@@ -433,18 +435,21 @@ end
 end
 
 @testitem "tuple_from_vals" begin
+    using EarthSciData
     @test EarthSciData.tuple_from_vals(1, 1, 2, 2, 3, 3) == (1, 2, 3)
     @test EarthSciData.tuple_from_vals(2, 2, 1, 1, 3, 3) == (1, 2, 3)
     @test EarthSciData.tuple_from_vals(3, 3, 2, 2, 1, 1) == (1, 2, 3)
 end
 
 @testitem "knots2range singleton" begin
+    using EarthSciData
     r = EarthSciData.knots2range([5.0])
     @test length(r) == 1
     @test first(r) == 5.0
 end
 
 @testitem "DummyFileSet singleton dim" begin
+    using EarthSciData
     using EarthSciMLBase: DomainInfo
     using Dates: datetime2unix, DateTime, Second, Hour
     using Interpolations: scale, interpolate, BSpline, Linear
