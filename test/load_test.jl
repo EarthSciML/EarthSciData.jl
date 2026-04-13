@@ -1,4 +1,5 @@
 @testsnippet LoadSetup begin
+    using EarthSciData
     using EarthSciMLBase
     using Dates
 
@@ -84,6 +85,7 @@ end
 end
 
 @testitem "DummyFileSet" begin
+    using EarthSciData
     using EarthSciMLBase: DomainInfo
     using Dates: datetime2unix, DateTime, Second, Hour
     using Interpolations: scale, interpolate, BSpline, Linear
@@ -186,7 +188,8 @@ end
 
     interp!(itp, times[end], xs[end], xs[end])
     @test length(itp.cache.times) == 2
-    @test itp.cache.times == [DateTime("2022-05-02T22:30:00"), DateTime("2022-05-03T01:30:00")]
+    @test itp.cache.times ==
+          [DateTime("2022-05-02T22:30:00"), DateTime("2022-05-03T01:30:00")]
 
     uvals = zeros(Float32, length(times), length(xs))
     answers = zeros(Float32, length(times), length(xs))
@@ -248,28 +251,140 @@ if !Sys.iswindows() # Allocation tests don't seem to work on windows.
     end
 end
 
-@testitem "create_interpolator! with Float32 coords" begin
+@testitem "interp_unsafe / interp_time_only are type-stable and non-allocating" begin
     using EarthSciData
-    using Interpolations: BSpline, Linear, interpolate!, scale
-    using Dates: DateTime, Hour, datetime2unix
+    using Test: @inferred
 
-    # Float32 coords (as when DomainInfo uses Float32 u_proto)
-    coords_f32 = (Float32(0.0):Float32(0.1):Float32(0.3), Float32(0.0):Float32(0.1):Float32(0.3))
-    times = [DateTime(2024, 1, 1) + Hour(i) for i in 0:1]
-    data = zeros(Float32, 4, 4, 2)
-    interp_cache = similar(data)
-    grid, itp = EarthSciData.create_interpolator!(interp_cache, data, coords_f32, times)
+    # The RHS of every MTK-generated simulation calls these functions millions
+    # of times per solve.  They must be both type-stable (so the compiler can
+    # emit efficient code) and allocation-free (so the GC doesn't thrash).
+    #
+    # The `DataBufferType` wrapper is the load-bearing part: `interp_unsafe`
+    # runs a forward through `data.data`, and if that access ever boxes
+    # (because `data::Any` or `data::AbstractArray`) the whole thing becomes
+    # dynamic and allocations go up.
+    for T in (Float64, Float32)
+        # ----- 4D (3 spatial + time) — atmospheric data -----
+        data4 = rand(T, 10, 10, 10, 2)
+        db4 = EarthSciData.DataBufferType(data4)
+        fit = T(1.5)
+        fi1, fi2, fi3 = T(5.3), T(5.7), T(5.2)
+        extrap = T(1.0)
 
-    # All ranges in the grid should be Float64
-    for r in grid
-        @test eltype(r) == Float64
+        # Type stability: @inferred throws if the return type is not concrete.
+        @test @inferred(EarthSciData.interp_unsafe(db4, fit, fi1, fi2, fi3, extrap)) isa T
+        @test @inferred(EarthSciData.interp_time_only(db4, fit, fi1, fi2, fi3, extrap)) isa
+              T
+
+        # Allocation: zero heap allocations after warmup.
+        EarthSciData.interp_unsafe(db4, fit, fi1, fi2, fi3, extrap)  # warmup
+        EarthSciData.interp_time_only(db4, fit, fi1, fi2, fi3, extrap)
+        @test (@allocated EarthSciData.interp_unsafe(
+            db4, fit, fi1, fi2, fi3, extrap)) == 0
+        @test (@allocated EarthSciData.interp_time_only(
+            db4, fit, fi1, fi2, fi3, extrap)) == 0
+
+        # ----- 3D (2 spatial + time) — emissions -----
+        data3 = rand(T, 10, 10, 2)
+        db3 = EarthSciData.DataBufferType(data3)
+        @test @inferred(EarthSciData.interp_unsafe(db3, fit, fi1, fi2, extrap)) isa T
+        @test @inferred(EarthSciData.interp_time_only(db3, fit, fi1, fi2, extrap)) isa T
+        EarthSciData.interp_unsafe(db3, fit, fi1, fi2, extrap)
+        EarthSciData.interp_time_only(db3, fit, fi1, fi2, extrap)
+        @test (@allocated EarthSciData.interp_unsafe(db3, fit, fi1, fi2, extrap)) == 0
+        @test (@allocated EarthSciData.interp_time_only(db3, fit, fi1, fi2, extrap)) == 0
+
+        # ----- 2D (1 spatial + time) -----
+        data2 = rand(T, 10, 2)
+        db2 = EarthSciData.DataBufferType(data2)
+        @test @inferred(EarthSciData.interp_unsafe(db2, fit, fi1, extrap)) isa T
+        @test @inferred(EarthSciData.interp_time_only(db2, fit, fi1, extrap)) isa T
+        EarthSciData.interp_unsafe(db2, fit, fi1, extrap)
+        EarthSciData.interp_time_only(db2, fit, fi1, extrap)
+        @test (@allocated EarthSciData.interp_unsafe(db2, fit, fi1, extrap)) == 0
+        @test (@allocated EarthSciData.interp_time_only(db2, fit, fi1, extrap)) == 0
+    end
+end
+
+@testitem "Float32 DomainInfo → Float32 data buffer (no Float64 promotion)" begin
+    using EarthSciData
+    using EarthSciMLBase
+    using ModelingToolkit
+    using ModelingToolkit: t, D
+    using Dates
+    using DynamicQuantities
+    using OrdinaryDiffEqTsit5
+    using SymbolicIndexingInterface: setp, getsym
+
+    # DomainInfo with Float32 u_proto — forces the element type through every
+    # downstream allocation. This is the CPU-side dress rehearsal for GPU
+    # execution: `similar(domain.u_proto, ...)` should preserve element type
+    # without promoting to Float64, and the interpolation path should not
+    # allocate Float64 intermediates.
+    domain = DomainInfo(
+        DateTime(2022, 1, 1),
+        DateTime(2022, 1, 3);
+        latrange = deg2rad(-85.0f0):deg2rad(2):deg2rad(85.0f0),
+        lonrange = deg2rad(-180.0f0):deg2rad(2.5):deg2rad(175.0f0),
+        levrange = 1:73,
+        u_proto = zeros(Float32, 0)
+    )
+    @test eltype(domain.u_proto) === Float32
+
+    geosfp = GEOSFP("4x5", domain)
+
+    # The `getdefault` of every _data parameter should be a Float32 Array
+    # (MTK stores the raw default pre-conversion; the conversion to
+    # `DataBufferType{Array{Float32,N}}` happens when `MTKParameters` is
+    # built — verified below).
+    ps = parameters(geosfp)
+    data_ps = [p for p in ps if endswith(string(ModelingToolkit.getname(p)), "_data")]
+    @test !isempty(data_ps)
+    for p in data_ps
+        default = ModelingToolkit.getdefault(p)
+        @test default isa Array{Float32}
+        @test eltype(default) === Float32
     end
 
-    # A second call (simulating update_interpolator!) should produce the same type
-    data2 = ones(Float32, 4, 4, 2)
-    interp_cache2 = similar(data2)
-    grid2, itp2 = EarthSciData.create_interpolator!(interp_cache2, data2, coords_f32, times)
-    @test typeof(itp) == typeof(itp2)
+    # Build a trivial wrapper system so ODEProblem/init work (GEOSFP alone has
+    # no state variables) and verify the initialize callback loads data
+    # without promoting the buffer.
+    @variables _dummy(t) = 0.0f0
+    _sys = compose(System([D(_dummy) ~ 0], t; name = :_w), geosfp)
+    compiled = mtkcompile(_sys)
+    prob = ODEProblem(compiled, [], (24.0 * 3600, 48.0 * 3600))
+    integ = init(prob, Tsit5())
+
+    # The `@discretes`-declared data buffers live in `p.discrete`, split into
+    # sub-buffers by symtype (one bucket per distinct concrete
+    # `DataBufferType{Array{Float32, N}}` — separate buckets for 2D+t and
+    # 3D+t data arrays). After the initialize callback fires, the buffers
+    # should be populated with real data, still Float32, no promotion.
+    # Wrap the scan in a function to avoid the `@testitem`-soft-scope
+    # ambiguity with the `found_nonzero_f32` assignment inside the loop.
+    function scan_buffers(pbuf)
+        all_f32 = true
+        found_nonzero_f32 = false
+        for buf in pbuf.discrete
+            T = eltype(buf)
+            T <: EarthSciData.DataBufferType || continue
+            for entry in buf
+                if !(entry.data isa Array{Float32})
+                    all_f32 = false
+                end
+                if eltype(entry.data) !== Float32
+                    all_f32 = false
+                end
+                if any(!iszero, entry.data)
+                    found_nonzero_f32 = true
+                end
+            end
+        end
+        return all_f32, found_nonzero_f32
+    end
+    all_f32, found_nonzero_f32 = scan_buffers(integ.p)
+    @test all_f32
+    @test found_nonzero_f32
 end
 
 @testitem "interp_cache_times! boundary" begin
@@ -294,7 +409,7 @@ end
         EarthSciData.MetaData(
             [[0.0, 1.0], [0.0, 1.0]],
             "m", "test", ["x", "y"], [2, 2],
-            "+proj=longlat +datum=WGS84 +no_defs", 1, 2, -1, (false, false, false),
+            "+proj=longlat +datum=WGS84 +no_defs", 1, 2, -1, (false, false, false)
         )
     end
 
@@ -302,10 +417,11 @@ end
         DateTime(2024, 1, 1), DateTime(2024, 1, 2);
         lonrange = deg2rad(0.0):deg2rad(1.0):deg2rad(1.0),
         latrange = deg2rad(0.0):deg2rad(1.0):deg2rad(1.0),
-        levrange = 1:1,
+        levrange = 1:1
     )
     fs = BoundaryCacheTestFS(DateTime(2024, 1, 1), DateTime(2024, 1, 2))
-    itp = EarthSciData.DataSetInterpolator{Float64}(fs, "X", DateTime(2024, 1, 1), DateTime(2024, 1, 2), domain)
+    itp = EarthSciData.DataSetInterpolator{Float64}(
+        fs, "X", DateTime(2024, 1, 1), DateTime(2024, 1, 2), domain)
 
     # At the last centerpoint, should not throw BoundsError
     times = EarthSciData.interp_cache_times!(itp, DateTime(2024, 1, 2))
@@ -319,37 +435,21 @@ end
 end
 
 @testitem "tuple_from_vals" begin
+    using EarthSciData
     @test EarthSciData.tuple_from_vals(1, 1, 2, 2, 3, 3) == (1, 2, 3)
     @test EarthSciData.tuple_from_vals(2, 2, 1, 1, 3, 3) == (1, 2, 3)
     @test EarthSciData.tuple_from_vals(3, 3, 2, 2, 1, 1) == (1, 2, 3)
 end
 
 @testitem "knots2range singleton" begin
+    using EarthSciData
     r = EarthSciData.knots2range([5.0])
     @test length(r) == 1
     @test first(r) == 5.0
 end
 
-@testitem "create_interpolator! with singleton dims" begin
-    using EarthSciData
-    using Interpolations: BSpline, Linear, interpolate!, scale
-    using Dates: DateTime, Hour, datetime2unix
-
-    # 2D spatial with one singleton dim + time
-    coords = (0.0:0.1:0.3, 0.0:1.0:0.0)  # dim 2 is singleton (length 1)
-    times = [DateTime(2024, 1, 1) + Hour(i) for i in 0:1]
-    data = ones(Float32, 4, 1, 2)
-    interp_cache = similar(data)
-
-    grid, itp = EarthSciData.create_interpolator!(interp_cache, data, coords, times)
-    @test length(grid) == 3
-    @test length(grid[2]) == 2  # singleton padded to 2
-
-    # Query should work — value should be 1.0 everywhere
-    @test itp(0.1, 0.5, datetime2unix(times[1])) ≈ 1.0f0
-end
-
 @testitem "DummyFileSet singleton dim" begin
+    using EarthSciData
     using EarthSciMLBase: DomainInfo
     using Dates: datetime2unix, DateTime, Second, Hour
     using Interpolations: scale, interpolate, BSpline, Linear
@@ -417,7 +517,8 @@ end
     )
 
     # Should be able to interpolate without error
-    val = EarthSciData.interp(itp, DateTime(2022, 5, 1, 1), deg2rad(0.25f0), deg2rad(0.5f0), 1.0f0)
+    val = EarthSciData.interp!(
+        itp, DateTime(2022, 5, 1, 1), deg2rad(0.25f0), deg2rad(0.5f0), 1.0f0)
     @test !isnan(val)
     @test isfinite(val)
 end

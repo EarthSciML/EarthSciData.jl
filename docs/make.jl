@@ -12,7 +12,11 @@ makedocs(;
         prettyurls = get(ENV, "CI", "false") == "true",
         canonical = "https://earthsciml.github.io/EarthSciData.jl",
         assets = String[],
-        repolink = "https://github.com/EarthSciML/EarthSciData.jl"
+        repolink = "https://github.com/EarthSciML/EarthSciData.jl",
+        # The NEI and GEOS-FP pages have large equation tables; raise the
+        # thresholds so Documenter's inline-HTML size checks pass.
+        size_threshold = 300 * 2^10,
+        size_threshold_warn = 200 * 2^10
     ),
     pages = [
         "Home" => "index.md",

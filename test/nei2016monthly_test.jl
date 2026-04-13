@@ -48,8 +48,9 @@ end
 
 @testitem "projections" setup=[NEISetup] begin
     import Proj
-    fs = EarthSciData.FileSetWithRegridder(fileset, EarthSciData.regridder(fileset,
-        EarthSciData.loadmetadata(fileset, first(EarthSciData.varnames(fileset))), domain))
+    fs = EarthSciData.FileSetWithRegridder(fileset,
+        EarthSciData.regridder(fileset,
+            EarthSciData.loadmetadata(fileset, first(EarthSciData.varnames(fileset))), domain))
     @testset "correct projection" begin
         itp = EarthSciData.DataSetInterpolator{Float32}(fs, "NOX", ts, te, domain)
         result = interp!(itp, sample_time, deg2rad(-97.0f0), deg2rad(40.0f0))
@@ -101,12 +102,20 @@ end
 
 @testitem "run" setup=[NEISetup] begin
     using ModelingToolkit
+    using ModelingToolkit: t, D
     using OrdinaryDiffEqTsit5
-    sys = mtkcompile(emis)
+
+    # NEI has no state variables; wrap with a trivial dummy to satisfy
+    # the ODE solver (same pattern as the GEOSFP/WRF/NCEP/EDGAR tests).
+    @variables _dummy(t) = 0.0
+    _sys = compose(System([D(_dummy) ~ 0], t; name = :_w), emis)
+    sys = mtkcompile(_sys)
     prob = ODEProblem(
         sys,
-        [lat => deg2rad(40.0), lon => deg2rad(-97.5), lev => 1.0],
-        (0.0, 60.0),
+        [sys.NEI2016MonthlyEmis.lat => deg2rad(40.0),
+            sys.NEI2016MonthlyEmis.lon => deg2rad(-97.5),
+            sys.NEI2016MonthlyEmis.lev => 1.0],
+        (0.0, 60.0)
     )
     solve(prob, Tsit5())
 end
@@ -116,12 +125,12 @@ end
     using ModelingToolkit: t, D
     using DynamicQuantities
     domain = DomainInfo(
-    DateTime(2016, 5, 16),
-    DateTime(2016, 5, 17);
-    lonrange=deg2rad(-125):deg2rad(0.625):deg2rad(-66.875),
-    latrange=deg2rad(25):deg2rad(0.5):deg2rad(49),
-    levrange=1:2,
-    u_proto=zeros(Float64, 1, 1, 1, 1))
+        DateTime(2016, 5, 16),
+        DateTime(2016, 5, 17);
+        lonrange = deg2rad(-125):deg2rad(0.625):deg2rad(-66.875),
+        latrange = deg2rad(25):deg2rad(0.5):deg2rad(49),
+        levrange = 1:2,
+        u_proto = zeros(Float64, 1, 1, 1, 1))
 
     emis_nei = NEI2016MonthlyEmis("mrggrid_withbeis_withrwc", domain)
     @constants uc = 1.0 [unit = u"s" description = "unit conversion"]
@@ -137,7 +146,7 @@ end
     prob = ODEProblem(
         sys,
         [lat_p => deg2rad(40.0), lon_p => deg2rad(-97.5), lev_p => 1.0],
-        (0.0, 60.0),
+        (0.0, 60.0)
     )
     sol = solve(prob, Tsit5())
     @test sol.u[end][end] != 0.0  # Ensure we get a nonzero result
@@ -165,49 +174,52 @@ end
 
     # 6 AM Chicago = 12 PM UTC (6 hours later)
     six_am_chicago = t_ref_numeric + 12 * 3600.0  # 6 AM Chicago = 12 PM UTC, 7th factor
-    @test EarthSciData.diurnal_itp(six_am_chicago, lon_chicago) == EarthSciData.DIURNAL_FACTORS[7]
+    @test EarthSciData.diurnal_itp(six_am_chicago, lon_chicago) ==
+          EarthSciData.DIURNAL_FACTORS[7]
 
     # 6 PM Chicago = 12 AM UTC next day (6 hours later)
     six_pm_chicago = t_ref_numeric + 24 * 3600.0  # 6 PM Chicago = 12 AM UTC next day, 19th factor
-    @test EarthSciData.diurnal_itp(six_pm_chicago, lon_chicago) == EarthSciData.DIURNAL_FACTORS[19]
+    @test EarthSciData.diurnal_itp(six_pm_chicago, lon_chicago) ==
+          EarthSciData.DIURNAL_FACTORS[19]
 
     # Test that the function wraps around 24 hours correctly
     # 24 hours = 86400 seconds
     next_midnight_utc = t_ref_numeric + 24 * 3600.0  # 24 hours since start
-    @test EarthSciData.diurnal_itp(next_midnight_utc, lon_utc) == EarthSciData.DIURNAL_FACTORS[1]
+    @test EarthSciData.diurnal_itp(next_midnight_utc, lon_utc) ==
+          EarthSciData.DIURNAL_FACTORS[1]
 
     # Test fractional hours
     half_past_one_utc = t_ref_numeric + 1.5 * 3600.0  # 1.5 hours since start
-    @test EarthSciData.diurnal_itp(half_past_one_utc, lon_utc) == EarthSciData.DIURNAL_FACTORS[2]  # Should floor to hour 1
+    @test EarthSciData.diurnal_itp(half_past_one_utc, lon_utc) ==
+          EarthSciData.DIURNAL_FACTORS[2]  # Should floor to hour 1
 end
 
 @testitem "allocations" setup=[NEISetup] begin
-     using AllocCheck
+    using AllocCheck
     if !Sys.iswindows() # Allocation tests don't seem to work on windows.
+        # Verify that the MTK-hot-path `interp_unsafe(data::DataBufferType,
+        # fit, fi1, fi2, extrap)` is statically allocation-free. This is
+        # the exact entry point used by the RHS function that MTK generates;
+        # everything else (coordinate-to-index conversion, DateTime to unix,
+        # etc.) is folded into the symbolic equation at codegen time, so the
+        # runtime call receives pre-computed fractional indices.
         AllocCheck.@check_allocs checkf(
-            itp, t, loc1, loc2) = EarthSciData.interp_unsafe(itp, t, loc1, loc2)
+            db, fit, fi1, fi2, extrap) = EarthSciData.interp_unsafe(
+            db, fit, fi1, fi2, extrap)
 
-        sample_time = DateTime(2016, 5, 1)
-        itp = EarthSciData.DataSetInterpolator{Float32}(fileset, "NOX", ts, te, domain)
-        interp!(itp, sample_time, deg2rad(-97.0f0), deg2rad(40.0f0))
-        # If there is an error, it should occur in the proj library.
-        # https://github.com/JuliaGeo/Proj.jl/issues/104
-        try
-            checkf(itp, sample_time, deg2rad(-97.0f0), deg2rad(40.0f0))
-        catch err
-            @warn "Allocation errors:\n$(err.errors)"
-            @test length(err.errors) <= 3
-            @test all([contains(string(s), "jl_get_pgcstack_static") for s in err.errors])
-        end
-
-        itp2 = EarthSciData.DataSetInterpolator{Float64}(fileset, "NOX", ts, te, domain)
-        interp!(itp2, sample_time, deg2rad(-97.0), deg2rad(40.0))
-        try # If there is an error, it should occur in the proj library.
-            checkf(itp2, sample_time, deg2rad(-97.0), deg2rad(40.0))
-        catch err
-            @warn "Allocation errors:\n$(err.errors)"
-            @test length(err.errors) <= 3
-            @test all([contains(string(s), "jl_get_pgcstack_static") for s in err.errors])
+        for T in (Float32, Float64)
+            sample_time = DateTime(2016, 5, 1)
+            itp = EarthSciData.DataSetInterpolator{T}(fileset, "NOX", ts, te, domain)
+            EarthSciData.lazyload!(itp, sample_time)
+            db = EarthSciData.DataBufferType(itp.cache.data_buffer)
+            # Warm up then check: no catch needed — this MUST be alloc-free.
+            checkf(db, T(1.5), T(5.3), T(5.7), T(1.0))
+            try
+                checkf(db, T(1.5), T(5.3), T(5.7), T(1.0))
+            catch err
+                @warn "Allocation errors ($T):\n$(err.errors)"
+                @test length(err.errors) == 0
+            end
         end
     end
 end
@@ -232,8 +244,10 @@ end
 end
 
 @testitem "delp_dry_surface_itp" setup=[NEISetup] begin
-    @test EarthSciData.delp_dry_surface_itp(deg2rad(-94.375), deg2rad(44.5)) ≈ 14.721285536474896
-    @test EarthSciData.delp_dry_surface_itp(deg2rad(-88.125), deg2rad(42.0)) ≈ 14.8498301901334
+    @test EarthSciData.delp_dry_surface_itp(deg2rad(-94.375), deg2rad(44.5)) ≈
+          14.721285536474896
+    @test EarthSciData.delp_dry_surface_itp(deg2rad(-88.125), deg2rad(42.0)) ≈
+          14.8498301901334
 end
 
 @testitem "conservative regridding" setup=[NEISetup] begin
@@ -242,8 +256,8 @@ end
     domain = DomainInfo(
         DateTime(2016, 5, 1),
         DateTime(2016, 5, 2);
-        lonrange=deg2rad(-125):deg2rad(0.625):deg2rad(-66.875),
-        latrange=deg2rad(25):deg2rad(0.5):deg2rad(49),
+        lonrange = deg2rad(-125):deg2rad(0.625):deg2rad(-66.875),
+        latrange = deg2rad(25):deg2rad(0.5):deg2rad(49),
         levrange = 1:10
     )
     emis = NEI2016MonthlyEmis("mrggrid_withbeis_withrwc", domain)
@@ -254,15 +268,16 @@ end
         domain = DomainInfo(
             DateTime(2016, 5, 16, 12, 0, 0),
             DateTime(2016, 5, 17, 12, 0, 0);
-            lonrange=deg2rad(-125):deg2rad(0.625):deg2rad(-66.875),
-            latrange=deg2rad(25):deg2rad(0.5):deg2rad(49),
+            lonrange = deg2rad(-125):deg2rad(0.625):deg2rad(-66.875),
+            latrange = deg2rad(25):deg2rad(0.5):deg2rad(49),
             levrange = 1:10
         )
         ts, te = get_tspan_datetime(domain)
         fileset = EarthSciData.NEI2016MonthlyEmisFileSet("mrggrid_withbeis_withrwc", ts, te)
         # Use the unified DataSetInterpolator with conservative regridding via regridder()
-        fs = EarthSciData.FileSetWithRegridder(fileset, EarthSciData.regridder(fileset,
-            EarthSciData.loadmetadata(fileset, "NO"), domain))
+        fs = EarthSciData.FileSetWithRegridder(fileset,
+            EarthSciData.regridder(fileset,
+                EarthSciData.loadmetadata(fileset, "NO"), domain))
         itp = EarthSciData.DataSetInterpolator{Float64}(fs, "NO", ts, te, domain)
         @test itp.varname == "NO"
         @test itp.metadata !== nothing
@@ -276,14 +291,15 @@ end
         domain = DomainInfo(
             DateTime(2016, 5, 1),
             DateTime(2016, 5, 2);
-            lonrange=deg2rad(-125):deg2rad(2.5):deg2rad(-66.875),
-            latrange=deg2rad(25):deg2rad(2.0):deg2rad(49),
+            lonrange = deg2rad(-125):deg2rad(2.5):deg2rad(-66.875),
+            latrange = deg2rad(25):deg2rad(2.0):deg2rad(49),
             levrange = 1:10
         )
         ts, te = get_tspan_datetime(domain)
         fileset = EarthSciData.NEI2016MonthlyEmisFileSet("mrggrid_withbeis_withrwc", ts, te)
-        fs = EarthSciData.FileSetWithRegridder(fileset, EarthSciData.regridder(fileset,
-            EarthSciData.loadmetadata(fileset, "NO"), domain))
+        fs = EarthSciData.FileSetWithRegridder(fileset,
+            EarthSciData.regridder(fileset,
+                EarthSciData.loadmetadata(fileset, "NO"), domain))
         itp = EarthSciData.DataSetInterpolator{Float64}(fs, "NO", ts, te, domain)
 
         # Test that interpolation works at a specific location
@@ -300,8 +316,8 @@ end
     domain = DomainInfo(
         DateTime(2016, 5, 15),
         DateTime(2016, 5, 16);
-        lonrange=deg2rad(-88.125):deg2rad(0.625):deg2rad(-86.875),
-        latrange=deg2rad(42):deg2rad(0.5):deg2rad(43),
+        lonrange = deg2rad(-88.125):deg2rad(0.625):deg2rad(-86.875),
+        latrange = deg2rad(42):deg2rad(0.5):deg2rad(43),
         levrange = 1:2
     )
     emis = NEI2016MonthlyEmis("mrggrid_withbeis_withrwc", domain)
@@ -321,7 +337,7 @@ end
     @constants uc = 1.0 [unit = u"s", description = "unit conversion"]
     @variables NO(t) = 0.0 [unit = u"1/s"]
 
-    saveat = range(tspan[1], tspan[2], length=nt)
+    saveat = range(tspan[1], tspan[2], length = nt)
 
     for (i, lon_val) in enumerate(lon_grid)
         for (j, lat_val) in enumerate(lat_grid)
@@ -338,8 +354,11 @@ end
                 [lat_p => lat_val, lon_p => lon_val, lev_p => 1.0],
                 tspan)
 
-            sol = solve(prob, Tsit5(), saveat=saveat)
-            NO_map[i, j, :] = getindex.(sol.u, 1)
+            sol = solve(prob, Tsit5(), saveat = saveat)
+            # Use the interpolant: the data-update discrete callback fires at
+            # tspan[1] and `save_positions=(true,true)` adds an extra entry
+            # at t=0, so `length(sol.u)` may exceed `length(saveat)`.
+            NO_map[i, j, :] = [u[1] for u in sol(saveat).u]
         end
     end
 
@@ -354,8 +373,8 @@ end
     domain = DomainInfo(
         DateTime(2016, 5, 15),
         DateTime(2016, 5, 16);
-        lonrange=deg2rad(-88.125):deg2rad(0.625):deg2rad(-86.875),
-        latrange=deg2rad(42):deg2rad(0.5):deg2rad(43),
+        lonrange = deg2rad(-88.125):deg2rad(0.625):deg2rad(-86.875),
+        latrange = deg2rad(42):deg2rad(0.5):deg2rad(43),
         levrange = 1:2
     )
     emis = NEI2016MonthlyEmis("mrggrid_withbeis_withrwc", domain)
@@ -372,12 +391,14 @@ end
     @constants uc = 1.0 [unit = u"s", description = "unit conversion"]
     @variables ACET(t) = 0.0 [unit = u"1/s"]
 
-    saveat = range(tspan[1], tspan[2], length=nt)
+    saveat = range(tspan[1], tspan[2], length = nt)
 
     for (i, lon_val) in enumerate(lon_grid)
         for (j, lat_val) in enumerate(lat_grid)
             eq = D(ACET) ~ emis.ACET / uc
-            sys = compose(System([eq], t, [ACET], [uc]; name = Symbol("ACET_sys_$(i)_$(j)")), emis)
+            sys = compose(
+                System(
+                    [eq], t, [ACET], [uc]; name = Symbol("ACET_sys_$(i)_$(j)")), emis)
             sys = mtkcompile(sys)
             # After composition, parameters are namespaced; extract them from the compiled system
             ps = parameters(sys)
@@ -389,8 +410,11 @@ end
                 [lat_p => lat_val, lon_p => lon_val, lev_p => 1.0],
                 tspan)
 
-            sol = solve(prob, Tsit5(), saveat=saveat)
-            ACET_map[i, j, :] = getindex.(sol.u, 1)
+            sol = solve(prob, Tsit5(), saveat = saveat)
+            # Use the interpolant: the data-update discrete callback fires at
+            # tspan[1] and `save_positions=(true,true)` adds an extra entry
+            # at t=0, so `length(sol.u)` may exceed `length(saveat)`.
+            ACET_map[i, j, :] = [u[1] for u in sol(saveat).u]
         end
     end
 

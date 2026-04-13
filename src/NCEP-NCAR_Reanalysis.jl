@@ -186,12 +186,13 @@ function get_geometry(::NCEPNCARReanalysisFileSet, m::MetaData)
     nx, ny = length(lon), length(lat)
     polys = Vector{Vector{NTuple{2, Float64}}}(undef, nx * ny)
     for j in 1:ny, i in 1:nx
+
         polys[(j - 1) * nx + i] = [
             (lon_edges[i], lat_edges[j]),
             (lon_edges[i + 1], lat_edges[j]),
             (lon_edges[i + 1], lat_edges[j + 1]),
             (lon_edges[i], lat_edges[j + 1]),
-            (lon_edges[i], lat_edges[j]),
+            (lon_edges[i], lat_edges[j])
         ]
     end
     return polys
@@ -209,11 +210,23 @@ struct NCEPNCARReanalysisCoupler
     sys::Any
 end
 
+"""
+$(SIGNATURES)
+
+A data loader for NCEP/NCAR Reanalysis data.
+
+`stream` specifies whether the data should be streamed in as needed or loaded all at once.
+
+`spatial_interp = :linear` (default) does full multilinear interpolation; `:nearest` does
+spatial nearest-neighbour + time-only linear interpolation for ~8x speedup when queries
+are always at grid points.
+"""
 function NCEPNCARReanalysis(
         mirror::String,
         domaininfo::DomainInfo;
         name = :NCEPNCARReanalysis,
-        stream = true
+        stream = true,
+        spatial_interp::Symbol = :linear
 )
     starttime, endtime = get_tspan_datetime(domaininfo)
     fs = NCEPNCARReanalysisFileSet(mirror, domaininfo)
@@ -224,7 +237,10 @@ function NCEPNCARReanalysis(
     @parameters t_ref=get_tref(domaininfo) [unit = u"s", description = "Reference time"]
     eqs = Equation[]
     params = Any[t_ref]
-    vars = Num[]
+    all_discretes = Any[]
+    all_constants = Any[]
+    interp_infos = []
+    lhs_vars = Num[]
 
     xdim = :x in keys(pvdict) ? :x : :lon
     ydim = :y in keys(pvdict) ? :y : :lat
@@ -252,13 +268,19 @@ function NCEPNCARReanalysis(
             @assert translated_dim ∈ keys(pvdict) "Dimension $d (translated to $translated_dim) is not in the domaininfo coordinates ($(pvs))."
             push!(coords, pvdict[translated_dim])
         end
-        eq, param = create_interp_equation(itp, "", t, t_ref, coords)
+        eq, discretes,
+        constants,
+        info = create_interp_equation(
+            itp, "", t, t_ref, coords;
+            spatial_interp = spatial_interp)
         push!(eqs, eq)
-        push!(params, param)
-        push!(vars, eq.lhs)
+        append!(all_discretes, discretes)
+        append!(all_constants, constants)
+        push!(interp_infos, info)
+        push!(lhs_vars, eq.lhs)
 
         if varname == :hgt
-            z_params["hgt"] = param
+            z_params["hgt"] = info
             z_params["hgt_coords"] = coords
         end
     end
@@ -277,7 +299,7 @@ function NCEPNCARReanalysis(
         lon_trans = δxδlon ~ lon2m * cos(pvdict[:lat])
         lat_trans = δyδlat ~ lat2meters
         push!(eqs, lon_trans, lat_trans)
-        push!(vars, δxδlon, δyδlat)
+        push!(lhs_vars, δxδlon, δyδlat)
     end
 
     if :lev in keys(pvdict)
@@ -286,7 +308,7 @@ function NCEPNCARReanalysis(
 
         p_expr = p ~ hPa2Pa * build_pressure_expr(pvdict[:lev])
         push!(eqs, p_expr)
-        push!(vars, p)
+        push!(lhs_vars, p)
     end
 
     @constants Rd=287.05 [unit = u"J/(kg*K)"]
@@ -297,38 +319,39 @@ function NCEPNCARReanalysis(
     p_val = hPa2Pa * build_pressure_expr(pvdict[:lev])
     w_expr = wwnd ~ -omega / (p_val / (Rd * T) * g)
     push!(eqs, w_expr)
-    push!(vars, wwnd)
+    push!(lhs_vars, wwnd)
 
     if haskey(z_params, "hgt")
         @variables δzδlev(t) [
             unit = u"m",
             description = "Height derivative with respect to vertical level"
         ]
-        hgt = z_params["hgt"]
+        hgt_info = z_params["hgt"]
         hgtc = z_params["hgt_coords"]
 
-        Δhgt = hgt(t + t_ref, hgtc[1], hgtc[2], hgtc[3] + 1) - hgt(t + t_ref, hgtc...)
+        Δhgt = build_interp_expr(hgt_info, t + t_ref, [hgtc[1], hgtc[2], hgtc[3] + 1]) -
+               build_interp_expr(hgt_info, t + t_ref, hgtc)
 
         lev_trans = δzδlev ~ Δhgt
         push!(eqs, lev_trans)
-        push!(vars, δzδlev)
+        push!(lhs_vars, δzδlev)
     end
 
     all_params = [
         pvdict[xdim], pvdict[ydim], pvdict[:lev],
         (:lat in keys(pvdict) ? [lat2meters, lon2m] : [])...,
         hPa2Pa, Rd, g,
-        params...
+        all_constants..., all_discretes..., params...
     ]
     sys = System(
         eqs,
         t,
-        vars,
+        lhs_vars,
         all_params;
         name = name,
         initial_conditions = _itp_defaults(all_params),
+        discrete_events = [build_interp_event(interp_infos, starttime)],
         metadata = Dict(CoupleType => NCEPNCARReanalysisCoupler,
-            SysDiscreteEvent => create_updater_sys_event(name, params, starttime),
             SysDomainInfo => domaininfo)
     )
     return sys

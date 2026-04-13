@@ -41,13 +41,13 @@ Submit a CDS API retrieve request and return the job ID.
 `dataset` is the CDS dataset identifier (e.g. "reanalysis-era5-pressure-levels").
 `request` is a Dict with the request parameters.
 """
-function cds_submit(dataset::AbstractString, request::Dict; api_key::AbstractString=cds_api_key())
+function cds_submit(dataset::AbstractString, request::Dict; api_key::AbstractString = cds_api_key())
     url = "$(CDS_API_URL)/retrieve/v1/processes/$(dataset)/execution"
     body = JSON3.write(Dict("inputs" => request))
 
     headers = [
         "PRIVATE-TOKEN" => api_key,
-        "Content-Type" => "application/json",
+        "Content-Type" => "application/json"
     ]
     resp = _cds_http_post(url, body, headers)
     data = JSON3.read(resp)
@@ -64,8 +64,8 @@ $(SIGNATURES)
 
 Poll a CDS API job until completion. Returns the download URL.
 """
-function cds_wait(job_id::AbstractString; api_key::AbstractString=cds_api_key(),
-                  poll_interval::Real=CDS_POLL_INTERVAL, timeout::Real=CDS_TIMEOUT)
+function cds_wait(job_id::AbstractString; api_key::AbstractString = cds_api_key(),
+        poll_interval::Real = CDS_POLL_INTERVAL, timeout::Real = CDS_TIMEOUT)
     url = "$(CDS_API_URL)/retrieve/v1/jobs/$(job_id)"
     headers = ["PRIVATE-TOKEN" => api_key]
     start_time = time()
@@ -97,17 +97,17 @@ Submit a CDS API request, wait for completion, and download the result.
 Returns the local file path.
 """
 function cds_retrieve(dataset::AbstractString, request::Dict, output_path::AbstractString;
-                      api_key::AbstractString=cds_api_key())
+        api_key::AbstractString = cds_api_key())
     if isfile(output_path)
         return output_path
     end
     mkpath(dirname(output_path))
 
     @info "Submitting CDS API request for $(dataset)..."
-    job_id = cds_submit(dataset, request; api_key=api_key)
+    job_id = cds_submit(dataset, request; api_key = api_key)
     @info "CDS API job submitted: $(job_id). Waiting for completion..."
 
-    download_url = cds_wait(job_id; api_key=api_key)
+    download_url = cds_wait(job_id; api_key = api_key)
     @info "Downloading from CDS: $(basename(output_path))"
 
     _download_with_progress(download_url, output_path)
@@ -117,7 +117,7 @@ end
 # HTTP helpers using Downloads.jl
 function _cds_http_get(url::AbstractString, headers::Vector{<:Pair})
     io = IOBuffer()
-    resp = Downloads.request(url; headers=headers, output=io)
+    resp = Downloads.request(url; headers = headers, output = io)
     body = String(take!(io))
     resp.status >= 400 && error("CDS API HTTP error $(resp.status): $(body)")
     return body
@@ -126,7 +126,8 @@ end
 function _cds_http_post(url::AbstractString, body::AbstractString, headers::Vector{<:Pair})
     io = IOBuffer()
     input = IOBuffer(body)
-    resp = Downloads.request(url; headers=headers, output=io, input=input, method="POST")
+    resp = Downloads.request(
+        url; headers = headers, output = io, input = input, method = "POST")
     resp_body = String(take!(io))
     resp.status >= 400 && error("CDS API HTTP error $(resp.status): $(resp_body)")
     return resp_body

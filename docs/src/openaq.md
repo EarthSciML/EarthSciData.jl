@@ -10,18 +10,18 @@
 
 ### Available Parameters
 
-| Parameter | Description |
-|-----------|-------------|
-| `pm25` | Particulate matter (PM2.5) |
-| `pm10` | Particulate matter (PM10) |
-| `o3` | Ozone |
-| `no2` | Nitrogen dioxide |
-| `so2` | Sulfur dioxide |
-| `co` | Carbon monoxide |
-| `bc` | Black carbon |
-| `pm1` | Particulate matter (PM1) |
-| `no` | Nitric oxide |
-| `nox` | Nitrogen oxides |
+| Parameter | Description                |
+|:--------- |:-------------------------- |
+| `pm25`    | Particulate matter (PM2.5) |
+| `pm10`    | Particulate matter (PM10)  |
+| `o3`      | Ozone                      |
+| `no2`     | Nitrogen dioxide           |
+| `so2`     | Sulfur dioxide             |
+| `co`      | Carbon monoxide            |
+| `bc`      | Black carbon               |
+| `pm1`     | Particulate matter (PM1)   |
+| `no`      | Nitric oxide               |
+| `nox`     | Nitrogen oxides            |
 
 ```@docs
 OpenAQ
@@ -31,17 +31,18 @@ OpenAQ
 
 ### Data Flow
 
-1. **Station Discovery**: The OpenAQ API is queried to find all monitoring stations within the model domain's bounding box that measure the requested parameter. Results are cached locally as JSON files.
+ 1. **Station Discovery**: The OpenAQ API is queried to find all monitoring stations within the model domain's bounding box that measure the requested parameter. Results are cached locally as JSON files.
 
-2. **Data Download**: Daily gzip-compressed CSV files are downloaded from the OpenAQ S3 archive for each station. Files are cached locally under `$EARTHSCIDATADIR/openaq_data/`.
+ 2. **Data Download**: Daily gzip-compressed CSV files are downloaded from the OpenAQ S3 archive for each station. Files are cached locally under `$EARTHSCIDATADIR/openaq_data/`.
 
-3. **Point-to-Grid Mapping**: For each hourly time step, measurements from all stations are binned into model grid cells:
-   - Each station is assigned to the grid cell that contains its coordinates
-   - Multiple stations within the same cell are averaged
-   - Multiple readings from the same station within one hour are averaged
-   - Grid cells with no stations receive a configurable fill value (default `NaN`)
+ 3. **Point-to-Grid Mapping**: For each hourly time step, measurements from all stations are binned into model grid cells:
 
-4. **Unit Conversion**: OpenAQ data (typically in µg/m³) is converted to SI units (kg/m³) using the standard EarthSciData.jl unit conversion system.
+      + Each station is assigned to the grid cell that contains its coordinates
+      + Multiple stations within the same cell are averaged
+      + Multiple readings from the same station within one hour are averaged
+      + Grid cells with no stations receive a configurable fill value (default `NaN`)
+
+ 4. **Unit Conversion**: OpenAQ data (typically in µg/m³) is converted to SI units (kg/m³) using the standard EarthSciData.jl unit conversion system.
 
 ### Authentication
 

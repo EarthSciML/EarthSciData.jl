@@ -43,7 +43,7 @@ const _UNIT_MAP = Dict(
     "s-1" => (1, u"s^-1"),
     "K m2 kg-1 s-1" => (1, u"K*m^2/kg/s"),
     "%" => (0.01, Quantity(1.0)),
-    "(0 - 1)" => (1, Quantity(1.0)),
+    "(0 - 1)" => (1, Quantity(1.0))
 )
 
 function to_unit(u)

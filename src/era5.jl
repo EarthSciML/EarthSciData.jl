@@ -29,7 +29,7 @@ const ERA5_VARIABLES = Dict(
     "specific_cloud_liquid_water_content" => "clwc",
     "specific_rain_water_content" => "crwc",
     "specific_snow_water_content" => "cswc",
-    "potential_vorticity" => "pv",
+    "potential_vorticity" => "pv"
 )
 
 # Dimension name constants to avoid scattered string literals.
@@ -64,8 +64,8 @@ struct ERA5PressureLevelFileSet <: FileSet
     _lon_shift::Int  # circshift amount for 0..360 → -180..180, 0 if no shift needed.
 
     function ERA5PressureLevelFileSet(domaininfo::DomainInfo;
-            mirror::AbstractString=CDS_API_URL,
-            variables::Vector{String}=collect(keys(ERA5_VARIABLES)))
+            mirror::AbstractString = CDS_API_URL,
+            variables::Vector{String} = collect(keys(ERA5_VARIABLES)))
         starttime, endtime = get_tspan_datetime(domaininfo)
 
         is_local = startswith(mirror, "file://")
@@ -118,15 +118,19 @@ struct ERA5PressureLevelFileSet <: FileSet
                 # Also sample edges to capture curvature for large domains.
                 for x in xs
                     lo, la = to_lonlat(x, first(ys))
-                    push!(lon_vals, rad2deg(lo)); push!(lat_vals, rad2deg(la))
+                    push!(lon_vals, rad2deg(lo));
+                    push!(lat_vals, rad2deg(la))
                     lo, la = to_lonlat(x, last(ys))
-                    push!(lon_vals, rad2deg(lo)); push!(lat_vals, rad2deg(la))
+                    push!(lon_vals, rad2deg(lo));
+                    push!(lat_vals, rad2deg(la))
                 end
                 for y in ys
                     lo, la = to_lonlat(first(xs), y)
-                    push!(lon_vals, rad2deg(lo)); push!(lat_vals, rad2deg(la))
+                    push!(lon_vals, rad2deg(lo));
+                    push!(lat_vals, rad2deg(la))
                     lo, la = to_lonlat(last(xs), y)
-                    push!(lon_vals, rad2deg(lo)); push!(lat_vals, rad2deg(la))
+                    push!(lon_vals, rad2deg(lo));
+                    push!(lat_vals, rad2deg(la))
                 end
                 lonrange_deg = extrema(lon_vals)
                 latrange_deg = extrema(lat_vals)
@@ -137,7 +141,7 @@ struct ERA5PressureLevelFileSet <: FileSet
                 ceil(Int, latrange_deg[2] + 1),   # north
                 floor(Int, lonrange_deg[1] - 1),   # west
                 floor(Int, latrange_deg[1] - 1),   # south
-                ceil(Int, lonrange_deg[2] + 1),    # east
+                ceil(Int, lonrange_deg[2] + 1)    # east
             ]
 
             for d in month_dates
@@ -145,19 +149,20 @@ struct ERA5PressureLevelFileSet <: FileSet
                 # Figure out which days in this month we need.
                 month_start = max(Date(yr, mo, 1), Date(t_start))
                 month_end = min(lastdayofmonth(Date(yr, mo, 1)), Date(t_end))
-                days = [lpad(dy, 2, '0') for dy in Dates.day(month_start):Dates.day(month_end)]
+                days = [lpad(dy, 2, '0')
+                        for dy in Dates.day(month_start):Dates.day(month_end)]
 
                 request = Dict(
                     "product_type" => ["reanalysis"],
                     "variable" => variables,
-                    "pressure_level" => [string(p) for p in sort(plevels, rev=true)],
+                    "pressure_level" => [string(p) for p in sort(plevels, rev = true)],
                     "year" => [string(yr)],
                     "month" => [lpad(mo, 2, '0')],
                     "day" => days,
                     "time" => [lpad(h, 2, '0') * ":00" for h in 0:23],
                     "data_format" => "netcdf",
                     "download_format" => "unarchived",
-                    "area" => area,
+                    "area" => area
                 )
 
                 outpath = joinpath(
@@ -165,7 +170,7 @@ struct ERA5PressureLevelFileSet <: FileSet
                     "era5_pressure_levels",
                     "era5_pl_$(yr)_$(lpad(mo, 2, '0')).nc"
                 )
-                cds_retrieve("reanalysis-era5-pressure-levels", request, outpath; api_key=api_key)
+                cds_retrieve("reanalysis-era5-pressure-levels", request, outpath; api_key = api_key)
                 push!(filepaths, outpath)
             end
         end
@@ -174,7 +179,7 @@ struct ERA5PressureLevelFileSet <: FileSet
             ds = if length(filepaths) == 1
                 NCDataset(filepaths[1])
             else
-                NCDataset(filepaths, aggdim=ERA5_TIME_DIM)
+                NCDataset(filepaths, aggdim = ERA5_TIME_DIM)
             end
 
             times = DateTime.(ds[ERA5_TIME_DIM][:])
@@ -184,7 +189,7 @@ struct ERA5PressureLevelFileSet <: FileSet
             # Discover which short-name variables are in the file.
             dim_keys = Set(keys(ds.dim))
             coord_keys = Set([ERA5_TIME_DIM, ERA5_PLEV_DIM, ERA5_LAT_DIM, ERA5_LON_DIM,
-                              "number", "expver"])
+                "number", "expver"])
             varlist = [k for k in keys(ds) if !(k in dim_keys) && !(k in coord_keys)]
 
             # Cache coordinate info for loadslice! hot path.
@@ -205,7 +210,7 @@ struct ERA5PressureLevelFileSet <: FileSet
             end
 
             return new(String(mirror), ds, dfi, varlist,
-                       lat_needs_reverse, plevs_need_reverse, lon_shift_amount)
+                lat_needs_reverse, plevs_need_reverse, lon_shift_amount)
         end
     end
 end
@@ -218,7 +223,10 @@ end
 
 DataFrequencyInfo(fs::ERA5PressureLevelFileSet)::DataFrequencyInfo = fs.freq_info
 
-Base.close(fs::ERA5PressureLevelFileSet) = lock(nclock) do; close(fs.ds); end
+Base.close(fs::ERA5PressureLevelFileSet) =
+    lock(nclock) do ;
+        close(fs.ds);
+    end
 
 function loadslice!(data::AbstractArray, fs::ERA5PressureLevelFileSet, t::DateTime, varname)
     lock(nclock) do
@@ -236,7 +244,7 @@ function loadslice!(data::AbstractArray, fs::ERA5PressureLevelFileSet, t::DateTi
         lat_idx = findfirst(isequal(ERA5_LAT_DIM), dims)
         if lat_idx !== nothing && fs._lat_needs_reverse
             lat_idx_notimedim = lat_idx > time_index ? lat_idx - 1 : lat_idx
-            reverse!(raw, dims=lat_idx_notimedim)
+            reverse!(raw, dims = lat_idx_notimedim)
         end
 
         # ERA5 pressure levels may be stored in ascending order; reverse to match
@@ -244,7 +252,7 @@ function loadslice!(data::AbstractArray, fs::ERA5PressureLevelFileSet, t::DateTi
         plev_idx = findfirst(isequal(ERA5_PLEV_DIM), dims)
         if plev_idx !== nothing && fs._plevs_need_reverse
             plev_idx_notimedim = plev_idx > time_index ? plev_idx - 1 : plev_idx
-            reverse!(raw, dims=plev_idx_notimedim)
+            reverse!(raw, dims = plev_idx_notimedim)
         end
 
         # ERA5 longitude is 0..360; shift to -180..180.
@@ -293,7 +301,7 @@ function loadmetadata(fs::ERA5PressureLevelFileSet, varname)::MetaData
                 # Map pressure levels to integer indices for interpolation.
                 plevs_hpa = Float64.(fs.ds[ERA5_PLEV_DIM][:])
                 # Sort from highest to lowest pressure (surface up).
-                plevs_sorted = sort(plevs_hpa, rev=true)
+                plevs_sorted = sort(plevs_hpa, rev = true)
                 # Map each to its index via precomputed lookup.
                 indices = Float64[]
                 for p in plevs_sorted
@@ -355,8 +363,9 @@ covering 1940 to present with hourly temporal resolution and 0.25deg x 0.25deg s
 on 37 pressure levels.
 
 **Authentication**: Requires a CDS API key. Either:
-- Set `ENV["CDSAPI_KEY"]`
-- Create `~/.cdsapirc` with `url: https://cds.climate.copernicus.eu/api` and `key: <your-key>`
+
+  - Set `ENV["CDSAPI_KEY"]`
+  - Create `~/.cdsapirc` with `url: https://cds.climate.copernicus.eu/api` and `key: <your-key>`
 
 **Pre-downloaded data**: Pass `mirror="file:///path/to/data"` to use local NetCDF files.
 Expected filenames: `era5_pl_YYYY_MM.nc` containing all variables for that month.
@@ -368,16 +377,21 @@ divergence, vorticity, ozone, cloud fractions, potential vorticity.
 The native data type for this dataset is Float32.
 
 `stream` specifies whether the data should be streamed in as needed or loaded all at once.
+
+`spatial_interp = :linear` (default) does full multilinear interpolation; `:nearest` does
+spatial nearest-neighbour + time-only linear interpolation for ~8x speedup when queries
+are always at grid points.
 """
 function ERA5(
         domaininfo::DomainInfo;
-        name=:ERA5,
-        mirror::AbstractString=CDS_API_URL,
-        variables::Vector{String}=collect(keys(ERA5_VARIABLES)),
-        stream=true,
+        name = :ERA5,
+        mirror::AbstractString = CDS_API_URL,
+        variables::Vector{String} = collect(keys(ERA5_VARIABLES)),
+        stream = true,
+        spatial_interp::Symbol = :linear
 )
     starttime, endtime = get_tspan_datetime(domaininfo)
-    fs = ERA5PressureLevelFileSet(domaininfo; mirror=mirror, variables=variables)
+    fs = ERA5PressureLevelFileSet(domaininfo; mirror = mirror, variables = variables)
 
     pvs = EarthSciMLBase.pvars(domaininfo)
     pvdict = Dict([Symbol(v) => v for v in pvs]...)
@@ -385,22 +399,31 @@ function ERA5(
     @parameters t_ref = get_tref(domaininfo) [unit = u"s", description = "Reference time"]
     eqs = Equation[]
     params = Any[t_ref]
-    vars = Num[]
+    all_discretes = Any[]
+    all_constants = Any[]
+    interp_infos = []
+    lhs_vars = Num[]
 
     for varname in varnames(fs)
         dt = EarthSciMLBase.eltype(domaininfo)
         itp = DataSetInterpolator{dt}(
-            fs, varname, starttime, endtime, domaininfo; stream=stream
+            fs, varname, starttime, endtime, domaininfo; stream = stream
         )
         dims = dimnames(itp)
         # Map ERA5 dimension names to domain coordinate names.
         # For projected domains, lon→x and lat→y.
         mapped_dims = [get(ERA5_COORD_MAP, dim, Symbol(dim)) for dim in dims]
         coords = _match_domain_coords(mapped_dims, pvdict, pvs)
-        eq, param = create_interp_equation(itp, "pl", t, t_ref, coords)
+        eq, discretes,
+        constants,
+        info = create_interp_equation(
+            itp, "pl", t, t_ref, coords;
+            spatial_interp = spatial_interp)
         push!(eqs, eq)
-        push!(params, param)
-        push!(vars, eq.lhs)
+        append!(all_discretes, discretes)
+        append!(all_constants, constants)
+        push!(interp_infos, info)
+        push!(lhs_vars, eq.lhs)
     end
 
     # Pressure from level index.
@@ -409,24 +432,27 @@ function ERA5(
     @variables P(t) [unit = u"Pa", description = "Pressure"]
     lev = pvdict[:lev]
     push!(eqs, P ~ hPa2Pa * era5_P_itp(lev))
-    push!(vars, P)
+    push!(lhs_vars, P)
 
     # Coordinate transforms.
     @constants lat2meters = 111.32e3 * 180 / π [unit = u"m/rad"]
     @constants lon2m = 40075.0e3 / 2π [unit = u"m/rad"]
     if :lat in keys(pvdict)
-        @variables δxδlon(t) [unit = u"m/rad", description = "X gradient with respect to longitude"]
-        @variables δyδlat(t) [unit = u"m/rad", description = "Y gradient with respect to latitude"]
+        @variables δxδlon(t) [
+            unit = u"m/rad", description = "X gradient with respect to longitude"]
+        @variables δyδlat(t) [
+            unit = u"m/rad", description = "Y gradient with respect to latitude"]
         push!(eqs, δxδlon ~ lon2m * cos(pvdict[:lat]))
         push!(eqs, δyδlat ~ lat2meters)
-        push!(vars, δxδlon, δyδlat)
+        push!(lhs_vars, δxδlon, δyδlat)
     end
 
     # Vertical coordinate transform: δPδlev (change in pressure per level index).
     if :lev in keys(pvdict)
-        @variables δPδlev(t) [unit = u"Pa", description = "Pressure gradient with respect to level index"]
+        @variables δPδlev(t) [
+            unit = u"Pa", description = "Pressure gradient with respect to level index"]
         push!(eqs, δPδlev ~ hPa2Pa * DataInterpolations.derivative(era5_P_itp, lev))
-        push!(vars, δPδlev)
+        push!(lhs_vars, δPδlev)
     end
 
     all_params = [
@@ -435,19 +461,19 @@ function ERA5(
         get(pvdict, :lev, nothing),
         hPa2Pa,
         (:lat in keys(pvdict) ? [lat2meters, lon2m] : [])...,
-        params...
+        all_constants..., all_discretes..., params...
     ]
     filter!(!isnothing, all_params)
 
     sys = System(
-        eqs, t, vars, all_params;
-        name=name,
+        eqs, t, lhs_vars, all_params;
+        name = name,
         initial_conditions = _itp_defaults(all_params),
-        metadata=Dict(
+        discrete_events = [build_interp_event(interp_infos, starttime)],
+        metadata = Dict(
             CoupleType => ERA5Coupler,
-            SysDiscreteEvent => create_updater_sys_event(name, params, starttime),
-            SysDomainInfo => domaininfo,
-        ),
+            SysDomainInfo => domaininfo
+        )
     )
     return sys
 end
@@ -461,16 +487,17 @@ from `δ(u)/δ(lev)` to `δ(u)/δ(P)`, i.e. from vertical level index
 to pressure in Pa.
 
 Usage (mirrors the GEOSFP pattern):
+
 ```julia
-era5 = ERA5(domain; ...)
+era5 = ERA5(domain)
 domain2 = EarthSciMLBase.add_partial_derivative_func(
     domain,
-    partialderivatives_δPδlev_era5(),
+    partialderivatives_δPδlev_era5()
 )
 composed = couple(sys, domain2, Advection(), era5)
 ```
 """
-function partialderivatives_δPδlev_era5(; default_lev=1.0)
+function partialderivatives_δPδlev_era5(; default_lev = 1.0)
     @constants P_unit = 100.0 [unit = u"Pa", description = "hPa to Pa conversion factor"]
     (pvars::AbstractVector) -> begin
         levindex = EarthSciMLBase.matching_suffix_idx(pvars, :lev)

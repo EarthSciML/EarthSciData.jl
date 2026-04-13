@@ -2,7 +2,6 @@ export USGS3DEP, USGS3DEPCoupler
 
 const USGS3DEP_MIRROR = "https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer"
 
-
 """
 $(SIGNATURES)
 
@@ -20,7 +19,7 @@ See https://elevation.nationalmap.gov/ for more information.
 """
 struct USGS3DEPFileSet <: FileSet
     mirror::String
-    bbox::NTuple{4,Float64}  # (west, south, east, north) in degrees
+    bbox::NTuple{4, Float64}  # (west, south, east, north) in degrees
     width::Int
     height::Int
     freq_info::DataFrequencyInfo
@@ -32,17 +31,19 @@ $(SIGNATURES)
 Create a USGS3DEPFileSet covering the spatial extent of the given domain.
 
 !!! warning "US coverage only"
+
     3DEP provides elevation data for the United States (CONUS, Alaska, Hawaii,
     and US territories). Requests for domains outside this coverage will return
     nodata values.
 
 # Arguments
-- `domaininfo`: A `DomainInfo` or `GridSpec` providing the spatial domain.
-- `resolution`: Target resolution in arc-seconds (default 1/3 ≈ 10m).
-  The pixel count is capped at 1000×1000 to avoid excessive download sizes
-  and API timeouts.
+
+  - `domaininfo`: A `DomainInfo` or `GridSpec` providing the spatial domain.
+  - `resolution`: Target resolution in arc-seconds (default 1/3 ≈ 10m).
+    The pixel count is capped at 1000×1000 to avoid excessive download sizes
+    and API timeouts.
 """
-function USGS3DEPFileSet(domaininfo; resolution=1 / 3)
+function USGS3DEPFileSet(domaininfo; resolution = 1 / 3)
     grid = _compute_grid(domaininfo, (false, false, false))
 
     # Convert domain grid coordinates to lon-lat degrees for the API request.
@@ -70,15 +71,19 @@ function USGS3DEPFileSet(domaininfo; resolution=1 / 3)
         # Also sample edges to capture curvature for large domains.
         for x in xs
             lo, la = to_lonlat(x, first(ys))
-            push!(lon_vals, rad2deg(lo)); push!(lat_vals, rad2deg(la))
+            push!(lon_vals, rad2deg(lo));
+            push!(lat_vals, rad2deg(la))
             lo, la = to_lonlat(x, last(ys))
-            push!(lon_vals, rad2deg(lo)); push!(lat_vals, rad2deg(la))
+            push!(lon_vals, rad2deg(lo));
+            push!(lat_vals, rad2deg(la))
         end
         for y in ys
             lo, la = to_lonlat(first(xs), y)
-            push!(lon_vals, rad2deg(lo)); push!(lat_vals, rad2deg(la))
+            push!(lon_vals, rad2deg(lo));
+            push!(lat_vals, rad2deg(la))
             lo, la = to_lonlat(last(xs), y)
-            push!(lon_vals, rad2deg(lo)); push!(lat_vals, rad2deg(la))
+            push!(lon_vals, rad2deg(lo));
+            push!(lat_vals, rad2deg(la))
         end
         lon_min, lon_max = extrema(lon_vals)
         lat_min, lat_max = extrema(lat_vals)
@@ -113,7 +118,7 @@ function relpath(fs::USGS3DEPFileSet, t::DateTime)
     "usgs3dep/elevation_$(w)_$(s)_$(e)_$(n)_$(fs.width)x$(fs.height).tif"
 end
 
-function url(fs::USGS3DEPFileSet, t::DateTime, varname=nothing)
+function url(fs::USGS3DEPFileSet, t::DateTime, varname = nothing)
     w, s, e, n = fs.bbox
     string(
         fs.mirror,
@@ -125,7 +130,7 @@ function url(fs::USGS3DEPFileSet, t::DateTime, varname=nothing)
         "&format=tiff",
         "&pixelType=F32",
         "&interpolation=+RSP_BilinearInterpolation",
-        "&f=image",
+        "&f=image"
     )
 end
 
@@ -154,7 +159,7 @@ function loadmetadata(fs::USGS3DEPFileSet, varname)::MetaData
         1,    # xdim (lon)
         2,    # ydim (lat)
         -1,   # zdim (none)
-        (false, false, false),
+        (false, false, false)
     )
 end
 
@@ -200,7 +205,7 @@ end
 
 mirror(fs::USGS3DEPSlopeFileSet) = mirror(fs.parent)
 relpath(fs::USGS3DEPSlopeFileSet, t::DateTime) = relpath(fs.parent, t)
-url(fs::USGS3DEPSlopeFileSet, t::DateTime, varname=nothing) = url(fs.parent, t, varname)
+url(fs::USGS3DEPSlopeFileSet, t::DateTime, varname = nothing) = url(fs.parent, t, varname)
 DataFrequencyInfo(fs::USGS3DEPSlopeFileSet)::DataFrequencyInfo = DataFrequencyInfo(fs.parent)
 varnames(fs::USGS3DEPSlopeFileSet) = [string(fs.component)]
 
@@ -212,7 +217,7 @@ function loadmetadata(fs::USGS3DEPSlopeFileSet, varname)::MetaData
     MetaData(
         elev_md.coords, "1", desc,
         elev_md.dimnames, elev_md.varsize, elev_md.native_sr,
-        elev_md.xdim, elev_md.ydim, elev_md.zdim, elev_md.staggering,
+        elev_md.xdim, elev_md.ydim, elev_md.zdim, elev_md.staggering
     )
 end
 
@@ -278,9 +283,10 @@ Create a ModelingToolkit `System` that provides terrain elevation and slope data
 from the USGS 3D Elevation Program (3DEP).
 
 The system exposes three variables interpolated to the simulation coordinates:
-- `elevation` (m): terrain elevation above sea level
-- `dzdx` (dimensionless): terrain slope in the x (east) direction (rise/run)
-- `dzdy` (dimensionless): terrain slope in the y (north) direction (rise/run)
+
+  - `elevation` (m): terrain elevation above sea level
+  - `dzdx` (dimensionless): terrain slope in the x (east) direction (rise/run)
+  - `dzdy` (dimensionless): terrain slope in the y (north) direction (rise/run)
 
 Slopes are computed from the elevation grid using central finite differences
 with coordinate conversion from lon/lat to metric distances.
@@ -295,26 +301,32 @@ Note that 3DEP coverage is limited to the United States
 (CONUS, Alaska, Hawaii, and US territories).
 
 # Arguments
-- `domaininfo`: A `DomainInfo` specifying the spatial and temporal domain.
-- `name`: System name (default `:USGS3DEP`).
-- `resolution`: Target resolution in arc-seconds (default 1/3 ≈ 10m).
-- `stream`: Whether to stream data lazily (default `true`).
+
+  - `domaininfo`: A `DomainInfo` specifying the spatial and temporal domain.
+  - `name`: System name (default `:USGS3DEP`).
+  - `resolution`: Target resolution in arc-seconds (default 1/3 ≈ 10m).
+  - `stream`: Whether to stream data lazily (default `true`).
+  - `spatial_interp = :linear` (default) does full multilinear interpolation; `:nearest` does
+    spatial nearest-neighbour + time-only linear interpolation for ~8x speedup when queries
+    are always at grid points.
 
 # Example
+
 ```julia
 using EarthSciData, EarthSciMLBase, ModelingToolkit, Dates
 domain = DomainInfo(
     DateTime(2018, 11, 8), DateTime(2018, 11, 9);
     lonrange = deg2rad(-121.7):deg2rad(0.01):deg2rad(-121.5),
     latrange = deg2rad(39.7):deg2rad(0.01):deg2rad(39.8),
-    levrange = 1:1,
+    levrange = 1:1
 )
 elev = USGS3DEP(domain)
 ```
 """
-function USGS3DEP(domaininfo::DomainInfo; name=:USGS3DEP, resolution=1 / 3, stream=true)
+function USGS3DEP(domaininfo::DomainInfo; name = :USGS3DEP, resolution = 1 / 3,
+        stream = true, spatial_interp::Symbol = :linear)
     starttime, endtime = get_tspan_datetime(domaininfo)
-    fs = USGS3DEPFileSet(domaininfo; resolution=resolution)
+    fs = USGS3DEPFileSet(domaininfo; resolution = resolution)
 
     @parameters t_ref = get_tref(domaininfo) [unit = u"s", description = "Reference time"]
     pvs = EarthSciMLBase.pvars(domaininfo)
@@ -326,36 +338,50 @@ function USGS3DEP(domaininfo::DomainInfo; name=:USGS3DEP, resolution=1 / 3, stre
     # may use x/y (projected CRS). Map domain coordinate names to the data
     # dimension names so the interpolator can apply coord_trans automatically.
     elev_itp = DataSetInterpolator{dt}(
-        fs, "elevation", starttime, endtime, domaininfo; stream=stream)
+        fs, "elevation", starttime, endtime, domaininfo; stream = stream)
     dims = dimnames(elev_itp)  # ["lon", "lat"] from the data metadata
     coords = _match_domain_coords(dims, pvdict, pvs)
 
     # Elevation equation.
-    eq_elev, p_elev = create_interp_equation(elev_itp, "", t, t_ref, coords)
-    params = Any[t_ref, p_elev]
-    vars = Num[eq_elev.lhs]
+    eq_elev, discretes_e,
+    constants_e,
+    info_e = create_interp_equation(
+        elev_itp, "", t, t_ref, coords;
+        spatial_interp = spatial_interp)
+    params = Any[t_ref]
+    all_discretes = Any[discretes_e...]
+    all_constants = Any[constants_e...]
+    interp_infos = Any[info_e]
+    lhs_vars = Num[eq_elev.lhs]
     eqs = Equation[eq_elev]
 
     # Slope equations (dzdx and dzdy).
     for component in (:dzdx, :dzdy)
         slope_fs = USGS3DEPSlopeFileSet(fs, component)
         slope_itp = DataSetInterpolator{dt}(
-            slope_fs, string(component), starttime, endtime, domaininfo; stream=stream)
-        eq_slope, p_slope = create_interp_equation(slope_itp, "", t, t_ref, coords)
+            slope_fs, string(component), starttime, endtime, domaininfo; stream = stream)
+        eq_slope, discretes_s,
+        constants_s,
+        info_s = create_interp_equation(
+            slope_itp, "", t, t_ref, coords;
+            spatial_interp = spatial_interp)
         push!(eqs, eq_slope)
-        push!(vars, eq_slope.lhs)
-        push!(params, p_slope)
+        push!(lhs_vars, eq_slope.lhs)
+        append!(all_discretes, discretes_s)
+        append!(all_constants, constants_s)
+        push!(interp_infos, info_s)
     end
 
+    all_params = Any[t_ref, all_constants..., all_discretes...]
     sys = System(
-        eqs, t, vars, params;
-        name=name,
-        initial_conditions=_itp_defaults(params),
-        metadata=Dict(
+        eqs, t, lhs_vars, all_params;
+        name = name,
+        initial_conditions = _itp_defaults(all_params),
+        discrete_events = [build_interp_event(interp_infos, starttime)],
+        metadata = Dict(
             CoupleType => USGS3DEPCoupler,
-            SysDiscreteEvent => create_updater_sys_event(name, params, starttime),
-            SysDomainInfo => domaininfo,
-        ),
+            SysDomainInfo => domaininfo
+        )
     )
     return sys
 end

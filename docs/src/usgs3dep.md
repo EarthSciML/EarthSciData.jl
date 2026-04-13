@@ -25,10 +25,10 @@ domain = DomainInfo(
     DateTime(2018, 11, 8), DateTime(2018, 11, 9);
     lonrange = deg2rad(-121.7):deg2rad(0.01):deg2rad(-121.5),
     latrange = deg2rad(39.7):deg2rad(0.01):deg2rad(39.8),
-    levrange = 1:1,
+    levrange = 1:1
 )
 
-elev = USGS3DEP(domain; resolution=10.0)
+elev = USGS3DEP(domain; resolution = 10.0)
 ```
 
 ### Variables
@@ -63,15 +63,16 @@ eqs = equations(elev)
 
 ## How It Works
 
-1. **Bounding box**: The spatial extent of the domain is converted to a WGS84 (EPSG:4326) longitude/latitude bounding box with a one-pixel buffer.
+ 1. **Bounding box**: The spatial extent of the domain is converted to a WGS84 (EPSG:4326) longitude/latitude bounding box with a one-pixel buffer.
 
-2. **Download**: A single GeoTIFF tile covering the bounding box is requested from the USGS ImageServer `exportImage` endpoint. Pixel dimensions are computed from the requested resolution, capped at 1000x1000 to limit download size. The tile is cached locally.
+ 2. **Download**: A single GeoTIFF tile covering the bounding box is requested from the USGS ImageServer `exportImage` endpoint. Pixel dimensions are computed from the requested resolution, capped at 1000x1000 to limit download size. The tile is cached locally.
 
-3. **Coordinate mapping**: Pixel-centre coordinates are computed analytically from the bounding box and pixel dimensions (no GeoTIFF metadata parsing needed). Coordinates are stored in radians for consistency with the EarthSciML coordinate system.
+ 3. **Coordinate mapping**: Pixel-centre coordinates are computed analytically from the bounding box and pixel dimensions (no GeoTIFF metadata parsing needed). Coordinates are stored in radians for consistency with the EarthSciML coordinate system.
 
-4. **Interpolation**: The elevation field is provided as a `DataSetInterpolator` that maps simulation coordinates to elevation values via bilinear interpolation.
+ 4. **Interpolation**: The elevation field is provided as a `DataSetInterpolator` that maps simulation coordinates to elevation values via bilinear interpolation.
 
 ## Coverage
 
 !!! warning "US coverage only"
+
     3DEP provides elevation data for the United States only. If the domain falls outside US coverage, a warning is issued and the returned data may contain nodata values. Approximate coverage bounds: longitude -180 to -60, latitude 17 to 72.
