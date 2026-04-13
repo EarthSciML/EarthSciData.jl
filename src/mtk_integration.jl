@@ -158,12 +158,24 @@ function create_interp_equation(itp::DataSetInterpolator{To}, filename, t, t_ref
     # `similar(domain.u_proto, ...)` so the buffer inherits the array backend
     # of the state vector (plain `Array` on CPU, `CuArray`/`ROCArray`/etc. on
     # device). Element type comes from the interpolator's `To` parameter,
-    # which is derived from `eltype(domaininfo)`. Initial value is zeros; the
-    # discrete update event populates the buffer at solve time.
+    # which is derived from `eltype(domaininfo)`.
+    #
+    # *Size*: use a minimal sentinel array at construction time rather than
+    # the full model grid.  At production domain sizes the full grid can be
+    # hundreds of MB per variable; pre-allocating one for every symbolic
+    # `create_interp_equation` would blow up the build-time memory budget
+    # (GitHub Actions runners have 7 GB RAM, a multi-loader simulation has
+    # 200+ variables).  The discrete update event (`build_interp_event`)
+    # replaces the sentinel with a full-sized array only for the variables
+    # whose data is actually referenced in the compiled RHS, matching the
+    # pre-refactor behaviour of growing on first event fire.  The number of
+    # dimensions still has to match the runtime `interp_unsafe` dispatch, so
+    # we keep `ndims` intact and only collapse each spatial/time axis to 2.
     n_data = Symbol(n, :_data)
-    init_data = similar(itp.domain.u_proto, To, data_dims...)
+    sentinel_dims = ntuple(_ -> 2, length(data_dims))
+    init_data = similar(itp.domain.u_proto, To, sentinel_dims...)
     fill!(init_data, zero(To))
-    p_data = _make_array_discrete(n_data, init_data, length(data_dims),
+    p_data = _make_array_discrete(n_data, init_data, length(sentinel_dims),
         "Interpolation data for $(n)")
 
     # Time grid discretes — scalar defaults work fine in MTK.

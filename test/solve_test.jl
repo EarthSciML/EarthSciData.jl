@@ -1,4 +1,5 @@
 @testsnippet SolveSetup begin
+    using EarthSciData
     using EarthSciMLBase, ModelingToolkit
     using ModelingToolkit: t, D
     using Dates
