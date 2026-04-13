@@ -100,15 +100,28 @@ function _make_array_discrete(name::Symbol, init_data, ndims::Int, desc::String)
     # device). Do NOT promote to Float64 here — that would break Float32
     # simulations and force all data buffers onto the host.
     #
-    # `@discretes` needs a concrete `DataType` for the `::T` annotation, and
+    # We use `@parameters` (not `@discretes $name(t)`) because the data buffer's
+    # *value* does not depend on `t` in a way that the symbolic differentiator
+    # can reason about — the value jumps discretely at callback fire times.
+    # Declaring it as `name(t)` made `executediff` produce a non-trivial
+    # `Differential(t)(name(t))` term during `calculate_tgrad`, whose symtype is
+    # `DataBufferType`; `mul_worker` then threw `MethodError(*, (Real,
+    # DataBufferType))` because the zero chain-rule factor from
+    # `@register_derivative interp_unsafe` can't be multiplied by it. Making
+    # the parameter time-independent short-circuits the derivative walk
+    # (`occursin_info(t, name) == false` => `COMMON_ZERO`).
+    # The discrete update event's `ImperativeAffect` writes to the parameter
+    # just the same whether it's `@parameters` or `@discretes`.
+    #
+    # `@parameters` needs a concrete `DataType` for the `::T` annotation, and
     # `DataBufferType` as a parameterized struct is a `UnionAll`.  Build the
     # concrete parameterization `DataBufferType{typeof(init_data)}` at runtime
-    # and feed it into `@discretes` via `@eval` so the macro sees a concrete
+    # and feed it into `@parameters` via `@eval` so the macro sees a concrete
     # type.  This is called a handful of times at model construction — the
     # `@eval` cost is in the noise compared to `mtkcompile`.
     BT = DataBufferType{typeof(init_data)}
     expr = quote
-        @discretes $name(t)::$BT = $init_data [description = $desc]
+        @parameters $name::$BT = $init_data [description = $desc]
     end
     return only(Core.eval(@__MODULE__, expr))
 end
@@ -196,9 +209,17 @@ function create_interp_equation(itp::DataSetInterpolator{To}, filename, t, t_ref
     n_tstep = Symbol(n, :_tstep)
     ts_default = EarthSciMLBase.get_tref(itp.domain)
     tstep_default = 1.0
-    p_tstart = only(@discretes $n_tstart(t) = ts_default [
+    # `@parameters` (not `@discretes`) — see rationale on `_make_array_discrete`.
+    # These parameters *are* updated by the discrete event at the same time
+    # `_data` is, but leaving them as `(t)`-dependent `@discretes` makes
+    # MTK attach a parameter timeseries slot which feeds a `SymbolCache` into
+    # the IMEX solver's solution-saving path and crashes in
+    # `get_saveable_values(::SymbolCache, ...)`.  Making them time-independent
+    # parameters bypasses that entire machinery; `ImperativeAffect` can still
+    # write to plain parameters.
+    p_tstart = only(@parameters $n_tstart = ts_default [
         unit = u"s", description = "Time grid start for $(n)"])
-    p_tstep = only(@discretes $n_tstep(t) = tstep_default [
+    p_tstep = only(@parameters $n_tstep = tstep_default [
         unit = u"s", description = "Time grid step for $(n)"])
 
     # Spatial grid constants (fixed for the lifetime of the simulation).
