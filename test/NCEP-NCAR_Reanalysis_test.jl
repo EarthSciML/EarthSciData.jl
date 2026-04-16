@@ -124,6 +124,7 @@ end
 end
 
 @testsnippet NCEPProb begin
+    using ModelingToolkit
     using ModelingToolkit: t, D
     using SymbolicIndexingInterface: setp, getsym, parameter_values
     using SciMLBase: ODEProblem

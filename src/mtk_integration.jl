@@ -394,7 +394,11 @@ function build_interp_event(interp_infos, starttime::DateTime)
     end
     modified_nt = NamedTuple{Tuple(mod_keys)}(Tuple(mod_vals))
 
-    # Build context NamedTuple: `DataSetInterpolator` objects.
+    # Build context NamedTuple: `DataSetInterpolator` objects.  Field order
+    # matches `interp_infos`, and each info contributes a 3-stride block of
+    # entries to `mod_keys` in the same order (data, tstart, tstep), so the
+    # callback can index `mod_keys[3i-2 : 3i]` from the i-th ctx pair without
+    # a key lookup.
     ctx_keys = Symbol[]
     ctx_vals = []
     for info in interp_infos
@@ -403,39 +407,62 @@ function build_interp_event(interp_infos, starttime::DateTime)
     end
     ctx_nt = NamedTuple{Tuple(ctx_keys)}(Tuple(ctx_vals))
 
-    # Map ctx key → (data_key, tstart_key, tstep_key) for the update callback.
-    key_map = Dict{Symbol, NamedTuple}()
-    for (i, info) in enumerate(interp_infos)
-        ck = Symbol(:itp_, info.var_sym)
-        key_map[ck] = (
-            data_key = mod_keys[3 * (i - 1) + 1],
-            tstart_key = mod_keys[3 * (i - 1) + 2],
-            tstep_key = mod_keys[3 * (i - 1) + 3]
-        )
-    end
+    # Persistent per-interpolator `DataBufferType` values, populated lazily
+    # on the first event fire and reused across all subsequent fires. This
+    # avoids the per-fire full-grid `similar` + `copyto!` that the earlier
+    # refactor introduced, and — for the common CPU-only case — also avoids
+    # the 2× steady-state memory of holding both `cache.data_buffer` and a
+    # separate parameter-side copy.
+    #
+    # `SolverStrangThreads` fires the same callback closure from multiple
+    # threads concurrently, so `data_bufs` is guarded by a lock.  The lock
+    # only covers callback invocation (rare, at tstops), not the RHS hot
+    # path, so the cost is negligible.
+    n_interps = length(interp_infos)
+    data_bufs = Vector{Any}(undef, n_interps)
+    update_lock = ReentrantLock()
 
     function update_data!(modified, observed, ctx, integ)
-        # Build result in the same order as mod_keys to guarantee the
-        # returned NamedTuple matches the `modified` declaration order.
-        # (Dict iteration order is not guaranteed in Julia.)
-        result_vals = Vector{Any}(undef, length(mod_keys))
-        for (ck, dsi) in pairs(ctx)
-            lazyload!(dsi, integ.t + t_ref)
-            km = key_map[ck]
-            # Transfer the CPU-side `dsi.cache.data_buffer` into a buffer of
-            # the same backend as the state vector (`Array` on CPU,
-            # `CuArray`/etc. on device), preserving the element type of the
-            # domain's prototype array.  `copyto!` handles both same-device
-            # (memcpy) and cross-device (host→device) transfers.
-            src = dsi.cache.data_buffer
-            dst = similar(dsi.domain.u_proto, size(src)...)
-            copyto!(dst, src)
-            result_vals[findfirst(==(km.data_key), mod_keys)] = DataBufferType(dst)
-            ts, tstep = get_time_grid_params(dsi)
-            result_vals[findfirst(==(km.tstart_key), mod_keys)] = ts
-            result_vals[findfirst(==(km.tstep_key), mod_keys)] = tstep
+        lock(update_lock) do
+            result_vals = Vector{Any}(undef, 3 * n_interps)
+            i = 0
+            for (_, dsi) in pairs(ctx)
+                i += 1
+                lazyload!(dsi, integ.t + t_ref)
+                src = dsi.cache.data_buffer
+                if !isassigned(data_bufs, i)
+                    # First fire. `cache.data_buffer` is always a plain CPU
+                    # `Array{To,N}` (see `load.jl`); when the domain prototype
+                    # is also a CPU `Array`, alias the cache directly so that
+                    # subsequent in-place `update!` calls are picked up
+                    # without any extra copy, and the parameter never holds a
+                    # second full-grid buffer.  For a cross-device run (CPU
+                    # cache, GPU state) allocate one persistent device-side
+                    # buffer and refresh it in place on each fire.
+                    u_proto = dsi.domain.u_proto
+                    data_bufs[i] = if u_proto isa Array
+                        DataBufferType(src)
+                    else
+                        dst = similar(u_proto, size(src)...)
+                        copyto!(dst, src)
+                        DataBufferType(dst)
+                    end
+                else
+                    buf = data_bufs[i]::DataBufferType
+                    # When `buf.data` aliases `src` (fast path) this is a
+                    # no-op; otherwise refresh the persistent device buffer
+                    # in place.
+                    if buf.data !== src
+                        copyto!(buf.data, src)
+                    end
+                end
+                result_vals[3i - 2] = data_bufs[i]
+                ts, tstep = get_time_grid_params(dsi)
+                result_vals[3i - 1] = ts
+                result_vals[3i] = tstep
+            end
+            NamedTuple{Tuple(mod_keys)}(Tuple(result_vals))
         end
-        NamedTuple{Tuple(mod_keys)}(Tuple(result_vals))
     end
 
     affect = ModelingToolkit.ImperativeAffect(
