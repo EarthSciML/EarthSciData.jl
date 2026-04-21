@@ -534,7 +534,7 @@ $id,8001,$name,2024-06-15T14:00:00+00:00,$lat,$lon,pm25,µg/m³,300.0"""
 
         # The variable should have units of kg/m^3 (converted from ug/m3)
         var_unit = ModelingToolkit.get_unit(vars[1])
-        @test dimension(var_unit) == dimension(u"kg/m^3")
+        @test DynamicQuantities.dimension(var_unit) == DynamicQuantities.dimension(u"kg/m^3")
 
         delete!(ENV, "EARTHSCIDATADIR")
     end

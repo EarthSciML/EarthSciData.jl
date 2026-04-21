@@ -166,11 +166,13 @@ end
 
     @testset "grid" begin
         (; itp) = setup()
-        grd = EarthSciData._model_grid(itp)
-        length.(grd) == (142, 86, 10)
-        grd[1] ≈ deg2rad(-175.0 - 1.25):deg2rad(2.5):deg2rad(175.0 + 1.25)
-        grd[2] ≈ deg2rad(-85.0):deg2rad(2):deg2rad(85.0)
-        grd[3] ≈ 1:1.0:10
+        @test itp.grid_size == (142, 86, 10)
+        @test itp.grid_starts[1] ≈ deg2rad(-175.0 - 1.25)
+        @test itp.grid_steps[1]  ≈ deg2rad(2.5)
+        @test itp.grid_starts[2] ≈ deg2rad(-85.0)
+        @test itp.grid_steps[2]  ≈ deg2rad(2)
+        @test itp.grid_starts[3] ≈ 1.0
+        @test itp.grid_steps[3]  ≈ 1.0
     end
 
     @testset "interpolation" begin
@@ -306,21 +308,36 @@ end
             tt = DateTime(2022, 5, 1)
             interp!(itp, tt, 1.0, 0.0, 1.0)
 
+            # AllocCheck.jl's safelist was built against pre-1.12 runtime
+            # names; Julia 1.12+ emits `jl_get_pgcstack_static` for the GC
+            # safepoint retrieval, which the old entry `get_pgcstack` no
+            # longer matches.  These calls don't actually heap-allocate, so
+            # drop them from the error list before asserting.
+            is_real_alloc(e) = !(e isa AllocCheck.AllocatingRuntimeCall &&
+                                 occursin("pgcstack", e.name))
+
             @test begin
                 @check_allocs checkf(itp, t, loc1, loc2,
                     loc3) = EarthSciData.interp_unsafe(itp, t, loc1, loc2, loc3)
 
+                real_errors = Any[]
                 try
                     checkf(itp, tt, 1.0, 0.0, 1.0)
                 catch err
-                    @warn err.errors
-                    rethrow(err)
+                    append!(real_errors, filter(is_real_alloc, err.errors))
                 end
 
                 itp2 = EarthSciData.DataSetInterpolator{Float32}(fs, "U", t, te, domain)
                 interp!(itp2, tt, 1.0f0, 0.0f0, 1.0f0)
-                checkf(itp2, tt, 1.0f0, 0.0f0, 1.0f0)
-                true
+                try
+                    checkf(itp2, tt, 1.0f0, 0.0f0, 1.0f0)
+                catch err
+                    append!(real_errors, filter(is_real_alloc, err.errors))
+                end
+
+                isempty(real_errors) ||
+                    @warn "Allocation errors:\n$(real_errors)"
+                isempty(real_errors)
             end
         end
     end
@@ -417,26 +434,33 @@ end
         prob = ODEProblem(compiled, [], (24.0 * 3600, 48.0 * 3600))
         integ = init(prob, Tsit5())
 
-        # The `@discretes`-declared data buffers live in `p.discrete`, split into
-        # sub-buffers by symtype (one bucket per distinct concrete
-        # `DataBufferType{Array{Float32, N}}` — separate buckets for 2D+t and
-        # 3D+t data arrays). After the initialize callback fires, the buffers
-        # should be populated with real data, still Float32, no promotion.
+        # The `DataBufferType` parameters are declared with `@parameters
+        # ::DataBufferType{...}` (see `_make_array_discrete`).  MTK routes
+        # them into `p.nonnumeric` — not `p.discrete` — because their symtype
+        # isn't numeric.  Within `nonnumeric` they're split into sub-buffers
+        # by concrete type (one bucket per `DataBufferType{Array{Float32, N}}`
+        # — separate buckets for 2D+t and 3D+t data arrays).  After the
+        # initialize callback fires, the buffers should be populated with
+        # real data, still Float32, no promotion.  We also check
+        # `p.discrete` defensively in case a future MTK refactor
+        # reclassifies.
         function scan_buffers(pbuf)
             all_f32 = true
             found_nonzero_f32 = false
-            for buf in pbuf.discrete
-                T = eltype(buf)
-                T <: EarthSciData.DataBufferType || continue
-                for entry in buf
-                    if !(entry.data isa Array{Float32})
-                        all_f32 = false
-                    end
-                    if eltype(entry.data) !== Float32
-                        all_f32 = false
-                    end
-                    if any(!iszero, entry.data)
-                        found_nonzero_f32 = true
+            for bucket_group in (pbuf.nonnumeric, pbuf.discrete)
+                for buf in bucket_group
+                    T = eltype(buf)
+                    T <: EarthSciData.DataBufferType || continue
+                    for entry in buf
+                        if !(entry.data isa Array{Float32})
+                            all_f32 = false
+                        end
+                        if eltype(entry.data) !== Float32
+                            all_f32 = false
+                        end
+                        if any(!iszero, entry.data)
+                            found_nonzero_f32 = true
+                        end
                     end
                 end
             end

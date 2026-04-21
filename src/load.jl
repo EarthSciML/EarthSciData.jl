@@ -301,6 +301,16 @@ mutable struct DataSetInterpolator{To, N, N2, FT, DomT, ET, FSRG}
     domain::DomT
     extrapolate_type::ET
     lock::ReentrantLock
+    # Precomputed spatial grid parameters in data-array dimension order
+    # (i.e. reordered by `metadata.xdim`/`ydim`/`zdim`).  Stored as plain
+    # `To`-typed scalars so that the `interp_unsafe` hot path computes
+    # fractional indices with zero allocation and without Float64 promotion
+    # on Float32 (GPU) DSIs.  Previously the hot path recomputed the grid
+    # per call via `_compute_grid(domain, staggering)`, which allocated in
+    # `endpoints(d::DomainInfo)` → `filter(...)` / `sizehint!(...)`.
+    grid_starts::NTuple{N2, To}
+    grid_steps::NTuple{N2, To}
+    grid_size::NTuple{N2, Int}
 
     function DataSetInterpolator{To}(fs::FileSet, varname::AbstractString,
             starttime::DateTime, endtime::DateTime, domain;
@@ -343,6 +353,15 @@ mutable struct DataSetInterpolator{To, N, N2, FT, DomT, ET, FSRG}
         coord_trns = coord_trans(metadata, domain)
         FT = typeof(coord_trns)
 
+        # Precompute the reordered spatial grid once.  The reordering follows
+        # `metadata.xdim`/`ydim`/`zdim` so that `grid_*[i]` aligns with data
+        # dimension `i`, matching the `locs[i]` argument order of
+        # `interp_unsafe`.
+        reordered = _reorder_grid(_compute_grid(domain, metadata.staggering), metadata)
+        grid_starts = ntuple(i -> To(first(reordered[i])), N2)
+        grid_steps  = ntuple(i -> To(step(reordered[i])),  N2)
+        grid_size   = ntuple(i -> Int(length(reordered[i])), N2)
+
         td = Threads.@spawn (() -> DateTime(0, 1, 10))() # Placeholder for async loading task.
         tc = TemporalCache{To, N, N2}(
             data_buffer, load_cache, times,
@@ -355,7 +374,10 @@ mutable struct DataSetInterpolator{To, N, N2, FT, DomT, ET, FSRG}
             metadata,
             domain,
             extrapolate_type,
-            ReentrantLock()
+            ReentrantLock(),
+            grid_starts,
+            grid_steps,
+            grid_size
         )
         itp
     end
@@ -482,18 +504,20 @@ function get_tstops(itp::DataSetInterpolator, starttime::DateTime)
     datetime2unix.(sort([starttime, dfi.centerpoints...]))
 end
 
-# Get the model grid for this interpolator.
-function _model_grid(itp::DataSetInterpolator)
-    grid = _compute_grid(itp.domain, itp.metadata.staggering)
-    if length(itp.metadata.varsize) == 2 && itp.metadata.zdim <= 0
-        grid_size = tuple_from_vals(itp.metadata.xdim, grid[1], itp.metadata.ydim, grid[2])
-    elseif length(itp.metadata.varsize) == 3
-        grid_size = tuple_from_vals(
-            itp.metadata.xdim,
+# Reorder raw coord ranges (domain-order) into data-array dimension order
+# using `metadata.xdim`/`ydim`/`zdim`.  Called exactly once per DSI at
+# construction to populate `grid_starts`/`grid_steps`/`grid_size`; the
+# hot path never hits this again.
+function _reorder_grid(grid, metadata::MetaData)
+    if length(metadata.varsize) == 2 && metadata.zdim <= 0
+        return tuple_from_vals(metadata.xdim, grid[1], metadata.ydim, grid[2])
+    elseif length(metadata.varsize) == 3
+        return tuple_from_vals(
+            metadata.xdim,
             grid[1],
-            itp.metadata.ydim,
+            metadata.ydim,
             grid[2],
-            itp.metadata.zdim,
+            metadata.zdim,
             grid[3]
         )
     else
@@ -504,8 +528,7 @@ end
 function initialize!(itp::DataSetInterpolator, t::DateTime)
     tc = itp.cache
     tc.load_cache = zeros(eltype(tc.load_cache), itp.metadata.varsize...)
-    grid_size = length.(_model_grid(itp))
-    tc.data_buffer = zeros(eltype(tc.data_buffer), grid_size..., size(tc.data_buffer, ndims(tc.data_buffer))) # Add a dimension for time.
+    tc.data_buffer = zeros(eltype(tc.data_buffer), itp.grid_size..., size(tc.data_buffer, ndims(tc.data_buffer))) # Add a dimension for time.
     tc.initialized = true
 end
 
@@ -617,12 +640,13 @@ function interp_unsafe(
     tc = itp.cache
     t_unix = datetime2unix(t)
     t_start, t_step = get_time_grid_params(itp)
-    grid_ranges = _model_grid(itp)
-    # Compute fractional 1-based indices
+    # Compute fractional 1-based indices from cached grid scalars.  All
+    # operands are `T1 = To`, so Float32 DSIs stay in Float32 (no Float64
+    # promotion on GPU).
     fit = one(T1) + T1((t_unix - t_start) / t_step)
     fis = ntuple(
         i -> one(T1) +
-             T1((locs[i] - first(grid_ranges[i])) / step(grid_ranges[i])), Val(N2))
+             T1((locs[i] - itp.grid_starts[i]) / itp.grid_steps[i]), Val(N2))
     extrap = itp.extrapolate_type isa Real ? zero(T1) : one(T1)
     interp_unsafe(tc.data_buffer, fit, fis..., extrap)
 end
@@ -670,14 +694,11 @@ end
 """
 Return the spatial grid parameters as a flat tuple `(s1_start, s1_step, s2_start, s2_step, ...)`.
 """
-function get_spatial_grid_params(itp::DataSetInterpolator)
-    ranges = _model_grid(itp)
-    params = Float64[]
-    for r in ranges
-        push!(params, first(r))
-        push!(params, step(r))
-    end
-    return Tuple(params)
+function get_spatial_grid_params(itp::DataSetInterpolator{To, N, N2}) where {To, N, N2}
+    ntuple(
+        k -> Float64(isodd(k) ? itp.grid_starts[(k + 1) >> 1] : itp.grid_steps[k >> 1]),
+        Val(2 * N2)
+    )
 end
 
 # --------------------------------------------------------------------------

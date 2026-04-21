@@ -17,12 +17,12 @@ using Test
         # Test % (percentage → dimensionless with scale 0.01)
         scale, unit = EarthSciData.to_unit("%")
         @test scale == 0.01
-        @test dimension(unit) == dimension(Quantity(1.0))
+        @test DynamicQuantities.dimension(unit) == DynamicQuantities.dimension(Quantity(1.0))
 
         # Test (0 - 1) → dimensionless
         scale, unit = EarthSciData.to_unit("(0 - 1)")
         @test scale == 1
-        @test dimension(unit) == dimension(Quantity(1.0))
+        @test DynamicQuantities.dimension(unit) == DynamicQuantities.dimension(Quantity(1.0))
     end
 
     @testset "to_unit CF convention ** normalization" begin

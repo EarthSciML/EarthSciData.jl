@@ -193,19 +193,33 @@ import Proj
                 db, fit, fi1, fi2, extrap) = EarthSciData.interp_unsafe(
                 db, fit, fi1, fi2, extrap)
 
+            # Julia 1.12+ emits `jl_get_pgcstack_static` for the GC safepoint
+            # retrieval; AllocCheck's safelist still matches `get_pgcstack`
+            # (old name), so these safepoints get reported as allocations
+            # even though they don't actually heap-allocate.  Filter them out.
+            is_real_alloc(e) = !(e isa AllocCheck.AllocatingRuntimeCall &&
+                                 occursin("pgcstack", e.name))
+
             for T in (Float32, Float64)
                 sample_time = DateTime(2016, 5, 1)
                 itp = EarthSciData.DataSetInterpolator{T}(fileset, "NOX", ts, te, domain)
                 EarthSciData.lazyload!(itp, sample_time)
                 db = EarthSciData.DataBufferType(itp.cache.data_buffer)
-                # Warm up then check: no catch needed — this MUST be alloc-free.
-                checkf(db, T(1.5), T(5.3), T(5.7), T(1.0))
+                # `@check_allocs` is a static (LLVM IR) analysis; every
+                # invocation raises the same `AllocCheckFailure` if any
+                # allocation is detected, so a warm-up pass is redundant.
+                # On Julia 1.12 the failure always fires because of
+                # `jl_get_pgcstack_static` safepoint markers; filter those
+                # out before asserting (see `is_real_alloc` above).
+                real_errors = Any[]
                 try
                     checkf(db, T(1.5), T(5.3), T(5.7), T(1.0))
                 catch err
-                    @warn "Allocation errors ($T):\n$(err.errors)"
-                    @test length(err.errors) == 0
+                    append!(real_errors, filter(is_real_alloc, err.errors))
                 end
+                isempty(real_errors) ||
+                    @warn "Allocation errors ($T):\n$(real_errors)"
+                @test isempty(real_errors)
             end
         end
     end

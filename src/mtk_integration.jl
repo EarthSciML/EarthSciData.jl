@@ -160,11 +160,11 @@ function create_interp_equation(itp::DataSetInterpolator{To}, filename, t, t_ref
     n = length(filename) > 0 ? Symbol("$(filename)₊$(itp.varname)") :
         Symbol("$(itp.varname)")
 
-    # Compute the correct data array dimensions from the model grid.
-    grid_ranges = _model_grid(itp)
-    grid_dims = length.(grid_ranges)
+    # Compute the correct data array dimensions from the cached spatial
+    # grid size (populated once at DSI construction) plus the current
+    # time-cache depth.
     cache_nt = size(itp.cache.data_buffer, ndims(itp.cache.data_buffer))
-    data_dims = (grid_dims..., cache_nt)
+    data_dims = (itp.grid_size..., cache_nt)
 
     # Data discrete — wrapped in `DataBufferType` so MTK stores it in the
     # nonnumeric parameter buffer with scalar symbolic shape. Allocate via
@@ -227,16 +227,16 @@ function create_interp_equation(itp::DataSetInterpolator{To}, filename, t, t_ref
     # (e.g., meters for Lambert, radians for longlat) so that fi = 1 + (coord - start) / step
     # is dimensionally consistent.
     spatial_consts = []
-    for (i, r) in enumerate(grid_ranges)
+    for i in eachindex(coords)
         coord_unit = ModelingToolkit.get_unit(coords[i])
         sn_start = Symbol(n, :_s, i, :start)
         sn_step = Symbol(n, :_s, i, :step)
         push!(spatial_consts,
-            only(@constants $sn_start = first(r) [
+            only(@constants $sn_start = itp.grid_starts[i] [
                 unit = coord_unit,
                 description = "Spatial grid start dim $(i) for $(n)"]))
         push!(spatial_consts,
-            only(@constants $sn_step = step(r) [
+            only(@constants $sn_step = itp.grid_steps[i] [
                 unit = coord_unit,
                 description = "Spatial grid step dim $(i) for $(n)"]))
     end
@@ -283,9 +283,9 @@ function create_interp_equation(itp::DataSetInterpolator{To}, filename, t, t_ref
 
     # Collect default values for constants (needed for initial_conditions in System).
     const_defaults = Dict{Any, Any}()
-    for (i, r) in enumerate(grid_ranges)
-        const_defaults[spatial_consts[2i - 1]] = first(r)
-        const_defaults[spatial_consts[2i]] = step(r)
+    for i in eachindex(coords)
+        const_defaults[spatial_consts[2i - 1]] = itp.grid_starts[i]
+        const_defaults[spatial_consts[2i]] = itp.grid_steps[i]
     end
     const_defaults[p_extrap] = extrap_val
     const_defaults[unit_scale] = 1.0
