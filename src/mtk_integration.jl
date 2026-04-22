@@ -155,7 +155,6 @@ function create_interp_equation(itp::DataSetInterpolator{To}, filename, t, t_ref
         wrapper_f = v -> v, spatial_interp::Symbol = :linear) where {To}
     spatial_interp in (:linear, :nearest) ||
         throw(ArgumentError("spatial_interp must be :linear or :nearest, got $spatial_interp"))
-    interp_f = spatial_interp === :nearest ? interp_time_only : interp_unsafe
 
     n = length(filename) > 0 ? Symbol("$(filename)₊$(itp.varname)") :
         Symbol("$(itp.varname)")
@@ -253,17 +252,27 @@ function create_interp_equation(itp::DataSetInterpolator{To}, filename, t, t_ref
     unit_scale = only(@constants $n_unit = 1.0 [unit = uu,
         description = "Unit scale for $(n)"])
 
-    # Compute fractional 1-based indices symbolically: fi = 1 + (coord - start) / step
-    fit = 1 + (t_ref + t - p_tstart) / p_tstep
-    fis = [1 + (coords[i] - spatial_consts[2i - 1]) / spatial_consts[2i]
-           for i in 1:length(coords)]
+    # Bundle the interp info up front so both the equation's RHS and any
+    # downstream at-different-coords evaluations go through a single code path
+    # (`build_interp_expr`). `wrapper_f` (e.g., NEI scaling) is layered on
+    # after; it's specific to the equation definition and not applicable to
+    # callers that just want the raw interpolator value at other coordinates.
+    const_defaults = Dict{Any, Any}()
+    for i in eachindex(coords)
+        const_defaults[spatial_consts[2i - 1]] = itp.grid_starts[i]
+        const_defaults[spatial_consts[2i]] = itp.grid_steps[i]
+    end
+    const_defaults[p_extrap] = extrap_val
+    const_defaults[unit_scale] = 1.0
 
-    # Build RHS: interp_f(data, fit, fi1, ..., extrap) * unit_scale
-    # where interp_f is either interp_unsafe (linear) or interp_time_only (nearest).
-    rhs_interp = interp_f(p_data, fit, fis..., p_extrap) * unit_scale
+    interp_info = (data_sym = p_data, tstart_sym = p_tstart, tstep_sym = p_tstep,
+        spatial_consts = spatial_consts, extrap_const = p_extrap,
+        unit_const = unit_scale, itp = itp, var_sym = n,
+        data_dims = data_dims, data_eltype = To,
+        const_defaults = const_defaults, spatial_interp = spatial_interp)
 
-    # Apply wrapper (e.g., NEI scaling).
-    rhs = wrapper_f(rhs_interp)
+    # Single source of truth for the interp formula.
+    rhs = wrapper_f(build_interp_expr(interp_info, t_ref + t, coords))
 
     # Create left hand side of equation.
     desc = description(itp)
@@ -280,21 +289,6 @@ function create_interp_equation(itp::DataSetInterpolator{To}, filename, t, t_ref
 
     discretes = [p_data, p_tstart, p_tstep]
     constants = [spatial_consts..., p_extrap, unit_scale]
-
-    # Collect default values for constants (needed for initial_conditions in System).
-    const_defaults = Dict{Any, Any}()
-    for i in eachindex(coords)
-        const_defaults[spatial_consts[2i - 1]] = itp.grid_starts[i]
-        const_defaults[spatial_consts[2i]] = itp.grid_steps[i]
-    end
-    const_defaults[p_extrap] = extrap_val
-    const_defaults[unit_scale] = 1.0
-
-    interp_info = (data_sym = p_data, tstart_sym = p_tstart, tstep_sym = p_tstep,
-        spatial_consts = spatial_consts, extrap_const = p_extrap,
-        unit_const = unit_scale, itp = itp, var_sym = n,
-        data_dims = data_dims, data_eltype = To,
-        const_defaults = const_defaults, spatial_interp = spatial_interp)
 
     return eq, discretes, constants, interp_info
 end
@@ -315,6 +309,95 @@ function build_interp_expr(info, t_expr, coord_exprs)
     interp_f = get(info, :spatial_interp, :linear) === :nearest ? interp_time_only :
                interp_unsafe
     interp_f(info.data_sym, fit, fis..., info.extrap_const) * info.unit_const
+end
+
+"""
+    InterpInfos
+
+Marker type used as a metadata key on systems built by
+[`create_interp_equation`](@ref) to store their per-variable `interp_info`
+vector. Used by [`interp_callable`](@ref). Must be a type (not a `Symbol`)
+because MTK's `System` metadata is typed `Dict{DataType, Any}`.
+"""
+struct InterpInfos end
+
+"""
+    InterpCallable(info)
+
+A thin callable wrapper around an `interp_info` (as produced by
+[`create_interp_equation`](@ref)). Calling it with an absolute-time expression
+and one expression per spatial coordinate returns the symbolic interpolation
+value at those coordinates — i.e. `itp(t_abs, locs...)` behaves like a classic
+interpolator callable, regardless of what the system's current coordinate
+variables are.
+
+This exists so downstream packages can evaluate an interpolator at
+**arbitrary** coordinates (e.g. plume-rise Newton steps at different vertical
+levels) without having to recompute fractional indices by hand.
+
+Use [`interp_callable`](@ref) to fetch one by variable name from a
+`create_interp_equation`-built system, and [`parent_scope_interp_info`](@ref)
+to re-scope the captured parameters when building a coupling equation in a
+parent system.
+"""
+struct InterpCallable{I}
+    info::I
+end
+
+function (c::InterpCallable)(t_expr, coord_exprs...)
+    return build_interp_expr(c.info, t_expr, collect(coord_exprs))
+end
+
+"""
+    interp_callable(sys, varname::Symbol; parent_scope = false) -> InterpCallable
+
+Look up the `interp_info` for a variable named `varname` on a system built
+with [`create_interp_equation`](@ref) (e.g. GEOSFP) and return an
+[`InterpCallable`](@ref) that evaluates that interpolator at arbitrary
+coordinates. If `parent_scope = true`, the captured parameters are resolved
+*through* the system (so they carry the system's namespace) and then
+wrapped with `ParentScope` — this is what you want when the returned
+callable will be used inside a `couple2` method so the resulting equation
+can live in the parent system's namespace.
+
+The system must carry its `InterpInfos` metadata, which `GEOSFP` populates
+automatically.
+"""
+function interp_callable(sys, varname::Symbol; parent_scope::Bool = false)
+    infos = ModelingToolkit.getmetadata(sys, InterpInfos, nothing)
+    infos === nothing && error(
+        "System $(ModelingToolkit.nameof(sys)) has no `InterpInfos` metadata; " *
+        "`interp_callable` only works on systems built via `create_interp_equation`."
+    )
+    idx = findfirst(i -> i.var_sym === varname, infos)
+    idx === nothing && error(
+        "No interpolator found for `$varname` on system " *
+        "$(ModelingToolkit.nameof(sys)). Known vars: " *
+        join([i.var_sym for i in infos], ", ")
+    )
+    info = infos[idx]
+
+    if parent_scope
+        # Access each captured parameter *through* `sys` so it picks up the
+        # system's namespace, then apply `ParentScope` to lift it to the
+        # parent coupler's scope. Using the bare symbols from `info` without
+        # going through `sys` would leave references like `A1₊PBLH_data`
+        # unnamespaced in the parent, and `mtkcompile` rejects them with
+        # "…is present in the system but …is not an unknown".
+        PS = ModelingToolkit.ParentScope
+        get_name(sym) = ModelingToolkit.getname(
+            sym isa Symbolics.Num ? Symbolics.unwrap(sym) : sym)
+        via(sym) = PS(getproperty(sys, get_name(sym)))
+        info = merge(info, (
+            data_sym = via(info.data_sym),
+            tstart_sym = via(info.tstart_sym),
+            tstep_sym = via(info.tstep_sym),
+            spatial_consts = Any[via(c) for c in info.spatial_consts],
+            extrap_const = via(info.extrap_const),
+            unit_const = via(info.unit_const),
+        ))
+    end
+    return InterpCallable(info)
 end
 
 # In MTK v11, parameter defaults set via `@parameters x = val` are stored as

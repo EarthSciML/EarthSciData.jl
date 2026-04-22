@@ -556,7 +556,8 @@ function GEOSFP(
         initial_conditions = _itp_defaults(all_params),
         discrete_events = [build_interp_event(interp_infos, starttime)],
         metadata = Dict(CoupleType => GEOSFPCoupler,
-            SysDomainInfo => domaininfo)
+            SysDomainInfo => domaininfo,
+            InterpInfos => interp_infos)
     )
     return sys
 end
