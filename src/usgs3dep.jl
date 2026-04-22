@@ -380,7 +380,8 @@ function USGS3DEP(domaininfo::DomainInfo; name = :USGS3DEP, resolution = 1 / 3,
         discrete_events = [build_interp_event(interp_infos, starttime)],
         metadata = Dict(
             CoupleType => USGS3DEPCoupler,
-            SysDomainInfo => domaininfo
+            SysDomainInfo => domaininfo,
+            InterpInfos => interp_infos
         )
     )
     return sys

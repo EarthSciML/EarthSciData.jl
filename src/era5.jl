@@ -472,7 +472,8 @@ function ERA5(
         discrete_events = [build_interp_event(interp_infos, starttime)],
         metadata = Dict(
             CoupleType => ERA5Coupler,
-            SysDomainInfo => domaininfo
+            SysDomainInfo => domaininfo,
+            InterpInfos => interp_infos
         )
     )
     return sys

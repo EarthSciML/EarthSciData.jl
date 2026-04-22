@@ -449,7 +449,8 @@ function NEI2016MonthlyEmis(
         initial_conditions = _itp_defaults(all_params),
         discrete_events = [build_interp_event(interp_infos, starttime)],
         metadata = Dict(CoupleType => NEI2016MonthlyEmisCoupler,
-            SysDomainInfo => domaininfo)
+            SysDomainInfo => domaininfo,
+            InterpInfos => interp_infos)
     )
     return sys
 end
