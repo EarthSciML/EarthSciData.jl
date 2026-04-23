@@ -86,6 +86,38 @@ function interpolate_from!(dst::AbstractArray{T, N},
 end
 
 """
+Callable regridder for staggered grids that interpolates a source field onto
+the model grid. Typed fields keep the per-timestep call site statically
+dispatched; the earlier closure-based implementation could capture its
+variables with abstract types.
+"""
+struct InterpolatingRegridder{MT, MG, DT}
+    metadata::MT
+    model_grid::MG
+    domain::DT
+end
+
+function (r::InterpolatingRegridder)(dst::AbstractArray, src::AbstractArray;
+        extrapolate_type = Flat())
+    interpolate_from!(dst, src, r.metadata, r.model_grid, r.domain;
+        extrapolate_type = extrapolate_type)
+end
+
+"""
+Callable regridder for non-staggered grids that uses `ConservativeRegridding`.
+`extrapolate_type` is accepted for a uniform call signature but is unused here.
+"""
+struct ConservativeRegridderCallable{RG, MT}
+    regridder::RG
+    metadata::MT
+end
+
+function (r::ConservativeRegridderCallable)(dst::AbstractArray, src::AbstractArray;
+        extrapolate_type = Flat())
+    regrid_horizontal!(dst, r.regridder, src, r.metadata)
+end
+
+"""
 Create a regridding function for the given file set, metadata, and domain.
 If any dimensions are staggered, use interpolation; otherwise, use conservative regridding.
 `extrapolate_type` specifies the extrapolation method for interpolation; it is only used
@@ -94,19 +126,9 @@ when interpolation is selected.
 function regridder(fs::FileSet, metadata::MetaData, domain::DomainInfo)
     if any(metadata.staggering) # Are any of the dimensions staggered?
         model_grid = EarthSciMLBase.grid(domain, metadata.staggering)
-        regrid! = (dst::AbstractArray,
-            src::AbstractArray;
-            extrapolate_type = Flat()) -> begin
-            interpolate_from!(dst, src, metadata, model_grid, domain;
-                extrapolate_type = extrapolate_type)
-        end
+        return InterpolatingRegridder(metadata, model_grid, domain)
     else
-        regridder = horizontal_regridder(fs, metadata, domain)
-        regrid! = (dst::AbstractArray,
-            src::AbstractArray;
-            extrapolate_type = Flat()) -> begin
-            regrid_horizontal!(dst, regridder, src, metadata)
-        end
+        rg = horizontal_regridder(fs, metadata, domain)
+        return ConservativeRegridderCallable(rg, metadata)
     end
-    return regrid!
 end

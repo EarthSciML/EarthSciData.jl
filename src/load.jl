@@ -232,6 +232,32 @@ struct DataFrequencyInfo
     frequency::Union{Dates.Period, Dates.CompoundPeriod}
     "Time representing the temporal center of each record."
     centerpoints::Vector{DateTime}
+    "Precomputed bucket boundaries for `centerpoint_index`: the i-th element
+    is the midpoint between `centerpoints[i-1]` and `centerpoints[i]`, with
+    `middles[1] = centerpoints[1]` so the first bucket begins there."
+    middles::Vector{DateTime}
+    function DataFrequencyInfo(start::DateTime,
+            frequency::Union{Dates.Period, Dates.CompoundPeriod},
+            centerpoints)
+        # Accept any iterable of DateTime (e.g. `StepRange{DateTime, Day}` from
+        # the daily-file loaders) to preserve the previous auto-generated
+        # constructor's behaviour, and materialize into `Vector{DateTime}` so
+        # the precomputed `middles` stay in sync with `centerpoints`.
+        cp::Vector{DateTime} = centerpoints isa Vector{DateTime} ? centerpoints :
+                               collect(DateTime, centerpoints)
+        new(start, frequency, cp, _compute_middles(cp))
+    end
+end
+
+function _compute_middles(cpts::Vector{DateTime})
+    n = length(cpts)
+    m = Vector{DateTime}(undef, n)
+    n == 0 && return m
+    m[1] = cpts[1]
+    @inbounds for i in 2:n
+        m[i] = cpts[i - 1] + (cpts[i] - cpts[i - 1]) / 2
+    end
+    return m
 end
 
 """
@@ -253,9 +279,7 @@ function centerpoint_index(t_info::DataFrequencyInfo, t::DateTime)
         ),
         )
     end
-    diffs = diff(cpts)
-    middles = (cpts[1], (cpts[i] + diffs[i] / 2 for i in 1:(length(cpts) - 1))...)
-    findlast((x) -> x <= t, middles)
+    return searchsortedlast(t_info.middles, t)
 end
 
 """
@@ -541,34 +565,59 @@ function update!(itp::DataSetInterpolator, t::DateTime)
     tc = itp.cache
     @assert tc.initialized "Interpolator has not been initialized"
     times = interp_cache_times!(itp, t) # Figure out which times we need.
-
-    # Figure out the overlap between the times we have and the times we need.
-    times_in_cache = intersect(times, tc.times)
-    idxs_in_cache = [findfirst(x -> x == times_in_cache[i], tc.times)
-                     for i in eachindex(times_in_cache)]
-    idxs_in_times = [findfirst(x -> x == times_in_cache[i], times)
-                     for i in eachindex(times_in_cache)]
-    idxs_not_in_times = setdiff(eachindex(times), idxs_in_times)
-
-    # Move data we already have to where it should be.
     N = ndims(tc.data_buffer)
-    if all(idxs_in_cache .> idxs_in_times) && all(issorted.((idxs_in_cache, idxs_in_times)))
-        for (new, old) in zip(idxs_in_times, idxs_in_cache)
-            selectdim(tc.data_buffer, N, new) .= selectdim(tc.data_buffer, N, old)
+    n_new = length(times)
+    n_old = length(tc.times)
+
+    # Find the overlap between the times we already have (`tc.times`) and
+    # the times we need (`times`). Both vectors are sorted contiguous windows
+    # over the same centerpoint list, so a single merge walk in O(n + m)
+    # finds every matching pair with no allocations. For any overlap, the
+    # index offset `delta = old - new` is constant; we use it to drive one
+    # in-place shift instead of allocating intersect/findfirst/setdiff
+    # vectors as the previous implementation did.
+    first_new = 0
+    delta = 0
+    overlap_count = 0
+    j = 1
+    @inbounds for i in 1:n_new
+        while j <= n_old && tc.times[j] < times[i]
+            j += 1
         end
-    elseif all(idxs_in_cache .< idxs_in_times) &&
-           all(issorted.((idxs_in_cache, idxs_in_times)))
-        for (new, old) in zip(reverse(idxs_in_times), reverse(idxs_in_cache))
-            selectdim(tc.data_buffer, N, new) .= selectdim(tc.data_buffer, N, old)
+        if j <= n_old && tc.times[j] == times[i]
+            if overlap_count == 0
+                first_new = i
+                delta = j - i
+            elseif j - i != delta
+                error("Unexpected time ordering in cache update")
+            end
+            overlap_count += 1
+            j += 1
         end
-    elseif !all(idxs_in_cache .== idxs_in_times)
-        error(
-            "Unexpected time ordering, can't reorder indexes $(idxs_in_times) to $(idxs_in_cache)",
-        )
     end
 
-    # Load the additional times we need
-    for idx in idxs_not_in_times
+    # Move overlapping data in place when the overlap has shifted.
+    if overlap_count > 0 && delta != 0
+        if delta > 0
+            # Source indices are higher than destinations — walk forward.
+            @inbounds for i in first_new:(first_new + overlap_count - 1)
+                selectdim(tc.data_buffer, N, i) .= selectdim(tc.data_buffer, N, i + delta)
+            end
+        else
+            # Source indices are lower than destinations — walk backward.
+            @inbounds for i in (first_new + overlap_count - 1):-1:first_new
+                selectdim(tc.data_buffer, N, i) .= selectdim(tc.data_buffer, N, i + delta)
+            end
+        end
+    end
+
+    # Load times not covered by the overlap.
+    lo = first_new
+    hi = first_new + overlap_count - 1
+    @inbounds for idx in 1:n_new
+        if overlap_count > 0 && lo <= idx <= hi
+            continue
+        end
         d = selectdim(tc.data_buffer, N, idx)
         if fetch(tc.loadtask) != times[idx] # Check if correct time is already loaded.
             load_data_for_time!(itp, times[idx]) # Load data if not already loaded.

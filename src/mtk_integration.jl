@@ -503,11 +503,15 @@ function build_interp_event(interp_infos, starttime::DateTime)
     # path, so the cost is negligible.
     n_interps = length(interp_infos)
     data_bufs = Vector{Any}(undef, n_interps)
+    # Hoisted: `result_vals` and the NamedTuple key-tuple are reused across
+    # every callback fire instead of being rebuilt each time. The callback is
+    # serialized by `update_lock`, so in-place mutation is safe.
+    result_vals = Vector{Any}(undef, 3 * n_interps)
+    mod_keys_tuple = Tuple(mod_keys)
     update_lock = ReentrantLock()
 
     function update_data!(modified, observed, ctx, integ)
         lock(update_lock) do
-            result_vals = Vector{Any}(undef, 3 * n_interps)
             i = 0
             for (_, dsi) in pairs(ctx)
                 i += 1
@@ -544,7 +548,7 @@ function build_interp_event(interp_infos, starttime::DateTime)
                 result_vals[3i - 1] = ts
                 result_vals[3i] = tstep
             end
-            NamedTuple{Tuple(mod_keys)}(Tuple(result_vals))
+            NamedTuple{mod_keys_tuple}(Tuple(result_vals))
         end
     end
 
