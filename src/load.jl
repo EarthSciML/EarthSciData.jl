@@ -375,8 +375,8 @@ mutable struct DataSetInterpolator{To, N, N2, FT, DomT, ET, FSRG}
         # `interp_unsafe`.
         reordered = _reorder_grid(_compute_grid(domain, metadata.staggering), metadata)
         grid_starts = ntuple(i -> To(first(reordered[i])), N2)
-        grid_steps  = ntuple(i -> To(step(reordered[i])),  N2)
-        grid_size   = ntuple(i -> Int(length(reordered[i])), N2)
+        grid_steps = ntuple(i -> To(step(reordered[i])), N2)
+        grid_size = ntuple(i -> Int(length(reordered[i])), N2)
 
         td = Threads.@spawn (() -> DateTime(0, 1, 10))() # Placeholder for async loading task.
         tc = TemporalCache{To, N, N2}(
@@ -544,7 +544,8 @@ end
 function initialize!(itp::DataSetInterpolator, t::DateTime)
     tc = itp.cache
     tc.load_cache = zeros(eltype(tc.load_cache), itp.metadata.varsize...)
-    tc.data_buffer = zeros(eltype(tc.data_buffer), itp.grid_size..., size(tc.data_buffer, ndims(tc.data_buffer))) # Add a dimension for time.
+    tc.data_buffer = zeros(
+        eltype(tc.data_buffer), itp.grid_size..., size(tc.data_buffer, ndims(tc.data_buffer))) # Add a dimension for time.
     tc.initialized = true
 end
 

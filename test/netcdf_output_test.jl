@@ -1,3 +1,4 @@
+using EarthSciData
 using EarthSciMLBase, ModelingToolkit, DomainSets
 using ModelingToolkit: t, D
 using NCDatasets, DynamicQuantities, Dates
