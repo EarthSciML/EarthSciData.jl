@@ -127,12 +127,28 @@ function localpath(fs::FileSet, t::DateTime, varname = nothing)
     joinpath(download_cache(), replace(mirror(fs), "://" => "_"), file)
 end
 
+# The progress bar is enabled on interactive TTYs but disabled in CI.  When
+# non-interactive (e.g. GitHub Actions), ProgressMeter rewrites the bar with
+# `\r`, which the log collector treats as a newline — a single 500 MB download
+# then emits tens of thousands of lines and overruns the 4 MB live-log cap,
+# hiding any later failure.  Opt in explicitly via `EARTHSCIDATA_PROGRESS=1`
+# to force-enable.
+function _progress_enabled()
+    force = get(ENV, "EARTHSCIDATA_PROGRESS", "")
+    force == "1" && return true
+    force == "0" && return false
+    return (stderr isa Base.TTY) && get(ENV, "CI", "") == ""
+end
+
 """
 Download a file with a progress bar, deleting the partial file on error.
 """
 function _download_with_progress(download_url::AbstractString, path::AbstractString; timeout::Real = 300)
     try
-        prog = Progress(100; desc = "Downloading $(basename(download_url)):", dt = 0.1)
+        prog = Progress(100;
+            desc = "Downloading $(basename(download_url)):",
+            dt = 0.1,
+            enabled = _progress_enabled())
         Downloads.download(download_url, path,
             timeout = timeout,
             progress = (
