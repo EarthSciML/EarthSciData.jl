@@ -22,6 +22,7 @@ const TEST_FILES = [
     "geosfp_test.jl",
     "era5_test.jl",
     "wrf_test.jl",
+    "wrf_solve_test.jl",
     "NCEP-NCAR_Reanalysis_test.jl",
     "landfire_test.jl",
     "usgs3dep_test.jl",
