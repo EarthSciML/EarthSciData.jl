@@ -65,6 +65,13 @@ end
         end
     end
 
+    # The `convert(PDESystem, composed_sys)` here drives MTK's symbolic
+    # expansion over the Advection PDE with 8 WRF met variables; on Julia
+    # 1.10 (LTS) it reproducibly exhausts the 7 GB CI runner's memory ~26 min
+    # in and the runner is SIGTERM'd by the Azure host.  Skip on LTS until
+    # the upstream symbolic-processing memory regression is fixed; Julia
+    # 1.12 still runs it.
+    @static if VERSION >= v"1.11"
     @testset "wrf" begin
         (; domain) = setup()
         lon, lat, lev = EarthSciMLBase.pvars(domain)
@@ -135,6 +142,7 @@ end
             @test any(occursin.((term,), have_eqs))
         end
     end
+    end # @static if VERSION >= v"1.11"
 
     @testset "wrf total pressures" begin
         (; domain) = setup()

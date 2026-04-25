@@ -63,6 +63,7 @@ AllocCheck = "9b6a8646-10ed-4001-bbdc-1d2f46dfbb1a"
 DifferentialEquations = "0c46a032-eb83-5123-abaf-570d42b7fbaa"
 DomainSets = "5b8099bc-c8ec-5219-889f-1d9e522a28bf"
 LaTeXStrings = "b964fa9f-0449-5b57-a5c2-d3ea65f4040f"
+Logging = "56ddb016-857b-54e1-b83d-db4d58db5568"
 OrdinaryDiffEqLowOrderRK = "1344f307-1e59-4825-a18e-ace9aa3fa4c6"
 OrdinaryDiffEqSDIRK = "2d112036-d095-4a1e-ab9a-08536f3ecdbf"
 OrdinaryDiffEqTsit5 = "b1df2697-797e-41e3-8120-5422d3b24e4a"
@@ -71,4 +72,4 @@ SymbolicIndexingInterface = "2efcf032-c050-4f8e-a9bb-153293bab1f5"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
-test = ["Test", "DomainSets", "LaTeXStrings", "OrdinaryDiffEqLowOrderRK", "OrdinaryDiffEqSDIRK", "OrdinaryDiffEqTsit5", "Random", "AllocCheck", "SymbolicIndexingInterface"]
+test = ["Test", "DomainSets", "LaTeXStrings", "Logging", "OrdinaryDiffEqLowOrderRK", "OrdinaryDiffEqSDIRK", "OrdinaryDiffEqTsit5", "Random", "AllocCheck", "SymbolicIndexingInterface"]
