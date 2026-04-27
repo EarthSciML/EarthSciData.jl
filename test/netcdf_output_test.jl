@@ -1,7 +1,9 @@
+using EarthSciData
 using EarthSciMLBase, ModelingToolkit, DomainSets
 using ModelingToolkit: t, D
 using NCDatasets, DynamicQuantities, Dates
 using OrdinaryDiffEqLowOrderRK, OrdinaryDiffEqTsit5
+using Logging
 using Test
 
 @testset "NetCDF Output" begin
@@ -39,7 +41,14 @@ using Test
         st = SolverStrangThreads(Tsit5(), dt)
         prob = ODEProblem(csys, st)
 
-        solve(prob, Euler(), dt = dt)
+        # The Strang solver currently goes unstable here (separate regression
+        # being fixed elsewhere) and emits thousands of dt_epsilon /
+        # init_NaN warnings per step.  In CI those drown out subsequent
+        # subprocess logs by exhausting GitHub's 4 MB live-log cap, so silence
+        # them at solve time.
+        with_logger(NullLogger()) do
+            solve(prob, Euler(), dt = dt)
+        end
 
         ds = NCDataset(file, "r")
 

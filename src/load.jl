@@ -127,12 +127,28 @@ function localpath(fs::FileSet, t::DateTime, varname = nothing)
     joinpath(download_cache(), replace(mirror(fs), "://" => "_"), file)
 end
 
+# The progress bar is enabled on interactive TTYs but disabled in CI.  When
+# non-interactive (e.g. GitHub Actions), ProgressMeter rewrites the bar with
+# `\r`, which the log collector treats as a newline — a single 500 MB download
+# then emits tens of thousands of lines and overruns the 4 MB live-log cap,
+# hiding any later failure.  Opt in explicitly via `EARTHSCIDATA_PROGRESS=1`
+# to force-enable.
+function _progress_enabled()
+    force = get(ENV, "EARTHSCIDATA_PROGRESS", "")
+    force == "1" && return true
+    force == "0" && return false
+    return (stderr isa Base.TTY) && get(ENV, "CI", "") == ""
+end
+
 """
 Download a file with a progress bar, deleting the partial file on error.
 """
 function _download_with_progress(download_url::AbstractString, path::AbstractString; timeout::Real = 300)
     try
-        prog = Progress(100; desc = "Downloading $(basename(download_url)):", dt = 0.1)
+        prog = Progress(100;
+            desc = "Downloading $(basename(download_url)):",
+            dt = 0.1,
+            enabled = _progress_enabled())
         Downloads.download(download_url, path,
             timeout = timeout,
             progress = (
@@ -383,8 +399,8 @@ mutable struct DataSetInterpolator{To, N, N2, FT, DomT, ET, FSRG}
         # `interp_unsafe`.
         reordered = _reorder_grid(_compute_grid(domain, metadata.staggering), metadata)
         grid_starts = ntuple(i -> To(first(reordered[i])), N2)
-        grid_steps  = ntuple(i -> To(step(reordered[i])),  N2)
-        grid_size   = ntuple(i -> Int(length(reordered[i])), N2)
+        grid_steps = ntuple(i -> To(step(reordered[i])), N2)
+        grid_size = ntuple(i -> Int(length(reordered[i])), N2)
 
         td = Threads.@spawn (() -> DateTime(0, 1, 10))() # Placeholder for async loading task.
         tc = TemporalCache{To, N, N2}(
@@ -552,7 +568,8 @@ end
 function initialize!(itp::DataSetInterpolator, t::DateTime)
     tc = itp.cache
     tc.load_cache = zeros(eltype(tc.load_cache), itp.metadata.varsize...)
-    tc.data_buffer = zeros(eltype(tc.data_buffer), itp.grid_size..., size(tc.data_buffer, ndims(tc.data_buffer))) # Add a dimension for time.
+    tc.data_buffer = zeros(
+        eltype(tc.data_buffer), itp.grid_size..., size(tc.data_buffer, ndims(tc.data_buffer))) # Add a dimension for time.
     tc.initialized = true
 end
 
