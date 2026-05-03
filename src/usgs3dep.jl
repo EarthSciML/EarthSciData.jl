@@ -381,7 +381,8 @@ function USGS3DEP(domaininfo::DomainInfo; name = :USGS3DEP, resolution = 1 / 3,
         metadata = Dict(
             CoupleType => USGS3DEPCoupler,
             SysDomainInfo => domaininfo,
-            InterpInfos => interp_infos
+            InterpInfos => interp_infos,
+            SysDiscreteEvent => make_prune_factory(interp_infos)
         )
     )
     return sys

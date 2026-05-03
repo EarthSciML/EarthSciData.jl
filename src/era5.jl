@@ -473,7 +473,8 @@ function ERA5(
         metadata = Dict(
             CoupleType => ERA5Coupler,
             SysDomainInfo => domaininfo,
-            InterpInfos => interp_infos
+            InterpInfos => interp_infos,
+            SysDiscreteEvent => make_prune_factory(interp_infos)
         )
     )
     return sys

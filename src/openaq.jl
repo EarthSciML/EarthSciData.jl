@@ -668,7 +668,8 @@ function OpenAQ(
         metadata = Dict(
             CoupleType => OpenAQCoupler,
             SysDomainInfo => domaininfo,
-            InterpInfos => interp_infos
+            InterpInfos => interp_infos,
+            SysDiscreteEvent => make_prune_factory(interp_infos)
         )
     )
     return sys

@@ -353,7 +353,8 @@ function NCEPNCARReanalysis(
         discrete_events = [build_interp_event(interp_infos, starttime)],
         metadata = Dict(CoupleType => NCEPNCARReanalysisCoupler,
             SysDomainInfo => domaininfo,
-            InterpInfos => interp_infos)
+            InterpInfos => interp_infos,
+            SysDiscreteEvent => make_prune_factory(interp_infos))
     )
     return sys
 end

@@ -288,7 +288,8 @@ function LANDFIRE(domaininfo::DomainInfo; name = :LANDFIRE,
         metadata = Dict(
             CoupleType => LANDFIRECoupler,
             SysDomainInfo => domaininfo,
-            InterpInfos => interp_infos
+            InterpInfos => interp_infos,
+            SysDiscreteEvent => make_prune_factory(interp_infos)
         )
     )
     return sys

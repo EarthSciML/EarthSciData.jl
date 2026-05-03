@@ -265,11 +265,18 @@ function create_interp_equation(itp::DataSetInterpolator{To}, filename, t, t_ref
     const_defaults[p_extrap] = extrap_val
     const_defaults[unit_scale] = 1.0
 
+    # `live`: per-variable run-time gate.  Flipped to `false` by
+    # `build_interp_event`'s init affect for variables that no compiled equation
+    # references, suppressing both `lazyload!` (no NetCDF read) and the
+    # full-grid `cache.data_buffer` allocation in `initialize!`.  Defaults to
+    # `true` so standalone `mtkcompile(loader)` (no parent system to prune
+    # against) loads everything.
     interp_info = (data_sym = p_data, tstart_sym = p_tstart, tstep_sym = p_tstep,
         spatial_consts = spatial_consts, extrap_const = p_extrap,
         unit_const = unit_scale, itp = itp, var_sym = n,
         data_dims = data_dims, data_eltype = To,
-        const_defaults = const_defaults, spatial_interp = spatial_interp)
+        const_defaults = const_defaults, spatial_interp = spatial_interp,
+        live = Ref(true))
 
     # Single source of truth for the interp formula.
     rhs = wrapper_f(build_interp_expr(interp_info, t_ref + t, coords))
@@ -510,11 +517,35 @@ function build_interp_event(interp_infos, starttime::DateTime)
     mod_keys_tuple = Tuple(mod_keys)
     update_lock = ReentrantLock()
 
+    # Per-interp_info `live` Refs captured so the affect can skip variables
+    # that no compiled equation in the parent system references.  Refs
+    # default to `true`; [`prune_unused_interps!`] (opt-in) flips them to
+    # `false` after compilation.  In the all-live (default) case the loop
+    # writes every entry of `result_vals`; with some dead, those entries
+    # need a fallback value, so we pre-fill from `modified`.
+    lives = [info.live for info in interp_infos]
+
     function update_data!(modified, observed, ctx, integ)
         lock(update_lock) do
+            # When at least one interp is dead, pre-fill `result_vals` with
+            # the current parameter values from `modified` so dead-entry
+            # slots have valid data when assembling the return NamedTuple.
+            # Skip this in the all-live fast path to keep behavior bit-for-bit
+            # identical to the pre-pruning code.
+            any_dead = false
+            for live in lives
+                live[] || (any_dead = true; break)
+            end
+            if any_dead
+                mod_input = values(modified)
+                @inbounds for k in 1:length(mod_keys_tuple)
+                    result_vals[k] = mod_input[k]
+                end
+            end
             i = 0
             for (_, dsi) in pairs(ctx)
                 i += 1
+                lives[i][] || continue
                 lazyload!(dsi, integ.t + t_ref)
                 src = dsi.cache.data_buffer
                 if !isassigned(data_bufs, i)
@@ -565,6 +596,163 @@ function build_interp_event(interp_infos, starttime::DateTime)
     return ModelingToolkit.SymbolicDiscreteCallback(
         all_tstops, affect; initialize = affect,
         initialize_save_discretes = false)
+end
+
+"""
+$(SIGNATURES)
+
+Mark each interpolator in `loader_sys`'s [`InterpInfos`] metadata that no
+compiled equation in `parent_sys` references as `live[] = false`, so
+[`build_interp_event`]'s affect skips its `lazyload!` call (no NetCDF read,
+no full-grid `cache.data_buffer` allocation).  `parent_sys` should be the
+post-`mtkcompile` system that `loader_sys` is part of.
+
+`extra_needed` is an extra set of symbolic variables to treat as needed
+(beyond what `equations(parent_sys)` and `observed(parent_sys)` reach).
+Pass `EarthSciMLBase.operator_vars(csys, parent_sys, domain)` here when the
+system uses [`EarthSciMLBase.Operator`]s (e.g. advection); operators
+specify their needs via `get_needed_vars` outside the symbolic equation
+graph and would otherwise be missed by the equation/observed walk.
+
+Loaders auto-register a `SysDiscreteEvent`-shaped factory in their
+metadata that calls this function with the temp coupled+`mtkcompile`d
+system at `convert(::Type{System}, ::CoupledSystem)` time, so the standard
+`couple(...)` → `convert(System, csys)` path applies pruning without any
+extra user action.  Call this function manually only when you bypass that
+path (e.g. plain `compose` + `mtkcompile`) or when you need to inject
+`extra_needed`.
+
+The pruning is irreversible for the lifetime of the loader's `interp_info`
+vector — build a fresh loader to reset `live[]` to `true`.
+
+The "needed" check substitutes observed equations into state-equation RHSs
+via `Symbolics.fixpoint_sub` and walks the resulting variables.  A variable
+that downstream compilation inlines through observed eqs that this walk
+doesn't reach (e.g. through coordinate-aware codegen paths in some
+operator-split solvers) could be marked dead in error.  If this happens
+the symptom is `interp_unsafe: time index outside loaded cache range` at
+solve time; in that case skip the call or expand `extra_needed`.
+
+# Example
+
+```julia
+emis = NEI2016MonthlyEmis(\"sector\", domain)
+@variables ACET(t) = 0.0
+sys = compose(System([D(ACET) ~ emis.ACET], t, [ACET], []; name = :state), emis)
+sys = mtkcompile(sys)
+EarthSciData.prune_unused_interps!(emis, sys)  # opt in to gating
+prob = ODEProblem(sys, ..., tspan)
+```
+
+When the workflow uses operators:
+
+```julia
+csys = couple(sys, emis, Advection(), domain)
+parent_sys = convert(System, csys)
+extra = EarthSciMLBase.operator_vars(csys, parent_sys, domain)
+EarthSciData.prune_unused_interps!(emis, parent_sys; extra_needed = extra)
+```
+"""
+function prune_unused_interps!(loader_sys, parent_sys; extra_needed = ())
+    interp_infos = ModelingToolkit.getmetadata(
+        loader_sys, InterpInfos, nothing)
+    isnothing(interp_infos) && return loader_sys
+    bare_data_syms = [string(EarthSciMLBase.var2symbol(info.data_sym))
+                      for info in interp_infos]
+    obs_subst = Dict{Any, Any}()
+    for eq in ModelingToolkit.observed(parent_sys)
+        obs_subst[eq.lhs] = eq.rhs
+    end
+    referenced = Set{String}()
+    for eq in ModelingToolkit.equations(parent_sys)
+        substed = isempty(obs_subst) ? eq.rhs :
+                  Symbolics.fixpoint_sub(eq.rhs, obs_subst)
+        for v in Symbolics.get_variables(substed)
+            push!(referenced, string(EarthSciMLBase.var2symbol(v)))
+        end
+    end
+    for v in extra_needed
+        push!(referenced, string(EarthSciMLBase.var2symbol(v)))
+    end
+    is_needed = [bare in referenced ||
+                 any(s -> endswith(s, "₊" * bare), referenced)
+                 for bare in bare_data_syms]
+    if any(is_needed)
+        for (k, ok) in enumerate(is_needed)
+            ok || (interp_infos[k].live[] = false)
+        end
+    end
+    return loader_sys
+end
+
+"""
+$(SIGNATURES)
+
+Convenience wrapper: convert `csys` to a `System`, gather operator-needed
+variables via `EarthSciMLBase.operator_vars`, and call
+[`prune_unused_interps!`] on `loader_sys` with both.  Returns the
+post-`mtkcompile` parent system so callers can use it for
+`ODEProblem(parent_sys, ...)`.
+"""
+function prune_unused_interps!(
+        loader_sys, csys::EarthSciMLBase.CoupledSystem; kwargs...)
+    parent_sys = convert(ModelingToolkit.System, csys; kwargs...)
+    extra = isnothing(csys.domaininfo) || isempty(csys.ops) ? () :
+            EarthSciMLBase.operator_vars(csys, parent_sys, csys.domaininfo)
+    prune_unused_interps!(loader_sys, parent_sys; extra_needed = extra)
+    return parent_sys
+end
+
+"""
+$(SIGNATURES)
+
+Build a `SysDiscreteEvent`-shaped factory closing over `interp_infos`.
+EarthSciMLBase's `convert(::Type{System}, ::CoupledSystem)` walks every
+subsystem's `SysDiscreteEvent` metadata and calls each factory with the
+temp coupled+`mtkcompile`d parent system; this factory side-effects the
+captured `interp_info.live` Refs and returns `nothing`, so the discrete
+event list passed to the parent is empty.  EarthSciMLBase's walker
+filters `nothing` returns, so registering this factory adds no new
+discrete events to the parent system — the existing loader-attached
+`build_interp_event` callback fires as before, just with a settled live
+mask by the time it runs.
+
+`operator_vars` is *not* consulted here because the factory only sees the
+post-compile `System` (no `CoupledSystem` access).  Workflows using
+`EarthSciMLBase.Operator`s should bypass auto-pruning by calling
+[`prune_unused_interps!`](@ref) on the `CoupledSystem` directly (which
+does include `operator_vars`).
+"""
+function make_prune_factory(interp_infos)
+    return function (parent_sys)
+        # Reuse the public function; `interp_infos` is already captured.
+        # We need a temp `loader_sys`-shaped object to call into the helper.
+        # Inline the equation/observed walk instead to avoid round-tripping
+        # through `getmetadata`.
+        bare_data_syms = [string(EarthSciMLBase.var2symbol(info.data_sym))
+                          for info in interp_infos]
+        obs_subst = Dict{Any, Any}()
+        for eq in ModelingToolkit.observed(parent_sys)
+            obs_subst[eq.lhs] = eq.rhs
+        end
+        referenced = Set{String}()
+        for eq in ModelingToolkit.equations(parent_sys)
+            substed = isempty(obs_subst) ? eq.rhs :
+                      Symbolics.fixpoint_sub(eq.rhs, obs_subst)
+            for v in Symbolics.get_variables(substed)
+                push!(referenced, string(EarthSciMLBase.var2symbol(v)))
+            end
+        end
+        is_needed = [bare in referenced ||
+                     any(s -> endswith(s, "₊" * bare), referenced)
+                     for bare in bare_data_syms]
+        if any(is_needed)
+            for (k, ok) in enumerate(is_needed)
+                ok || (interp_infos[k].live[] = false)
+            end
+        end
+        return nothing
+    end
 end
 
 Latexify.@latexrecipe function f(itp::EarthSciData.DataSetInterpolator)

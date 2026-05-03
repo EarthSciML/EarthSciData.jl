@@ -26,7 +26,8 @@ const TEST_FILES = [
     "NCEP-NCAR_Reanalysis_test.jl",
     "landfire_test.jl",
     "usgs3dep_test.jl",
-    "coupling_test.jl"
+    "coupling_test.jl",
+    "interp_pruning_test.jl"
 ]
 
 const SELECTED = let raw = get(ENV, "EARTHSCIDATA_TEST_FILES", "")
