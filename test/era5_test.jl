@@ -205,8 +205,9 @@ end
         lonv=deg2rad(-90.0)
         latv=deg2rad(35.0)
         levv=1.0
-        EarthSciData.lazyload!(itp, tt)
-        val=EarthSciData.interp_unsafe(itp, tt, lonv, latv, levv)
+        buf=EarthSciData.make_data_buffer(itp)
+        EarthSciData.lazyload!(itp, tt, buf)
+        val=EarthSciData.interp_unsafe(itp, buf, tt, lonv, latv, levv)
         # Temperature should be reasonable (200-320 K at 1000 hPa).
         @test 200.0 < val < 320.0
     end

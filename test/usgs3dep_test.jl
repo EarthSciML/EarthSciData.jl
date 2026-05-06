@@ -156,7 +156,8 @@ using Test
         # Interpolate at the centre of the domain
         lon_c=deg2rad(-121.60)
         lat_c=deg2rad(39.78)
-        val=EarthSciData.interp!(itp, ts, Float32(lon_c), Float32(lat_c))
+        buf=EarthSciData.make_data_buffer(itp)
+        val=EarthSciData.interp!(itp, buf, ts, Float32(lon_c), Float32(lat_c))
         @test 50 < val < 3000
     end
 
@@ -317,7 +318,8 @@ using Test
             fs, "elevation", ts, te, lcc_domain; stream = true)
 
         # Interpolate at the LCC origin (0, 0) which corresponds to the projection centre.
-        val=EarthSciData.interp!(itp, ts, Float32(0.0), Float32(0.0))
+        buf=EarthSciData.make_data_buffer(itp)
+        val=EarthSciData.interp!(itp, buf, ts, Float32(0.0), Float32(0.0))
         # Paradise, CA area elevation should be physically reasonable.
         @test 50 < val < 3000
     end
@@ -356,9 +358,11 @@ using Test
         # Query both at the projection centre (Paradise, CA).
         lon_c=deg2rad(-121.60)
         lat_c=deg2rad(39.78)
-        val_ll=EarthSciData.interp!(itp_ll, ts_ll, Float32(lon_c), Float32(lat_c))
+        buf_ll=EarthSciData.make_data_buffer(itp_ll)
+        val_ll=EarthSciData.interp!(itp_ll, buf_ll, ts_ll, Float32(lon_c), Float32(lat_c))
 
-        val_lcc=EarthSciData.interp!(itp_lcc, ts_lcc, Float32(0.0), Float32(0.0))
+        buf_lcc=EarthSciData.make_data_buffer(itp_lcc)
+        val_lcc=EarthSciData.interp!(itp_lcc, buf_lcc, ts_lcc, Float32(0.0), Float32(0.0))
 
         # Values should be close (not exact due to different grid resolutions).
         @test abs(val_ll - val_lcc) / max(abs(val_ll), abs(val_lcc)) < 0.1

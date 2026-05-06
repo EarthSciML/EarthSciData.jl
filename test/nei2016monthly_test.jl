@@ -46,14 +46,16 @@ import Proj
                 EarthSciData.loadmetadata(fileset, first(EarthSciData.varnames(fileset))), domain))
         @testset "correct projection" begin
             itp = EarthSciData.DataSetInterpolator{Float32}(fs, "NOX", ts, te, domain)
-            result = interp!(itp, sample_time, deg2rad(-97.0f0), deg2rad(40.0f0))
+            buf = EarthSciData.make_data_buffer(itp)
+            result = interp!(itp, buf, sample_time, deg2rad(-97.0f0), deg2rad(40.0f0))
             @test result > 0.0f0
             @test result < 1.0f-7  # Should be a small positive value
         end
 
         @testset "Out of domain" begin
             itp = EarthSciData.DataSetInterpolator{Float32}(fs, "NOX", ts, te, domain)
-            @test interp!(itp, sample_time, deg2rad(0.0f0), deg2rad(40.0f0)) ≈ 0.0
+            buf = EarthSciData.make_data_buffer(itp)
+            @test interp!(itp, buf, sample_time, deg2rad(0.0f0), deg2rad(40.0f0)) ≈ 0.0
         end
     end
 
@@ -83,13 +85,14 @@ import Proj
         fileset = EarthSciData.NEI2016MonthlyEmisFileSet("mrggrid_withbeis_withrwc", ts, te)
         sample_time = DateTime(2016, 5, 1)
         itp = EarthSciData.DataSetInterpolator{Float32}(fileset, "NOX", ts, te, domain)
-        EarthSciData.lazyload!(itp, sample_time)
+        buf = EarthSciData.make_data_buffer(itp)
+        EarthSciData.lazyload!(itp, sample_time, buf)
         ti = EarthSciData.DataFrequencyInfo(itp.fs.fs)
         @test month(itp.cache.times[1]) == 4
         @test month(itp.cache.times[2]) == 5
 
         sample_time = DateTime(2016, 5, 31)
-        EarthSciData.lazyload!(itp, sample_time)
+        EarthSciData.lazyload!(itp, sample_time, buf)
         @test month(itp.cache.times[1]) == 5
         @test month(itp.cache.times[2]) == 6
     end
@@ -203,8 +206,9 @@ import Proj
             for T in (Float32, Float64)
                 sample_time = DateTime(2016, 5, 1)
                 itp = EarthSciData.DataSetInterpolator{T}(fileset, "NOX", ts, te, domain)
-                EarthSciData.lazyload!(itp, sample_time)
-                db = EarthSciData.DataBufferType(itp.cache.data_buffer)
+                buf = EarthSciData.make_data_buffer(itp)
+                EarthSciData.lazyload!(itp, sample_time, buf)
+                db = EarthSciData.DataBufferType(buf)
                 # `@check_allocs` is a static (LLVM IR) analysis; every
                 # invocation raises the same `AllocCheckFailure` if any
                 # allocation is detected, so a warm-up pass is redundant.
@@ -240,7 +244,8 @@ import Proj
         sample_time = DateTime(2016, 5, 1)
         itp = EarthSciData.DataSetInterpolator{Float32}(fileset, "NOX", ts, te, domain)
         sample_time = DateTime(2017, 5, 1)
-        @test_throws ArgumentError EarthSciData.lazyload!(itp, sample_time)
+        buf = EarthSciData.make_data_buffer(itp)
+        @test_throws ArgumentError EarthSciData.lazyload!(itp, sample_time, buf)
     end
 
     @testset "delp_dry_surface_itp" begin
@@ -282,7 +287,8 @@ import Proj
             @test itp.metadata !== nothing
 
             # Test that interpolation works
-            result = interp!(itp, ts, deg2rad(-88.125), deg2rad(42.0))
+            buf = EarthSciData.make_data_buffer(itp)
+            result = interp!(itp, buf, ts, deg2rad(-88.125), deg2rad(42.0))
             @test result > 0.0  # Should be nonzero for this location
         end
 
@@ -302,7 +308,8 @@ import Proj
             itp = EarthSciData.DataSetInterpolator{Float64}(fs, "NO", ts, te, domain)
 
             # Test that interpolation works at a specific location
-            result = interp!(itp, ts, deg2rad(-87.5), deg2rad(41.0))
+            buf = EarthSciData.make_data_buffer(itp)
+            result = interp!(itp, buf, ts, deg2rad(-87.5), deg2rad(41.0))
             @test result > 0.0
         end
     end

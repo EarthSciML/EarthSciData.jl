@@ -160,9 +160,9 @@ function create_interp_equation(itp::DataSetInterpolator{To}, filename, t, t_ref
         Symbol("$(itp.varname)")
 
     # Compute the correct data array dimensions from the cached spatial
-    # grid size (populated once at DSI construction) plus the current
-    # time-cache depth.
-    cache_nt = size(itp.cache.data_buffer, ndims(itp.cache.data_buffer))
+    # grid size (populated once at DSI construction) plus the time-cache
+    # depth (`itp.cache_size`, also fixed at construction).
+    cache_nt = itp.cache_size
     data_dims = (itp.grid_size..., cache_nt)
 
     # Data discrete — wrapped in `DataBufferType` so MTK stores it in the
@@ -268,7 +268,7 @@ function create_interp_equation(itp::DataSetInterpolator{To}, filename, t, t_ref
     # `live`: per-variable run-time gate.  Flipped to `false` by
     # `build_interp_event`'s init affect for variables that no compiled equation
     # references, suppressing both `lazyload!` (no NetCDF read) and the
-    # full-grid `cache.data_buffer` allocation in `initialize!`.  Defaults to
+    # first-fire grow-from-sentinel allocation in the affect.  Defaults to
     # `true` so standalone `mtkcompile(loader)` (no parent system to prune
     # against) loads everything.
     interp_info = (data_sym = p_data, tstart_sym = p_tstart, tstep_sym = p_tstep,
@@ -497,19 +497,22 @@ function build_interp_event(interp_infos, starttime::DateTime)
     end
     ctx_nt = NamedTuple{Tuple(ctx_keys)}(Tuple(ctx_vals))
 
-    # Persistent per-interpolator `DataBufferType` values, populated lazily
-    # on the first event fire and reused across all subsequent fires. This
-    # avoids the per-fire full-grid `similar` + `copyto!` that the earlier
-    # refactor introduced, and — for the common CPU-only case — also avoids
-    # the 2× steady-state memory of holding both `cache.data_buffer` and a
-    # separate parameter-side copy.
+    # The full-grid data buffer lives on the parameter object itself: the
+    # affect reads the current `DataBufferType` from `modified`, hands its
+    # underlying array to `lazyload!` as the regrid target, and writes the
+    # (possibly grown) wrapper back into the returned NamedTuple.  The
+    # parameter starts out wrapping a 2^N sentinel array (see
+    # `_make_array_discrete`); the first fire grows it to the full grid
+    # via `similar(domain.u_proto, ...)`.  Subsequent fires reuse the
+    # parameter's array in place, so steady-state memory is exactly one
+    # full-grid buffer per variable (plus, for cross-device runs, a host
+    # staging array inside `cache.host_scratch`).
     #
     # `SolverStrangThreads` fires the same callback closure from multiple
-    # threads concurrently, so `data_bufs` is guarded by a lock.  The lock
+    # threads concurrently, so the affect is guarded by a lock.  The lock
     # only covers callback invocation (rare, at tstops), not the RHS hot
     # path, so the cost is negligible.
     n_interps = length(interp_infos)
-    data_bufs = Vector{Any}(undef, n_interps)
     # Hoisted: `result_vals` and the NamedTuple key-tuple are reused across
     # every callback fire instead of being rebuilt each time. The callback is
     # serialized by `update_lock`, so in-place mutation is safe.
@@ -520,61 +523,50 @@ function build_interp_event(interp_infos, starttime::DateTime)
     # Per-interp_info `live` Refs captured so the affect can skip variables
     # that no compiled equation in the parent system references.  Refs
     # default to `true`; [`prune_unused_interps!`] (opt-in) flips them to
-    # `false` after compilation.  In the all-live (default) case the loop
-    # writes every entry of `result_vals`; with some dead, those entries
-    # need a fallback value, so we pre-fill from `modified`.
+    # `false` after compilation.  Dead variables keep whatever the parameter
+    # buffer was set to at problem construction (the 2^N sentinel) — no
+    # NetCDF read, no full-grid allocation.
     lives = [info.live for info in interp_infos]
+
+    # Per-interp first-fire flags.  The parameter starts out wrapping a 2^N
+    # sentinel; the first fire allocates a full-grid buffer via
+    # `similar(domain.u_proto, ...)` so the array backend matches the state
+    # vector.  Using an explicit flag (rather than inferring from size) is
+    # robust for test domains whose actual grid happens to be 2^N.
+    grown = falses(n_interps)
+    full_spatial_sizes = [info.itp.grid_size for info in interp_infos]
+    full_cache_sizes = [info.itp.cache_size for info in interp_infos]
 
     function update_data!(modified, observed, ctx, integ)
         lock(update_lock) do
-            # When at least one interp is dead, pre-fill `result_vals` with
-            # the current parameter values from `modified` so dead-entry
-            # slots have valid data when assembling the return NamedTuple.
-            # Skip this in the all-live fast path to keep behavior bit-for-bit
-            # identical to the pre-pruning code.
-            any_dead = false
-            for live in lives
-                live[] || (any_dead = true; break)
-            end
-            if any_dead
-                mod_input = values(modified)
-                @inbounds for k in 1:length(mod_keys_tuple)
-                    result_vals[k] = mod_input[k]
-                end
+            mod_input = values(modified)
+            # Pre-fill so dead slots and the scalar tstart/tstep slots have
+            # valid current values when we assemble the return NamedTuple.
+            @inbounds for k in 1:length(mod_keys_tuple)
+                result_vals[k] = mod_input[k]
             end
             i = 0
             for (_, dsi) in pairs(ctx)
                 i += 1
                 lives[i][] || continue
-                lazyload!(dsi, integ.t + t_ref)
-                src = dsi.cache.data_buffer
-                if !isassigned(data_bufs, i)
-                    # First fire. `cache.data_buffer` is always a plain CPU
-                    # `Array{To,N}` (see `load.jl`); when the domain prototype
-                    # is also a CPU `Array`, alias the cache directly so that
-                    # subsequent in-place `update!` calls are picked up
-                    # without any extra copy, and the parameter never holds a
-                    # second full-grid buffer.  For a cross-device run (CPU
-                    # cache, GPU state) allocate one persistent device-side
-                    # buffer and refresh it in place on each fire.
-                    u_proto = dsi.domain.u_proto
-                    data_bufs[i] = if u_proto isa Array
-                        DataBufferType(src)
-                    else
-                        dst = similar(u_proto, size(src)...)
-                        copyto!(dst, src)
-                        DataBufferType(dst)
-                    end
-                else
-                    buf = data_bufs[i]::DataBufferType
-                    # When `buf.data` aliases `src` (fast path) this is a
-                    # no-op; otherwise refresh the persistent device buffer
-                    # in place.
-                    if buf.data !== src
-                        copyto!(buf.data, src)
-                    end
+                # Current parameter value — the `DataBufferType` MTK is
+                # holding for `info.data_sym`.  The data slot is at index
+                # `3i - 2` (matches the modified-NamedTuple layout in
+                # `mod_keys`).
+                current = mod_input[3i - 2]::DataBufferType
+                buf = current.data
+                if !grown[i]
+                    # First fire: grow the parameter's buffer to the full
+                    # grid.  After this, MTK stores the full-size buffer in
+                    # the parameter object and subsequent fires reuse it
+                    # in place via `lazyload!`.
+                    buf = similar(dsi.domain.u_proto, eltype(buf),
+                        full_spatial_sizes[i]..., full_cache_sizes[i])
+                    fill!(buf, zero(eltype(buf)))
+                    grown[i] = true
                 end
-                result_vals[3i - 2] = data_bufs[i]
+                lazyload!(dsi, integ.t + t_ref, buf)
+                result_vals[3i - 2] = DataBufferType(buf)
                 ts, tstep = get_time_grid_params(dsi)
                 result_vals[3i - 1] = ts
                 result_vals[3i] = tstep
@@ -604,7 +596,7 @@ $(SIGNATURES)
 Mark each interpolator in `loader_sys`'s [`InterpInfos`] metadata that no
 compiled equation in `parent_sys` references as `live[] = false`, so
 [`build_interp_event`]'s affect skips its `lazyload!` call (no NetCDF read,
-no full-grid `cache.data_buffer` allocation).  `parent_sys` should be the
+no first-fire grow-from-sentinel allocation).  `parent_sys` should be the
 post-`mtkcompile` system that `loader_sys` is part of.
 
 `extra_needed` is an extra set of symbolic variables to treat as needed

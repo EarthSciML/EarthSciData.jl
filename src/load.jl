@@ -1,4 +1,4 @@
-export interp_unsafe, interp!, GridSpec
+export interp_unsafe, interp!, make_data_buffer, GridSpec
 
 const _LONLAT_SR = "+proj=longlat +datum=WGS84 +no_defs"
 
@@ -300,15 +300,21 @@ end
 
 """
 Cache for time-varying interpolation state within a `DataSetInterpolator`.
+The full-grid data buffer lives on the parameter object (see
+`build_interp_event`), not here; the affect threads it back into
+`update!`/`initialize!` via the `target` argument. `host_scratch` is a
+host-side full-grid buffer, allocated only when the parameter buffer is
+on a non-CPU device, that the regridder writes into before a single
+`copyto!` to the device parameter buffer.
 
 $(FIELDS)
 """
 mutable struct TemporalCache{To, N, N2}
-    "Internal buffer holding loaded/regridded data (spatial dims + time). After loading, this is copied to the discrete parameter."
-    data_buffer::Array{To, N}
-    "Buffer that data is read into from file (separate from `data_buffer` for async loading)."
+    "Buffer that data is read into from file (separate from the data buffer for async loading)."
     load_cache::Array{To, N2}
-    "Timestamps corresponding to each time index in `data_buffer`."
+    "Host-side full-grid scratch for cross-device runs; `nothing` when the parameter buffer is itself a CPU `Array`."
+    host_scratch::Union{Nothing, Array{To, N}}
+    "Timestamps corresponding to each time index in the data buffer."
     times::Vector{DateTime}
     "The current time that the interpolator has been loaded for."
     currenttime::DateTime
@@ -351,6 +357,8 @@ mutable struct DataSetInterpolator{To, N, N2, FT, DomT, ET, FSRG}
     grid_starts::NTuple{N2, To}
     grid_steps::NTuple{N2, To}
     grid_size::NTuple{N2, Int}
+    "Number of time slices the interpolator caches at once (size of the trailing time dim of the data buffer)."
+    cache_size::Int
 
     function DataSetInterpolator{To}(fs::FileSet, varname::AbstractString,
             starttime::DateTime, endtime::DateTime, domain;
@@ -385,9 +393,8 @@ mutable struct DataSetInterpolator{To, N, N2, FT, DomT, ET, FSRG}
         end
 
         load_cache = zeros(To, repeat([1], length(metadata.varsize))...)
-        data_buffer = zeros(To, repeat([2], length(metadata.varsize))..., cache_size) # Add a dimension for time.
-        N = ndims(data_buffer)
-        N2 = N - 1
+        N2 = length(metadata.varsize)
+        N = N2 + 1                              # spatial + time
         times = [DateTime(0, 1, 1) + Hour(i) for i in 1:cache_size]
 
         coord_trns = coord_trans(metadata, domain)
@@ -404,7 +411,7 @@ mutable struct DataSetInterpolator{To, N, N2, FT, DomT, ET, FSRG}
 
         td = Threads.@spawn (() -> DateTime(0, 1, 10))() # Placeholder for async loading task.
         tc = TemporalCache{To, N, N2}(
-            data_buffer, load_cache, times,
+            load_cache, nothing, times,
             DateTime(1, 1, 1), td, false
         )
         itp = new{To, N, N2, FT, typeof(domain), typeof(extrapolate_type), typeof(fs)}(
@@ -417,7 +424,8 @@ mutable struct DataSetInterpolator{To, N, N2, FT, DomT, ET, FSRG}
             ReentrantLock(),
             grid_starts,
             grid_steps,
-            grid_size
+            grid_size,
+            cache_size
         )
         itp
     end
@@ -565,12 +573,25 @@ function _reorder_grid(grid, metadata::MetaData)
     end
 end
 
-function initialize!(itp::DataSetInterpolator, t::DateTime)
+function initialize!(itp::DataSetInterpolator, t::DateTime, target::AbstractArray)
     tc = itp.cache
     tc.load_cache = zeros(eltype(tc.load_cache), itp.metadata.varsize...)
-    tc.data_buffer = zeros(
-        eltype(tc.data_buffer), itp.grid_size..., size(tc.data_buffer, ndims(tc.data_buffer))) # Add a dimension for time.
+    # Cross-device runs need a CPU staging array because the regridder writes
+    # element-by-element via scalar indexing, which `CuArray` etc. don't
+    # support.  CPU runs reuse `target` directly — `regrid_target_for` returns
+    # `target` itself in that case, so no extra allocation.
+    if !(target isa Array)
+        tc.host_scratch = zeros(eltype(target), size(target)...)
+    else
+        tc.host_scratch = nothing
+    end
     tc.initialized = true
+end
+
+# Pick the buffer the regridder writes into: `target` itself when it's a CPU
+# `Array`, otherwise the host-side staging array.
+@inline function regrid_target_for(tc::TemporalCache, target::AbstractArray)
+    target isa Array ? target : tc.host_scratch::Array
 end
 
 function load_data_for_time!(itp::DataSetInterpolator, t::DateTime)
@@ -578,11 +599,12 @@ function load_data_for_time!(itp::DataSetInterpolator, t::DateTime)
     return t
 end
 
-function update!(itp::DataSetInterpolator, t::DateTime)
+function update!(itp::DataSetInterpolator, t::DateTime, target::AbstractArray)
     tc = itp.cache
     @assert tc.initialized "Interpolator has not been initialized"
     times = interp_cache_times!(itp, t) # Figure out which times we need.
-    N = ndims(tc.data_buffer)
+    rt = regrid_target_for(tc, target)
+    N = ndims(rt)
     n_new = length(times)
     n_old = length(tc.times)
 
@@ -618,12 +640,12 @@ function update!(itp::DataSetInterpolator, t::DateTime)
         if delta > 0
             # Source indices are higher than destinations — walk forward.
             @inbounds for i in first_new:(first_new + overlap_count - 1)
-                selectdim(tc.data_buffer, N, i) .= selectdim(tc.data_buffer, N, i + delta)
+                selectdim(rt, N, i) .= selectdim(rt, N, i + delta)
             end
         else
             # Source indices are lower than destinations — walk backward.
             @inbounds for i in (first_new + overlap_count - 1):-1:first_new
-                selectdim(tc.data_buffer, N, i) .= selectdim(tc.data_buffer, N, i + delta)
+                selectdim(rt, N, i) .= selectdim(rt, N, i + delta)
             end
         end
     end
@@ -635,7 +657,7 @@ function update!(itp::DataSetInterpolator, t::DateTime)
         if overlap_count > 0 && lo <= idx <= hi
             continue
         end
-        d = selectdim(tc.data_buffer, N, idx)
+        d = selectdim(rt, N, idx)
         if fetch(tc.loadtask) != times[idx] # Check if correct time is already loaded.
             load_data_for_time!(itp, times[idx]) # Load data if not already loaded.
         end
@@ -645,30 +667,33 @@ function update!(itp::DataSetInterpolator, t::DateTime)
         tc.loadtask = Threads.@spawn load_data_for_time!(
             itp, nexttimepoint(itp, times[idx]))
     end
+    if rt !== target
+        copyto!(target, rt)
+    end
     tc.times = times
     tc.currenttime = t
     @assert issorted(tc.times) "Interpolator times are in wrong order"
 end
 
-function lazyload!(itp::DataSetInterpolator, t::DateTime)
+function lazyload!(itp::DataSetInterpolator, t::DateTime, target::AbstractArray)
     lock(itp.lock) do
         tc = itp.cache
         if tc.currenttime == t
             return
         end
         if !tc.initialized # Initialize new interpolator.
-            initialize!(itp, t)
-            update!(itp, t)
+            initialize!(itp, t, target)
+            update!(itp, t, target)
             return
         end
         if t < tc.times[begin] || t >= tc.times[end]
-            update!(itp, t)
+            update!(itp, t, target)
         end
     end
     itp
 end
-function lazyload!(itp::DataSetInterpolator, t::AbstractFloat)
-    lazyload!(itp, Dates.unix2datetime(t))
+function lazyload!(itp::DataSetInterpolator, t::AbstractFloat, target::AbstractArray)
+    lazyload!(itp, Dates.unix2datetime(t), target)
 end
 
 """
@@ -695,15 +720,30 @@ description(itp::DataSetInterpolator) = itp.metadata.description
 """
 $(SIGNATURES)
 
+Allocate a fresh full-grid data buffer matching `itp`'s array backend, eltype,
+and shape. Use this once per direct-call site to obtain a `target` for
+[`lazyload!`](@ref) and the `interp_unsafe(itp, target, t, locs...)` form;
+the MTK callback path manages its own buffer through the parameter system
+and does not call this.
+"""
+function make_data_buffer(itp::DataSetInterpolator{To}) where {To}
+    similar(itp.domain.u_proto, To, itp.grid_size..., itp.cache_size)
+end
+
+"""
+$(SIGNATURES)
+
 Interpolate without checking if the data has been correctly loaded for the given time.
 This convenience method on `DataSetInterpolator` delegates to the array-based `interp_unsafe`.
+`target` is the full-grid buffer that [`lazyload!`](@ref) populated; allocate
+one with [`make_data_buffer`](@ref).
 """
 function interp_unsafe(
         itp::DataSetInterpolator{T1, N, N2},
+        target::AbstractArray,
         t::DateTime,
         locs::Vararg{T2, N2}
 ) where {T1, T2, N, N2}
-    tc = itp.cache
     t_unix = datetime2unix(t)
     t_start, t_step = get_time_grid_params(itp)
     # Compute fractional 1-based indices from cached grid scalars.  All
@@ -714,31 +754,34 @@ function interp_unsafe(
         i -> one(T1) +
              T1((locs[i] - itp.grid_starts[i]) / itp.grid_steps[i]), Val(N2))
     extrap = itp.extrapolate_type isa Real ? zero(T1) : one(T1)
-    interp_unsafe(tc.data_buffer, fit, fis..., extrap)
+    interp_unsafe(target, fit, fis..., extrap)
 end
 
 """
 Interpolation with a unix timestamp.
 """
-function interp_unsafe(
-        itp::DataSetInterpolator, t::Real, locs::Vararg{T, N})::T where {T, N}
-    interp_unsafe(itp, Dates.unix2datetime(t), locs...)
+function interp_unsafe(itp::DataSetInterpolator, target::AbstractArray,
+        t::Real, locs::Vararg{T, N})::T where {T, N}
+    interp_unsafe(itp, target, Dates.unix2datetime(t), locs...)
 end
 
-# Deprecated: use `interp_unsafe` directly.
+# Deprecated: use `interp_unsafe` directly.  `target` is required; allocate
+# one via [`make_data_buffer`](@ref).
 function interp!(
         itp::DataSetInterpolator{T, N, N2},
+        target::AbstractArray,
         t::DateTime,
         locs::Vararg{T, N2}
 )::T where {T, N, N2}
     Base.depwarn("`interp!` is deprecated, use `interp_unsafe` instead.", :interp!)
-    lazyload!(itp, t)
-    interp_unsafe(itp, t, locs...)
+    lazyload!(itp, t, target)
+    interp_unsafe(itp, target, t, locs...)
 end
-function interp!(itp::DataSetInterpolator, t::Real, locs::Vararg{T, N})::T where {T, N}
+function interp!(itp::DataSetInterpolator, target::AbstractArray,
+        t::Real, locs::Vararg{T, N})::T where {T, N}
     Base.depwarn("`interp!` is deprecated, use `interp_unsafe` instead.", :interp!)
-    lazyload!(itp, Dates.unix2datetime(t))
-    interp_unsafe(itp, t, locs...)
+    lazyload!(itp, Dates.unix2datetime(t), target)
+    interp_unsafe(itp, target, t, locs...)
 end
 
 """

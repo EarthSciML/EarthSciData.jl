@@ -132,7 +132,7 @@ using Test
     @test "t" in initialized
 
     # Per-variable gating: variables that no compiled equation references
-    # must NOT have their full-grid `cache.data_buffer` allocated by the
+    # must NOT have their parameter buffer grown from the sentinel by the
     # discrete event firing during `init`.  The init affect prunes them via
     # `needed_vars(integ.f.sys)` so subsequent fires (and the init fire
     # itself) skip `lazyload!` on dead interpolators.

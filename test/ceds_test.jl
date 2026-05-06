@@ -60,11 +60,12 @@ using Test
         (; domain, ts, te) = setup()
         fs = EarthSciData.CEDSFileSet("SO2", ts, te)
         itp = EarthSciData.DataSetInterpolator{Float32}(fs, "SO2_em_anthro", ts, te, domain)
+        buf = EarthSciData.make_data_buffer(itp)
 
-        result = interp!(itp, ts, deg2rad(116.0f0), deg2rad(39.0f0))
+        result = interp!(itp, buf, ts, deg2rad(116.0f0), deg2rad(39.0f0))
         @test result > 0.0f0
 
-        result_ocean = interp!(itp, ts, deg2rad(-170.0f0), deg2rad(0.0f0))
+        result_ocean = interp!(itp, buf, ts, deg2rad(-170.0f0), deg2rad(0.0f0))
         @test result_ocean >= 0.0f0
         @test result_ocean < result
     end
@@ -74,17 +75,20 @@ using Test
         fs_all = EarthSciData.CEDSFileSet("SO2", ts, te)
         itp_all = EarthSciData.DataSetInterpolator{Float32}(
             fs_all, "SO2_em_anthro", ts, te, domain)
-        val_all = interp!(itp_all, ts, deg2rad(116.0f0), deg2rad(39.0f0))
+        buf_all = EarthSciData.make_data_buffer(itp_all)
+        val_all = interp!(itp_all, buf_all, ts, deg2rad(116.0f0), deg2rad(39.0f0))
 
         fs_energy = EarthSciData.CEDSFileSet("SO2", ts, te; sectors = [1])
         itp_energy = EarthSciData.DataSetInterpolator{Float32}(
             fs_energy, "SO2_em_anthro", ts, te, domain)
-        val_energy = interp!(itp_energy, ts, deg2rad(116.0f0), deg2rad(39.0f0))
+        buf_energy = EarthSciData.make_data_buffer(itp_energy)
+        val_energy = interp!(itp_energy, buf_energy, ts, deg2rad(116.0f0), deg2rad(39.0f0))
 
         fs_multi = EarthSciData.CEDSFileSet("SO2", ts, te; sectors = [1, 2])
         itp_multi = EarthSciData.DataSetInterpolator{Float32}(
             fs_multi, "SO2_em_anthro", ts, te, domain)
-        val_multi = interp!(itp_multi, ts, deg2rad(116.0f0), deg2rad(39.0f0))
+        buf_multi = EarthSciData.make_data_buffer(itp_multi)
+        val_multi = interp!(itp_multi, buf_multi, ts, deg2rad(116.0f0), deg2rad(39.0f0))
 
         @test val_energy <= val_multi || val_energy ≈ val_multi
         @test val_multi <= val_all || val_multi ≈ val_all
@@ -95,7 +99,8 @@ using Test
         (; domain, ts, te) = setup()
         fs = EarthSciData.CEDSFileSet("SO2", ts, te)
         itp = EarthSciData.DataSetInterpolator{Float32}(fs, "SO2_em_anthro", ts, te, domain)
-        EarthSciData.lazyload!(itp, ts)
+        buf = EarthSciData.make_data_buffer(itp)
+        EarthSciData.lazyload!(itp, ts, buf)
 
         @test month(itp.cache.times[1]) == 4 || month(itp.cache.times[1]) == 5
         @test month(itp.cache.times[2]) == 5 || month(itp.cache.times[2]) == 6
@@ -105,19 +110,21 @@ using Test
         (; domain, ts, te) = setup()
         fs = EarthSciData.CEDSFileSet("SO2", ts, te)
         itp = EarthSciData.DataSetInterpolator{Float32}(fs, "SO2_em_anthro", ts, te, domain)
+        buf = EarthSciData.make_data_buffer(itp)
 
-        val_china = interp!(itp, ts, deg2rad(116.0f0), deg2rad(39.0f0))
+        val_china = interp!(itp, buf, ts, deg2rad(116.0f0), deg2rad(39.0f0))
         @test val_china > 1.0f-12
         @test val_china < 1.0f-6
 
-        val_sahara = interp!(itp, ts, deg2rad(10.0f0), deg2rad(25.0f0))
+        val_sahara = interp!(itp, buf, ts, deg2rad(10.0f0), deg2rad(25.0f0))
         @test val_sahara >= 0.0f0
         @test val_sahara < val_china * 0.01f0
 
         fs_co = EarthSciData.CEDSFileSet("CO", ts, te)
         itp_co = EarthSciData.DataSetInterpolator{Float32}(
             fs_co, "CO_em_anthro", ts, te, domain)
-        val_co = interp!(itp_co, ts, deg2rad(116.0f0), deg2rad(39.0f0))
+        buf_co = EarthSciData.make_data_buffer(itp_co)
+        val_co = interp!(itp_co, buf_co, ts, deg2rad(116.0f0), deg2rad(39.0f0))
         @test val_co > 0.0f0
         @test val_co != val_china
     end
@@ -134,9 +141,10 @@ using Test
         @test sort(fs.lon_perm) == 1:720
 
         itp = EarthSciData.DataSetInterpolator{Float32}(fs, "SO2_em_anthro", ts, te, domain)
+        buf = EarthSciData.make_data_buffer(itp)
 
-        val_us = interp!(itp, ts, deg2rad(-90.0f0), deg2rad(35.0f0))
-        val_pacific = interp!(itp, ts, deg2rad(170.0f0), deg2rad(35.0f0))
+        val_us = interp!(itp, buf, ts, deg2rad(-90.0f0), deg2rad(35.0f0))
+        val_pacific = interp!(itp, buf, ts, deg2rad(170.0f0), deg2rad(35.0f0))
         @test val_us > val_pacific
     end
 
@@ -187,7 +195,8 @@ using Test
 
         fs = EarthSciData.CEDSFileSet("SO2", ts, te)
         itp = EarthSciData.DataSetInterpolator{Float32}(fs, "SO2_em_anthro", ts, te, domain)
-        rate = interp!(itp, ts, deg2rad(116.0f0), deg2rad(40.0f0))
+        buf = EarthSciData.make_data_buffer(itp)
+        rate = interp!(itp, buf, ts, deg2rad(116.0f0), deg2rad(40.0f0))
         expected_approx = Float64(rate) * 60.0
         @test sol.u[end][1] ≈ expected_approx rtol=0.1
     end

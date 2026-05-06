@@ -177,10 +177,11 @@ end
 
     @testset "interpolation" begin
         (; itp) = setup()
+        buf = EarthSciData.make_data_buffer(itp)
         uvals = []
         times = DateTime(2022, 5, 1):Hour(1):DateTime(2022, 5, 3)
         for t in times
-            push!(uvals, interp!(itp, t, deg2rad(1.0f0), deg2rad(0.0f0), 1.0f0))
+            push!(uvals, interp!(itp, buf, t, deg2rad(1.0f0), deg2rad(0.0f0), 1.0f0))
         end
         for i in 4:3:(length(uvals) - 1)
             @test uvals[i]≈(uvals[i - 1] + uvals[i + 1]) / 2 atol=1e-2
@@ -203,7 +204,7 @@ end
         uvals2 = []
         idx = randperm(length(times))
         for t in times[idx]
-            push!(uvals2, interp!(itp, t, deg2rad(1.0f0), deg2rad(0.0f0), 1.0f0))
+            push!(uvals2, interp!(itp, buf, t, deg2rad(1.0f0), deg2rad(0.0f0), 1.0f0))
         end
         @test uvals2 ≈ uvals[idx]
     end
@@ -250,18 +251,19 @@ end
         times = DateTime(2022, 5, 1):Hour(1):DateTime(2022, 5, 3)
         xs = [0.0f0, 0.25f0, 0.75f0]
 
+        buf = EarthSciData.make_data_buffer(itp)
         uvals = zeros(Float32, length(times), length(xs))
         answers = zeros(Float32, length(times), length(xs))
         for (i, tt) in enumerate(times)
             for (j, x) in enumerate(xs)
-                uvals[i, j] = interp!(itp, tt, (x, x)...)
+                uvals[i, j] = interp!(itp, buf, tt, (x, x)...)
                 answers[i, j] = answer_itp(datetime2unix(tt), x)
             end
         end
 
         @test uvals ≈ answers
 
-        interp!(itp, times[end], xs[end], xs[end])
+        interp!(itp, buf, times[end], xs[end], xs[end])
         @test length(itp.cache.times) == 2
         @test itp.cache.times ==
               [DateTime("2022-05-02T22:30:00"), DateTime("2022-05-03T01:30:00")]
@@ -272,7 +274,7 @@ end
             tt = times[i]
             for j in randperm(length(xs))
                 x = xs[j]
-                uvals[i, j] = interp!(itp, tt, x, x)
+                uvals[i, j] = interp!(itp, buf, tt, x, x)
                 answers[i, j] = answer_itp(datetime2unix(tt), x)
             end
         end
@@ -287,12 +289,13 @@ end
                 domain;
                 stream = false
             )
+            buf = EarthSciData.make_data_buffer(itp)
 
             uvals = zeros(Float32, length(times), length(xs))
             answers = zeros(Float32, length(times), length(xs))
             for (i, tt) in enumerate(times)
                 for (j, x) in enumerate(xs)
-                    uvals[i, j] = interp!(itp, tt, x, x)
+                    uvals[i, j] = interp!(itp, buf, tt, x, x)
                     answers[i, j] = answer_itp(datetime2unix(tt), x)
                 end
             end
@@ -305,8 +308,9 @@ end
         @testset "allocations" begin
             (; t, te, fs, domain) = setup()
             itp = EarthSciData.DataSetInterpolator{Float64}(fs, "U", t, te, domain)
+            buf = EarthSciData.make_data_buffer(itp)
             tt = DateTime(2022, 5, 1)
-            interp!(itp, tt, 1.0, 0.0, 1.0)
+            interp!(itp, buf, tt, 1.0, 0.0, 1.0)
 
             # AllocCheck.jl's safelist was built against pre-1.12 runtime
             # names; Julia 1.12+ emits `jl_get_pgcstack_static` for the GC
@@ -317,20 +321,21 @@ end
                                  occursin("pgcstack", e.name))
 
             @test begin
-                @check_allocs checkf(itp, t, loc1, loc2,
-                    loc3) = EarthSciData.interp_unsafe(itp, t, loc1, loc2, loc3)
+                @check_allocs checkf(itp, target, t, loc1, loc2,
+                    loc3) = EarthSciData.interp_unsafe(itp, target, t, loc1, loc2, loc3)
 
                 real_errors = Any[]
                 try
-                    checkf(itp, tt, 1.0, 0.0, 1.0)
+                    checkf(itp, buf, tt, 1.0, 0.0, 1.0)
                 catch err
                     append!(real_errors, filter(is_real_alloc, err.errors))
                 end
 
                 itp2 = EarthSciData.DataSetInterpolator{Float32}(fs, "U", t, te, domain)
-                interp!(itp2, tt, 1.0f0, 0.0f0, 1.0f0)
+                buf2 = EarthSciData.make_data_buffer(itp2)
+                interp!(itp2, buf2, tt, 1.0f0, 0.0f0, 1.0f0)
                 try
-                    checkf(itp2, tt, 1.0f0, 0.0f0, 1.0f0)
+                    checkf(itp2, buf2, tt, 1.0f0, 0.0f0, 1.0f0)
                 catch err
                     append!(real_errors, filter(is_real_alloc, err.errors))
                 end
@@ -527,8 +532,9 @@ end
         )
 
         # Should be able to interpolate without error
+        buf = EarthSciData.make_data_buffer(itp)
         val = EarthSciData.interp!(
-            itp, DateTime(2022, 5, 1, 1), deg2rad(0.25f0), deg2rad(0.5f0), 1.0f0)
+            itp, buf, DateTime(2022, 5, 1, 1), deg2rad(0.25f0), deg2rad(0.5f0), 1.0f0)
         @test !isnan(val)
         @test isfinite(val)
     end

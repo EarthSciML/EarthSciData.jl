@@ -57,8 +57,9 @@ using Test
         sample_time=DateTime(2020, 6, 15)
 
         itp=EarthSciData.DataSetInterpolator{Float32}(fileset, varname, ts, te, domain)
+        buf=EarthSciData.make_data_buffer(itp)
         # Central Germany (high power plant density)
-        result=EarthSciData.interp!(itp, sample_time, deg2rad(10.0f0), deg2rad(51.0f0))
+        result=EarthSciData.interp!(itp, buf, sample_time, deg2rad(10.0f0), deg2rad(51.0f0))
         @test result >= 0.0f0
     end
 
@@ -69,7 +70,8 @@ using Test
         sample_time=DateTime(2020, 6, 15)
 
         itp=EarthSciData.DataSetInterpolator{Float32}(fileset, varname, ts, te, domain)
-        EarthSciData.lazyload!(itp, sample_time)
+        buf=EarthSciData.make_data_buffer(itp)
+        EarthSciData.lazyload!(itp, sample_time, buf)
         ti=EarthSciData.DataFrequencyInfo(itp.fs.fs)
         @test length(ti.centerpoints) >= 2
         # The cached times should bracket the query month
