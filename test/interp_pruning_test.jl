@@ -104,10 +104,12 @@ using Test
     sys = mtkcompile(sys_unsimp)
 
     # `compose` + `mtkcompile` bypasses `convert(::Type{System}, ::CoupledSystem)`,
-    # so the auto-registered `SysDiscreteEvent` walk doesn't fire.  Invoke
-    # the factory manually here so the test exercises the same prune logic
-    # that auto-registration runs on the coupled-system path.
-    auto_factory(sys)
+    # so the auto-registered `SysDiscreteEvent` walk doesn't fire.  We do NOT
+    # call `auto_factory(sys)` here — the discrete update event's affect runs
+    # the same `_apply_live_mask!` walk on its first fire (using
+    # `integ.f.sys`), so this test verifies the auto-prune-at-init path.
+    @test all(info.itp.cache.initialized == false for info in infos)
+    @test all(info.live[] == true for info in infos)
 
     ps = parameters(sys)
     lat_p = only(filter(p -> endswith(string(Symbol(p)), "₊lat"), ps))

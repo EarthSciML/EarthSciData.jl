@@ -537,8 +537,22 @@ function build_interp_event(interp_infos, starttime::DateTime)
     full_spatial_sizes = [info.itp.grid_size for info in interp_infos]
     full_cache_sizes = [info.itp.cache_size for info in interp_infos]
 
+    # First-fire auto-prune flag.  On the very first affect invocation we
+    # walk `integ.f.sys` and apply `_apply_live_mask!` to settle the `live`
+    # Refs, so `compose + mtkcompile` paths (which bypass
+    # `convert(::Type{System}, ::CoupledSystem)` and therefore the
+    # `SysDiscreteEvent` factory walk) get the same gating as the coupled
+    # path.  Idempotent w.r.t. the factory: if pruning already ran at
+    # convert time, the second pass leaves the `false` flags alone.
+    prune_done = Ref(false)
+
     function update_data!(modified, observed, ctx, integ)
         lock(update_lock) do
+            if !prune_done[]
+                sys = integ.f.sys
+                _apply_live_mask!(interp_infos, sys)
+                prune_done[] = true
+            end
             mod_input = values(modified)
             # Pre-fill so dead slots and the scalar tstart/tstep slots have
             # valid current values when we assemble the return NamedTuple.
@@ -645,10 +659,12 @@ extra = EarthSciMLBase.operator_vars(csys, parent_sys, domain)
 EarthSciData.prune_unused_interps!(emis, parent_sys; extra_needed = extra)
 ```
 """
-function prune_unused_interps!(loader_sys, parent_sys; extra_needed = ())
-    interp_infos = ModelingToolkit.getmetadata(
-        loader_sys, InterpInfos, nothing)
-    isnothing(interp_infos) && return loader_sys
+# Single source of truth for the live-mask walk: substitute observed equations
+# into each state equation's RHS and collect the names of every referenced
+# variable.  Then mark each `interp_info` whose data symbol does not appear in
+# the resulting set as `live[] = false`.  Used by `prune_unused_interps!`,
+# `make_prune_factory`, and the affect's first-fire auto-prune path.
+function _apply_live_mask!(interp_infos, parent_sys; extra_needed = ())
     bare_data_syms = [string(EarthSciMLBase.var2symbol(info.data_sym))
                       for info in interp_infos]
     obs_subst = Dict{Any, Any}()
@@ -674,6 +690,14 @@ function prune_unused_interps!(loader_sys, parent_sys; extra_needed = ())
             ok || (interp_infos[k].live[] = false)
         end
     end
+    return is_needed
+end
+
+function prune_unused_interps!(loader_sys, parent_sys; extra_needed = ())
+    interp_infos = ModelingToolkit.getmetadata(
+        loader_sys, InterpInfos, nothing)
+    isnothing(interp_infos) && return loader_sys
+    _apply_live_mask!(interp_infos, parent_sys; extra_needed = extra_needed)
     return loader_sys
 end
 
@@ -717,32 +741,7 @@ does include `operator_vars`).
 """
 function make_prune_factory(interp_infos)
     return function (parent_sys)
-        # Reuse the public function; `interp_infos` is already captured.
-        # We need a temp `loader_sys`-shaped object to call into the helper.
-        # Inline the equation/observed walk instead to avoid round-tripping
-        # through `getmetadata`.
-        bare_data_syms = [string(EarthSciMLBase.var2symbol(info.data_sym))
-                          for info in interp_infos]
-        obs_subst = Dict{Any, Any}()
-        for eq in ModelingToolkit.observed(parent_sys)
-            obs_subst[eq.lhs] = eq.rhs
-        end
-        referenced = Set{String}()
-        for eq in ModelingToolkit.equations(parent_sys)
-            substed = isempty(obs_subst) ? eq.rhs :
-                      Symbolics.fixpoint_sub(eq.rhs, obs_subst)
-            for v in Symbolics.get_variables(substed)
-                push!(referenced, string(EarthSciMLBase.var2symbol(v)))
-            end
-        end
-        is_needed = [bare in referenced ||
-                     any(s -> endswith(s, "₊" * bare), referenced)
-                     for bare in bare_data_syms]
-        if any(is_needed)
-            for (k, ok) in enumerate(is_needed)
-                ok || (interp_infos[k].live[] = false)
-            end
-        end
+        _apply_live_mask!(interp_infos, parent_sys)
         return nothing
     end
 end
