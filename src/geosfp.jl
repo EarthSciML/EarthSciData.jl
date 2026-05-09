@@ -209,171 +209,220 @@ Base.close(fs::GEOSFPFileSet) =
         close(fs.ds);
     end
 
-# Hybrid grid parameters from https://wiki.seas.harvard.edu/geos-chem/index.php/GEOS-Chem_vertical_grids
-const Ap = DataInterpolations.LinearInterpolation(
-    [
-        0.000000e+00,
-        4.804826e-02,
-        6.593752e+00,
-        1.313480e+01,
-        1.961311e+01,
-        2.609201e+01,
-        3.257081e+01,
-        3.898201e+01,
-        4.533901e+01,
-        5.169611e+01,
-        5.805321e+01,
-        6.436264e+01,
-        7.062198e+01,
-        7.883422e+01,
-        8.909992e+01,
-        9.936521e+01,
-        1.091817e+02,
-        1.189586e+02,
-        1.286959e+02,
-        1.429100e+02,
-        1.562600e+02,
-        1.696090e+02,
-        1.816190e+02,
-        1.930970e+02,
-        2.032590e+02,
-        2.121500e+02,
-        2.187760e+02,
-        2.238980e+02,
-        2.243630e+02,
-        2.168650e+02,
-        2.011920e+02,
-        1.769300e+02,
-        1.503930e+02,
-        1.278370e+02,
-        1.086630e+02,
-        9.236572e+01,
-        7.851231e+01,
-        6.660341e+01,
-        5.638791e+01,
-        4.764391e+01,
-        4.017541e+01,
-        3.381001e+01,
-        2.836781e+01,
-        2.373041e+01,
-        1.979160e+01,
-        1.645710e+01,
-        1.364340e+01,
-        1.127690e+01,
-        9.292942e+00,
-        7.619842e+00,
-        6.216801e+00,
-        5.046801e+00,
-        4.076571e+00,
-        3.276431e+00,
-        2.620211e+00,
-        2.084970e+00,
-        1.650790e+00,
-        1.300510e+00,
-        1.019440e+00,
-        7.951341e-01,
-        6.167791e-01,
-        4.758061e-01,
-        3.650411e-01,
-        2.785261e-01,
-        2.113490e-01,
-        1.594950e-01,
-        1.197030e-01,
-        8.934502e-02,
-        6.600001e-02,
-        4.758501e-02,
-        3.270000e-02,
-        2.000000e-02,
-        1.000000e-02
-    ] .* 100,
-    1:73
-) # Pa
+# Hybrid-grid Ap and Bp coefficients for GEOS-FP, tabulated at integer
+# vertical levels 1..73.  Pressure at fractional level `lev` is
+# `P_unit * Ap(lev) + Bp(lev) * Ps`, with `Ap`/`Bp` piecewise linear.
+# Source: https://wiki.seas.harvard.edu/geos-chem/index.php/GEOS-Chem_vertical_grids
+const _Ap_data = [
+    0.000000e+00,
+    4.804826e-02,
+    6.593752e+00,
+    1.313480e+01,
+    1.961311e+01,
+    2.609201e+01,
+    3.257081e+01,
+    3.898201e+01,
+    4.533901e+01,
+    5.169611e+01,
+    5.805321e+01,
+    6.436264e+01,
+    7.062198e+01,
+    7.883422e+01,
+    8.909992e+01,
+    9.936521e+01,
+    1.091817e+02,
+    1.189586e+02,
+    1.286959e+02,
+    1.429100e+02,
+    1.562600e+02,
+    1.696090e+02,
+    1.816190e+02,
+    1.930970e+02,
+    2.032590e+02,
+    2.121500e+02,
+    2.187760e+02,
+    2.238980e+02,
+    2.243630e+02,
+    2.168650e+02,
+    2.011920e+02,
+    1.769300e+02,
+    1.503930e+02,
+    1.278370e+02,
+    1.086630e+02,
+    9.236572e+01,
+    7.851231e+01,
+    6.660341e+01,
+    5.638791e+01,
+    4.764391e+01,
+    4.017541e+01,
+    3.381001e+01,
+    2.836781e+01,
+    2.373041e+01,
+    1.979160e+01,
+    1.645710e+01,
+    1.364340e+01,
+    1.127690e+01,
+    9.292942e+00,
+    7.619842e+00,
+    6.216801e+00,
+    5.046801e+00,
+    4.076571e+00,
+    3.276431e+00,
+    2.620211e+00,
+    2.084970e+00,
+    1.650790e+00,
+    1.300510e+00,
+    1.019440e+00,
+    7.951341e-01,
+    6.167791e-01,
+    4.758061e-01,
+    3.650411e-01,
+    2.785261e-01,
+    2.113490e-01,
+    1.594950e-01,
+    1.197030e-01,
+    8.934502e-02,
+    6.600001e-02,
+    4.758501e-02,
+    3.270000e-02,
+    2.000000e-02,
+    1.000000e-02
+] .* 100  # Pa
 
-# Handle units
-ModelingToolkit.get_unit(::typeof(Ap)) = 1.0
-ModelingToolkit.get_unit(::typeof(DataInterpolations.derivative), args) = 1.0
-Latexify.@latexrecipe function f(itp::typeof(Ap))
-    return "$(nameof(itp))_interp"
+const _Bp_data = [
+    1.000000e+00,
+    9.849520e-01,
+    9.634060e-01,
+    9.418650e-01,
+    9.203870e-01,
+    8.989080e-01,
+    8.774290e-01,
+    8.560180e-01,
+    8.346609e-01,
+    8.133039e-01,
+    7.919469e-01,
+    7.706375e-01,
+    7.493782e-01,
+    7.211660e-01,
+    6.858999e-01,
+    6.506349e-01,
+    6.158184e-01,
+    5.810415e-01,
+    5.463042e-01,
+    4.945902e-01,
+    4.437402e-01,
+    3.928911e-01,
+    3.433811e-01,
+    2.944031e-01,
+    2.467411e-01,
+    2.003501e-01,
+    1.562241e-01,
+    1.136021e-01,
+    6.372006e-02,
+    2.801004e-02,
+    6.960025e-03,
+    8.175413e-09,
+    0.000000e+00,
+    0.000000e+00,
+    0.000000e+00,
+    0.000000e+00,
+    0.000000e+00,
+    0.000000e+00,
+    0.000000e+00,
+    0.000000e+00,
+    0.000000e+00,
+    0.000000e+00,
+    0.000000e+00,
+    0.000000e+00,
+    0.000000e+00,
+    0.000000e+00,
+    0.000000e+00,
+    0.000000e+00,
+    0.000000e+00,
+    0.000000e+00,
+    0.000000e+00,
+    0.000000e+00,
+    0.000000e+00,
+    0.000000e+00,
+    0.000000e+00,
+    0.000000e+00,
+    0.000000e+00,
+    0.000000e+00,
+    0.000000e+00,
+    0.000000e+00,
+    0.000000e+00,
+    0.000000e+00,
+    0.000000e+00,
+    0.000000e+00,
+    0.000000e+00,
+    0.000000e+00,
+    0.000000e+00,
+    0.000000e+00,
+    0.000000e+00,
+    0.000000e+00,
+    0.000000e+00,
+    0.000000e+00
+]
+
+# Piecewise linear interpolation over integer knots `1..length(coeffs)`.
+# `levx` outside the knot range is clamped (Flat extrapolation, matching
+# the previous DataInterpolations default).
+@inline function _hybrid_lerp(coeffs::AbstractVector, levx)
+    n = length(coeffs)
+    i = clamp(unsafe_trunc(Int, levx), 1, n - 1)
+    f = levx - i
+    return coeffs[i] * (1 - f) + coeffs[i + 1] * f
 end
 
-const Bp = DataInterpolations.LinearInterpolation(
-    [
-        1.000000e+00,
-        9.849520e-01,
-        9.634060e-01,
-        9.418650e-01,
-        9.203870e-01,
-        8.989080e-01,
-        8.774290e-01,
-        8.560180e-01,
-        8.346609e-01,
-        8.133039e-01,
-        7.919469e-01,
-        7.706375e-01,
-        7.493782e-01,
-        7.211660e-01,
-        6.858999e-01,
-        6.506349e-01,
-        6.158184e-01,
-        5.810415e-01,
-        5.463042e-01,
-        4.945902e-01,
-        4.437402e-01,
-        3.928911e-01,
-        3.433811e-01,
-        2.944031e-01,
-        2.467411e-01,
-        2.003501e-01,
-        1.562241e-01,
-        1.136021e-01,
-        6.372006e-02,
-        2.801004e-02,
-        6.960025e-03,
-        8.175413e-09,
-        0.000000e+00,
-        0.000000e+00,
-        0.000000e+00,
-        0.000000e+00,
-        0.000000e+00,
-        0.000000e+00,
-        0.000000e+00,
-        0.000000e+00,
-        0.000000e+00,
-        0.000000e+00,
-        0.000000e+00,
-        0.000000e+00,
-        0.000000e+00,
-        0.000000e+00,
-        0.000000e+00,
-        0.000000e+00,
-        0.000000e+00,
-        0.000000e+00,
-        0.000000e+00,
-        0.000000e+00,
-        0.000000e+00,
-        0.000000e+00,
-        0.000000e+00,
-        0.000000e+00,
-        0.000000e+00,
-        0.000000e+00,
-        0.000000e+00,
-        0.000000e+00,
-        0.000000e+00,
-        0.000000e+00,
-        0.000000e+00,
-        0.000000e+00,
-        0.000000e+00,
-        0.000000e+00,
-        0.000000e+00,
-        0.000000e+00,
-        0.000000e+00,
-        0.000000e+00,
-        0.000000e+00,
-        0.000000e+00,
-        0.000000e+00
-    ],
-    1:73
-)
+# Piecewise constant slope between adjacent knots — the closed-form
+# derivative of `_hybrid_lerp` w.r.t. `levx`.
+@inline function _hybrid_lerp_deriv(coeffs::AbstractVector, levx)
+    n = length(coeffs)
+    i = clamp(unsafe_trunc(Int, levx), 1, n - 1)
+    return coeffs[i + 1] - coeffs[i]
+end
+
+# Symbolic-traceable `Ap`/`Bp` and their derivatives.  Replaces the
+# previous `DataInterpolations.LinearInterpolation` constants so the
+# pressure equation traces through `@register_symbolic` functions with
+# explicit derivatives, avoiding the `get_unit(::typeof(...))` and
+# Latexify shims that the DataInterpolations approach required.
+Ap(levx::Real) = _hybrid_lerp(_Ap_data, levx)
+Bp(levx::Real) = _hybrid_lerp(_Bp_data, levx)
+Ap_deriv(levx::Real) = _hybrid_lerp_deriv(_Ap_data, levx)
+Bp_deriv(levx::Real) = _hybrid_lerp_deriv(_Bp_data, levx)
+
+# Unit-inference shims: Ap and Bp are dimensionless (the Pa unit on
+# pressure is applied via `P_unit` at the call site).  Their derivatives
+# w.r.t. lev are therefore also dimensionless.  Both the 1-arg form
+# (matched on the operation type during older code paths) and the 2-arg
+# `(op, args)` form (used by MTK's `get_unit(Term)` fallback) are
+# overridden so the unit walker doesn't try to call `Ap(unit_quantity)`
+# directly, which would fail because `Ap`'s `Real` method does not
+# accept a `DynamicQuantities.Quantity`.
+ModelingToolkit.get_unit(::typeof(Ap)) = 1.0
+ModelingToolkit.get_unit(::typeof(Bp)) = 1.0
+ModelingToolkit.get_unit(::typeof(Ap_deriv)) = 1.0
+ModelingToolkit.get_unit(::typeof(Bp_deriv)) = 1.0
+ModelingToolkit.get_unit(::typeof(Ap), args) = 1.0
+ModelingToolkit.get_unit(::typeof(Bp), args) = 1.0
+ModelingToolkit.get_unit(::typeof(Ap_deriv), args) = 1.0
+ModelingToolkit.get_unit(::typeof(Bp_deriv), args) = 1.0
+
+@register_symbolic Ap(levx::Real)
+@register_symbolic Bp(levx::Real)
+@register_symbolic Ap_deriv(levx::Real)
+@register_symbolic Bp_deriv(levx::Real)
+
+@register_derivative Ap(levx) 1 Ap_deriv(levx)
+@register_derivative Bp(levx) 1 Bp_deriv(levx)
+
+# Unit-inference shim for `DataInterpolations.derivative` — used by era5.jl
+# which still relies on `DataInterpolations.LinearInterpolation`.  Kept here
+# (rather than in era5.jl) because it has historically lived next to the
+# Ap/Bp shims and removing it from this file silently broke era5's unit
+# checking.
+ModelingToolkit.get_unit(::typeof(DataInterpolations.derivative), args) = 1.0
 
 struct GEOSFPCoupler
     sys::Any
