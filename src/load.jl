@@ -310,7 +310,7 @@ on a non-CPU device, that the regridder writes into before a single
 $(FIELDS)
 """
 mutable struct TemporalCache{To, N, N2}
-    "Buffer that data is read into from file (separate from the data buffer for async loading)."
+    "Buffer that data is read into from file before the regridder runs."
     load_cache::Array{To, N2}
     "Host-side full-grid scratch for cross-device runs; `nothing` when the parameter buffer is itself a CPU `Array`."
     host_scratch::Union{Nothing, Array{To, N}}
@@ -318,8 +318,6 @@ mutable struct TemporalCache{To, N, N2}
     times::Vector{DateTime}
     "The current time that the interpolator has been loaded for."
     currenttime::DateTime
-    "Async task for loading the next time step."
-    loadtask::Task
     "Whether the cache has been initialized with real data."
     initialized::Bool
 end
@@ -409,10 +407,9 @@ mutable struct DataSetInterpolator{To, N, N2, FT, DomT, ET, FSRG}
         grid_steps = ntuple(i -> To(step(reordered[i])), N2)
         grid_size = ntuple(i -> Int(length(reordered[i])), N2)
 
-        td = Threads.@spawn (() -> DateTime(0, 1, 10))() # Placeholder for async loading task.
         tc = TemporalCache{To, N, N2}(
             load_cache, nothing, times,
-            DateTime(1, 1, 1), td, false
+            DateTime(1, 1, 1), false
         )
         itp = new{To, N, N2, FT, typeof(domain), typeof(extrapolate_type), typeof(fs)}(
             fs,
@@ -496,15 +493,6 @@ end
 
 # create_interpolator! and update_interpolator! have been removed.
 # Interpolation is now done by the array-based interp_unsafe functions.
-
-"""
-Return the next interpolation time point for this interpolator.
-"""
-function nexttimepoint(itp::DataSetInterpolator, t::DateTime)
-    ti = DataFrequencyInfo(itp.fs.fs)
-    ci = centerpoint_index(ti, t)
-    ti.centerpoints[min(length(ti.centerpoints), ci + 1)]
-end
 
 """
 Return the previous interpolation time point for this interpolator.
@@ -658,14 +646,8 @@ function update!(itp::DataSetInterpolator, t::DateTime, target::AbstractArray)
             continue
         end
         d = selectdim(rt, N, idx)
-        if fetch(tc.loadtask) != times[idx] # Check if correct time is already loaded.
-            load_data_for_time!(itp, times[idx]) # Load data if not already loaded.
-        end
-        # Regrid results into the data buffer.
+        load_data_for_time!(itp, times[idx])
         itp.fs.regridder(d, tc.load_cache; extrapolate_type = itp.extrapolate_type)
-        # Start loading the next time point asynchronously.
-        tc.loadtask = Threads.@spawn load_data_for_time!(
-            itp, nexttimepoint(itp, times[idx]))
     end
     if rt !== target
         copyto!(target, rt)
