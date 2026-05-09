@@ -543,14 +543,20 @@ function build_interp_event(interp_infos, starttime::DateTime)
     # `convert(::Type{System}, ::CoupledSystem)` and therefore the
     # `SysDiscreteEvent` factory walk) get the same gating as the coupled
     # path.  Idempotent w.r.t. the factory: if pruning already ran at
-    # convert time, the second pass leaves the `false` flags alone.
+    # convert time, the second pass leaves the `false` flags alone.  Some
+    # operator-split solvers (`SolverStrangSerial/Threads`, `SolverIMEX`)
+    # build inner integrators whose `integ.f.sys` is `nothing`; in those
+    # cases we skip auto-pruning and rely on the convert-time factory walk,
+    # which has already settled `live[]` for that path.
     prune_done = Ref(false)
 
     function update_data!(modified, observed, ctx, integ)
         lock(update_lock) do
             if !prune_done[]
-                sys = integ.f.sys
-                _apply_live_mask!(interp_infos, sys)
+                sys = isdefined(integ.f, :sys) ? integ.f.sys : nothing
+                if sys !== nothing
+                    _apply_live_mask!(interp_infos, sys)
+                end
                 prune_done[] = true
             end
             mod_input = values(modified)

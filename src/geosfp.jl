@@ -50,6 +50,10 @@ struct GEOSFPFileSet <: FileSet
     filetype::Any
     ds::Any
     freq_info::DataFrequencyInfo
+    # Per-variable metadata cache, populated once at construction. Lookups by
+    # `loadmetadata` and `varnames` no longer hit the NetCDF or `nclock`.
+    var_names::Vector{String}
+    metadata_cache::Dict{String, MetaData}
     function GEOSFPFileSet(domain, filetype, starttime, endtime)
         GEOSFPFileSet(
             "https://geos-chem.s3-us-west-2.amazonaws.com",
@@ -66,7 +70,9 @@ struct GEOSFPFileSet <: FileSet
             domain,
             filetype,
             nothing,
-            DataFrequencyInfo(starttime, Day(1), check_times)
+            DataFrequencyInfo(starttime, Day(1), check_times),
+            String[],
+            Dict{String, MetaData}()
         )
         filepaths = maybedownload.((fs_temp,), check_times)
 
@@ -83,9 +89,63 @@ struct GEOSFPFileSet <: FileSet
             times = ds["time"][:]
             dfi = DataFrequencyInfo(file_start, frequency, times)
 
-            return new(mirror, domain, filetype, ds, dfi)
+            var_names = collect(String, setdiff(keys(ds), keys(ds.dim)))
+            metadata_cache = Dict{String, MetaData}()
+            for varname in var_names
+                metadata_cache[varname] = _build_geosfp_metadata(ds, varname, filetype)
+            end
+
+            return new(mirror, domain, filetype, ds, dfi, var_names, metadata_cache)
         end
     end
+end
+
+# Build a `MetaData` for one variable in an open NetCDF dataset. Called from
+# the GEOSFPFileSet constructor under `nclock`, never from the simulation
+# hot path. Coordinate conversion to radians is done out-of-place so the
+# returned vectors don't alias NCDataset's internal buffers.
+function _build_geosfp_metadata(ds, varname, filetype)
+    timedim = "time"
+    var = ds[varname]
+    dims = collect(NCDatasets.dimnames(var))
+    @assert timedim ∈ dims "Variable $varname does not have a dimension named '$timedim'."
+    time_index = findfirst(isequal(timedim), dims)
+    dims = deleteat!(dims, time_index)
+    varsize = deleteat!(collect(size(var)), time_index)
+    unit_str = var.attrib["units"]
+    description = var.attrib["long_name"]
+    @assert var.attrib["scale_factor"]==1.0 "Unexpected scale factor."
+    # `ds[d][:]` returns the dimension array in its native NetCDF eltype
+    # (often Float32). Stay in that precision through `deg2rad` so the
+    # coords match the historical numerical pipeline byte-for-byte;
+    # `MetaData`'s constructor promotes to Float64 afterwards.
+    coords = Any[ds[d][:] for d in dims]
+
+    xdim = findfirst((x) -> x == "lon", dims)
+    ydim = findfirst((x) -> x == "lat", dims)
+    zdim = findfirst((x) -> x == "lev", dims)
+    zdim = isnothing(zdim) ? -1 : zdim
+    @assert xdim>0 "GEOSFP `lon` dimension not found"
+    @assert ydim>0 "GEOSFP `lat` dimension not found"
+    # Out-of-place `deg2rad` (not `.=`) so the returned vectors don't alias
+    # any NCDataset-cached buffer.
+    coords[xdim] = deg2rad.(coords[xdim])
+    coords[ydim] = deg2rad.(coords[ydim])
+
+    staggering = geosfp_staggering(filetype, varname)
+    prj = "+proj=longlat +datum=WGS84 +no_defs"
+    return MetaData(
+        coords,
+        unit_str,
+        description,
+        dims,
+        varsize,
+        prj,
+        xdim,
+        ydim,
+        zdim,
+        staggering
+    )
 end
 
 """
@@ -131,63 +191,18 @@ end
 """
 $(SIGNATURES)
 
-Load the data for the given variable name at the given time.
+Return the metadata for the given variable. Reads from a per-`FileSet`
+cache populated at construction time, so no NetCDF read or `nclock`
+acquire happens here.
 """
-function loadmetadata(fs::GEOSFPFileSet, varname)::MetaData
-    lock(nclock) do
-        timedim = "time"
-        var = fs.ds[varname]
-        dims = collect(NCDatasets.dimnames(var))
-        @assert timedim ∈ dims "Variable $varname does not have a dimension named '$timedim'."
-        time_index = findfirst(isequal(timedim), dims)
-        dims = deleteat!(dims, time_index)
-        varsize = deleteat!(collect(size(var)), time_index)
-        unit_str = var.attrib["units"]
-        description = var.attrib["long_name"]
-        @assert var.attrib["scale_factor"]==1.0 "Unexpected scale factor."
-        coords = [fs.ds[d][:] for d in dims]
-
-        xdim = findfirst((x) -> x == "lon", dims)
-        ydim = findfirst((x) -> x == "lat", dims)
-        zdim = findfirst((x) -> x == "lev", dims)
-        zdim = isnothing(zdim) ? -1 : zdim
-        @assert xdim>0 "GEOSFP `lon` dimension not found"
-        @assert ydim>0 "GEOSFP `lat` dimension not found"
-        # Convert from degrees to radians (so we are using SI units)
-        coords[xdim] .= deg2rad.(coords[xdim])
-        coords[ydim] .= deg2rad.(coords[ydim])
-
-        staggering = geosfp_staggering(fs.filetype, varname)
-
-        # This projection will assume the inputs are radians when used within
-        # a Proj pipeline: https://proj.org/en/9.3/operations/pipeline.html
-        prj = "+proj=longlat +datum=WGS84 +no_defs"
-
-        return MetaData(
-            coords,
-            unit_str,
-            description,
-            dims,
-            varsize,
-            prj,
-            xdim,
-            ydim,
-            zdim,
-            staggering
-        )
-    end
-end
+loadmetadata(fs::GEOSFPFileSet, varname)::MetaData = fs.metadata_cache[varname]
 
 """
 $(SIGNATURES)
 
 Return the variable names associated with this FileSet.
 """
-function varnames(fs::GEOSFPFileSet)
-    lock(nclock) do
-        return [setdiff(keys(fs.ds), keys(fs.ds.dim))...]
-    end
-end
+varnames(fs::GEOSFPFileSet) = fs.var_names
 
 Base.close(fs::GEOSFPFileSet) =
     lock(nclock) do ;
