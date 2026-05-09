@@ -531,11 +531,12 @@ function build_interp_event(interp_infos, starttime::DateTime)
     # Per-interp first-fire flags.  The parameter starts out wrapping a 2^N
     # sentinel; the first fire allocates a full-grid buffer via
     # `similar(domain.u_proto, ...)` so the array backend matches the state
-    # vector.  Using an explicit flag (rather than inferring from size) is
-    # robust for test domains whose actual grid happens to be 2^N.
+    # vector.  An explicit flag (rather than `size(buf) != full_size`) is
+    # robust for the pathological case of a test domain whose grid happens
+    # to be 2^N.  The full grid + cache sizes are taken from the per-DSI
+    # `grid_size`/`cache_size` fields rather than parallel arrays, since
+    # those fields are already populated at DSI construction.
     grown = falses(n_interps)
-    full_spatial_sizes = [info.itp.grid_size for info in interp_infos]
-    full_cache_sizes = [info.itp.cache_size for info in interp_infos]
 
     # First-fire auto-prune flag.  On the very first affect invocation we
     # walk `integ.f.sys` and apply `_apply_live_mask!` to settle the `live`
@@ -581,7 +582,7 @@ function build_interp_event(interp_infos, starttime::DateTime)
                     # the parameter object and subsequent fires reuse it
                     # in place via `lazyload!`.
                     buf = similar(dsi.domain.u_proto, eltype(buf),
-                        full_spatial_sizes[i]..., full_cache_sizes[i])
+                        dsi.grid_size..., dsi.cache_size)
                     fill!(buf, zero(eltype(buf)))
                     grown[i] = true
                 end
