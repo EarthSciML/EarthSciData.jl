@@ -193,21 +193,22 @@ function create_interp_equation(itp::DataSetInterpolator{To}, filename, t, t_ref
     # Time grid discretes — scalar defaults work fine in MTK.
     #
     # Choose initial defaults such that the computed fractional time index
-    # `fit = 1 + (t_ref + t - p_tstart) / p_tstep` lands at `1.0` when
-    # `t = 0`.  This matters because ODE solvers evaluate the RHS *once*
-    # during `init(prob, alg)` BEFORE firing the discrete callback's
-    # `initialize` affect (the Tsit5 FSAL call in `Tsit5Cache.initialize!`
-    # runs first).  At that point the data buffer is still zeros, but we
-    # need `fit` to be in `[1, nt]` so `@boundscheck` doesn't fire on an
-    # uninitialized interpolator.  Setting `p_tstart = t_ref` yields
-    # `fit = 1` and `interp_unsafe` returns zero from the zero buffer —
-    # same behaviour as before the bounds check was added.  The callback's
-    # initialize affect subsequently overwrites both defaults with real
-    # values from the loaded cache.
+    # `fit = 1 + (t_ref + t - p_tstart) / p_tstep` lands at `1.0` regardless
+    # of the integrator's `t`.  This matters because ODE solvers evaluate
+    # the RHS *once* during `init(prob, alg)` BEFORE firing the discrete
+    # callback's `initialize` affect (the Tsit5 FSAL call in
+    # `Tsit5Cache.initialize!` runs first).  At that point the data buffer
+    # is still zeros, but we need `fit` to be in `[1, nt]` so `@boundscheck`
+    # doesn't fire on an uninitialized interpolator.  Setting
+    # `p_tstep = Inf` yields `fit = 1 + finite/∞ = 1` for any `(t_ref, t,
+    # p_tstart)` triple, so the FSAL pre-call works regardless of the
+    # caller's `tspan` / `t_ref` convention (e.g., `tspan[1] != 0`).
+    # The callback's initialize affect subsequently overwrites both
+    # defaults with real values from the loaded cache.
     n_tstart = Symbol(n, :_tstart)
     n_tstep = Symbol(n, :_tstep)
     ts_default = EarthSciMLBase.get_tref(itp.domain)
-    tstep_default = 1.0
+    tstep_default = Inf
     # `@parameters` (not `@discretes`) — see rationale on `_make_array_discrete`.
     # These parameters *are* updated by the discrete event at the same time
     # `_data` is, but leaving them as `(t)`-dependent `@discretes` makes
