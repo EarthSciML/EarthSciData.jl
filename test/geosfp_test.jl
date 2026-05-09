@@ -106,6 +106,16 @@ end
     end
 
     @testset "GEOS-FP pressure levels" begin
+        # `P` is the hybrid-grid pressure
+        # `P_unit * Ap(lev) + Bp(lev) * I3.PS`. The `lev` dependence is
+        # purely analytical (piecewise linear in `Ap` and `Bp`); only
+        # the surface pressure `I3.PS` reads from the NetCDF, and that
+        # read is at fixed `(lon, lat)`, independent of `lev`. So the
+        # six `lev` values below exercise the analytical pressure
+        # formula at one fixed grid point — the data interpolation is
+        # what provides `PS`, not what differentiates the six results.
+        # For high `lev` (≥72), `Bp(lev) = 0`, so `P` collapses to
+        # `Ap(lev)` (≈ 2, 1.5, 1 Pa).
         (; compiled) = setup_solved()
         prob = ODEProblem(compiled, [], (24.0 * 3600, 48.0 * 3600))
         integ = init(prob, Tsit5())
