@@ -587,72 +587,119 @@ function load_data_for_time!(itp::DataSetInterpolator, t::DateTime)
     return t
 end
 
-function update!(itp::DataSetInterpolator, t::DateTime, target::AbstractArray)
-    tc = itp.cache
-    @assert tc.initialized "Interpolator has not been initialized"
-    times = interp_cache_times!(itp, t) # Figure out which times we need.
-    rt = regrid_target_for(tc, target)
-    N = ndims(rt)
-    n_new = length(times)
-    n_old = length(tc.times)
+"""
+Description of how to advance a `TemporalCache`'s time window from `old_times`
+to `new_times`. The fields define a *single contiguous overlap*: indices
+`first_new : (first_new + overlap_count - 1)` of the new window correspond
+to old-window indices shifted by `delta = old_idx - new_idx`. Slots outside
+that range are missing and must be reloaded from disk.
 
-    # Find the overlap between the times we already have (`tc.times`) and
-    # the times we need (`times`). Both vectors are sorted contiguous windows
-    # over the same centerpoint list, so a single merge walk in O(n + m)
-    # finds every matching pair with no allocations. For any overlap, the
-    # index offset `delta = old - new` is constant; we use it to drive one
-    # in-place shift instead of allocating intersect/findfirst/setdiff
-    # vectors as the previous implementation did.
+Both vectors come from `interp_cache_times!`, which slides a window of fixed
+length over the dataset's monotonically-increasing centerpoint list. That
+invariant guarantees at most one overlap region with a single constant
+`delta`, which is why the in-place shift below is sound. The struct is the
+documented surface area for this invariant; helpers below operate on it.
+
+Fields
+- `first_new`     — first 1-based index in `new_times` covered by overlap
+                    (`0` when no overlap)
+- `overlap_count` — number of consecutive new-window slots covered by
+                    overlap
+- `delta`         — `old_idx - new_idx` for any slot in the overlap
+"""
+struct _CacheAdvancePlan
+    first_new::Int
+    overlap_count::Int
+    delta::Int
+end
+
+# Build a `_CacheAdvancePlan` by merge-walking the two sorted windows in
+# O(n + m) with no allocations.  Errors out if the overlap is non-contiguous
+# (which would indicate the `interp_cache_times!` invariant has been
+# violated, e.g. by a future refactor that allows non-monotonic windows).
+function _plan_cache_advance(old_times, new_times)
+    n_new = length(new_times)
+    n_old = length(old_times)
     first_new = 0
     delta = 0
     overlap_count = 0
     j = 1
     @inbounds for i in 1:n_new
-        while j <= n_old && tc.times[j] < times[i]
+        while j <= n_old && old_times[j] < new_times[i]
             j += 1
         end
-        if j <= n_old && tc.times[j] == times[i]
+        if j <= n_old && old_times[j] == new_times[i]
             if overlap_count == 0
                 first_new = i
                 delta = j - i
             elseif j - i != delta
-                error("Unexpected time ordering in cache update")
+                error("Non-contiguous cache overlap (delta jumped from " *
+                      "$delta to $(j - i)); `interp_cache_times!` is " *
+                      "expected to return a contiguous sliding window.")
             end
             overlap_count += 1
             j += 1
         end
     end
+    return _CacheAdvancePlan(first_new, overlap_count, delta)
+end
 
-    # Move overlapping data in place when the overlap has shifted.
-    if overlap_count > 0 && delta != 0
-        if delta > 0
-            # Source indices are higher than destinations — walk forward.
-            @inbounds for i in first_new:(first_new + overlap_count - 1)
-                selectdim(rt, N, i) .= selectdim(rt, N, i + delta)
-            end
-        else
-            # Source indices are lower than destinations — walk backward.
-            @inbounds for i in (first_new + overlap_count - 1):-1:first_new
-                selectdim(rt, N, i) .= selectdim(rt, N, i + delta)
-            end
+# Shift overlapping slices into their new positions along the last
+# (time) dim. Walk direction is chosen to avoid clobbering: forward when
+# sources sit at higher indices than destinations, backward otherwise.
+function _shift_overlap_in_place!(rt::AbstractArray, plan::_CacheAdvancePlan)
+    plan.overlap_count == 0 && return
+    plan.delta == 0 && return
+    N = ndims(rt)
+    first_new = plan.first_new
+    last_new = first_new + plan.overlap_count - 1
+    delta = plan.delta
+    if delta > 0
+        @inbounds for i in first_new:last_new
+            selectdim(rt, N, i) .= selectdim(rt, N, i + delta)
+        end
+    else
+        @inbounds for i in last_new:-1:first_new
+            selectdim(rt, N, i) .= selectdim(rt, N, i + delta)
         end
     end
+    return
+end
 
-    # Load times not covered by the overlap.
-    lo = first_new
-    hi = first_new + overlap_count - 1
-    @inbounds for idx in 1:n_new
-        if overlap_count > 0 && lo <= idx <= hi
-            continue
-        end
+# Predicate: is new-window slot `idx` covered by the overlap (no reload needed)?
+@inline function _slot_in_overlap(plan::_CacheAdvancePlan, idx::Int)
+    plan.overlap_count > 0 &&
+        plan.first_new <= idx <= plan.first_new + plan.overlap_count - 1
+end
+
+# Load + regrid every new-window slot that the overlap doesn't cover.
+function _fill_missing_slices!(rt::AbstractArray, itp::DataSetInterpolator,
+        new_times::AbstractVector{DateTime}, plan::_CacheAdvancePlan)
+    N = ndims(rt)
+    tc = itp.cache
+    @inbounds for idx in eachindex(new_times)
+        _slot_in_overlap(plan, idx) && continue
         d = selectdim(rt, N, idx)
-        load_data_for_time!(itp, times[idx])
+        load_data_for_time!(itp, new_times[idx])
         itp.fs.regridder(d, tc.load_cache; extrapolate_type = itp.extrapolate_type)
     end
+    return
+end
+
+function update!(itp::DataSetInterpolator, t::DateTime, target::AbstractArray)
+    tc = itp.cache
+    @assert tc.initialized "Interpolator has not been initialized"
+    new_times = interp_cache_times!(itp, t)
+    rt = regrid_target_for(tc, target)
+
+    plan = _plan_cache_advance(tc.times, new_times)
+    _shift_overlap_in_place!(rt, plan)
+    _fill_missing_slices!(rt, itp, new_times, plan)
+
     if rt !== target
         copyto!(target, rt)
     end
-    tc.times = times
+    tc.times = new_times
     tc.currenttime = t
     @assert issorted(tc.times) "Interpolator times are in wrong order"
 end

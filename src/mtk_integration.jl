@@ -192,23 +192,26 @@ function create_interp_equation(itp::DataSetInterpolator{To}, filename, t, t_ref
 
     # Time grid discretes — scalar defaults work fine in MTK.
     #
-    # Choose initial defaults such that the computed fractional time index
-    # `fit = 1 + (t_ref + t - p_tstart) / p_tstep` lands at `1.0` regardless
-    # of the integrator's `t`.  This matters because ODE solvers evaluate
-    # the RHS *once* during `init(prob, alg)` BEFORE firing the discrete
-    # callback's `initialize` affect (the Tsit5 FSAL call in
-    # `Tsit5Cache.initialize!` runs first).  At that point the data buffer
-    # is still zeros, but we need `fit` to be in `[1, nt]` so `@boundscheck`
-    # doesn't fire on an uninitialized interpolator.  Setting
-    # `p_tstep = Inf` yields `fit = 1 + finite/∞ = 1` for any `(t_ref, t,
-    # p_tstart)` triple, so the FSAL pre-call works regardless of the
-    # caller's `tspan` / `t_ref` convention (e.g., `tspan[1] != 0`).
-    # The callback's initialize affect subsequently overwrites both
-    # defaults with real values from the loaded cache.
+    # The sentinel buffer above is `(2, ..., 2)`, so the computed fractional
+    # time index `fit = 1 + (t_ref + t - p_tstart) / p_tstep` must land in
+    # `[1, 2]` for `@boundscheck` not to fire during the RHS pre-evaluation
+    # that ODE solvers perform inside `init(prob, alg)` BEFORE the discrete
+    # callback's `initialize` affect runs (e.g. Tsit5's FSAL stage in
+    # `Tsit5Cache.initialize!`).  Picking `p_tstart = t_ref + tspan[1]` and
+    # `p_tstep = tspan[2] - tspan[1]` makes the sentinel cover exactly the
+    # integration window: `fit = 1` at `t = tspan[1]` and `fit = 2` at
+    # `t = tspan[2]`, with linear interpolation in between — so any in-tspan
+    # probe is in bounds with a real meaning (all zeros, matching the
+    # sentinel contents).  No `Inf` arithmetic, no special-casing in the
+    # interpolation kernel.  The callback's initialize affect subsequently
+    # overwrites both defaults with the cache-derived values once data is
+    # loaded.
     n_tstart = Symbol(n, :_tstart)
     n_tstep = Symbol(n, :_tstep)
-    ts_default = EarthSciMLBase.get_tref(itp.domain)
-    tstep_default = Inf
+    t_ref_val = EarthSciMLBase.get_tref(itp.domain)
+    tspan = EarthSciMLBase.get_tspan(itp.domain)
+    ts_default = Float64(t_ref_val) + Float64(tspan[1])
+    tstep_default = max(Float64(tspan[2]) - Float64(tspan[1]), 1.0)
     # `@parameters` (not `@discretes`) — see rationale on `_make_array_discrete`.
     # These parameters *are* updated by the discrete event at the same time
     # `_data` is, but leaving them as `(t)`-dependent `@discretes` makes
@@ -694,9 +697,23 @@ function _apply_live_mask!(interp_infos, parent_sys; extra_needed = ())
                  any(s -> endswith(s, "₊" * bare), referenced)
                  for bare in bare_data_syms]
     if any(is_needed)
+        kept = String[]
+        dropped = String[]
         for (k, ok) in enumerate(is_needed)
-            ok || (interp_infos[k].live[] = false)
+            name = string(interp_infos[k].var_sym)
+            if ok
+                push!(kept, name)
+            else
+                interp_infos[k].live[] = false
+                push!(dropped, name)
+            end
         end
+        # Surface the pruning result so users debugging "why is my chemistry
+        # mechanism not seeing emissions for X?" can see whether X was pruned.
+        # `@debug` keeps this silent in production; set
+        # `JULIA_DEBUG=EarthSciData` to enable.
+        @debug "Live-mask pruning: kept $(length(kept)) of $(length(interp_infos)) " *
+               "interpolators, dropped $(length(dropped))" kept dropped
     end
     return is_needed
 end

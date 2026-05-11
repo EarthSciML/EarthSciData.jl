@@ -45,82 +45,40 @@ function delp_dry_surface_itp(lon, lat)
     return DELP_DRY_SURFACE_ITP(lon_deg, lat_deg)
 end
 
-"""
-$(SIGNATURES)
-
-Diurnal interpolation function that returns the scale factor for a given time.
-Returns different emission scaling factors based on the hour of day.
-"""
-function diurnal_itp(t, lon)
-    ut = Dates.unix2datetime(t)
-
-    # Convert radians to degrees for timezone calculation
+# Local time conversion: shift UTC unix time `t` (seconds) by the longitude-derived
+# timezone offset (`floor(lon_deg / 15)` hours) and return the resulting `DateTime`.
+# Used by every diurnal/day-of-week scaling lookup below.
+@inline function _local_datetime(t, lon)
     lon_deg = rad2deg(lon)
-    dt = floor(lon_deg / 15) # in hours (timezone offset)
-    t_local = t + dt * 3600 # in seconds
-    ut_local = Dates.unix2datetime(t_local)
-    hour_of_day = Dates.hour(ut_local) + 1  # +1 for 1-based indexing
-
-    return DIURNAL_FACTORS[hour_of_day]
+    dt = floor(lon_deg / 15) # timezone offset in hours
+    return Dates.unix2datetime(t + dt * 3600)
 end
 
-function diurnal_itp_NOx(t, lon)
-    ut = Dates.unix2datetime(t)
-
-    # Convert radians to degrees for timezone calculation
-    lon_deg = rad2deg(lon)
-    dt = floor(lon_deg / 15) # in hours (timezone offset)
-    t_local = t + dt * 3600 # in seconds
-    ut_local = Dates.unix2datetime(t_local)
-    hour_of_day = Dates.hour(ut_local) + 1  # +1 for 1-based indexing
-
-    return DIURNAL_FACTORS_NOx[hour_of_day]
-end
-
-function diurnal_itp_ISOP(t, lon)
-    ut = Dates.unix2datetime(t)
-
-    # Convert radians to degrees for timezone calculation
-    lon_deg = rad2deg(lon)
-    dt = floor(lon_deg / 15) # in hours (timezone offset)
-    t_local = t + dt * 3600 # in seconds
-    ut_local = Dates.unix2datetime(t_local)
-    hour_of_day = Dates.hour(ut_local) + 1  # +1 for 1-based indexing
-
-    return DIURNAL_FACTORS_ISOP[hour_of_day]
-end
+# 1-based hour-of-day index (1..24) at the local time corresponding to UTC `t` / `lon`.
+@inline _local_hour_index(t, lon) = Dates.hour(_local_datetime(t, lon)) + 1
+# 1-based day-of-week index (1..7) at the local time corresponding to UTC `t` / `lon`.
+@inline _local_dow_index(t, lon) = Dates.dayofweek(_local_datetime(t, lon))
 
 """
 $(SIGNATURES)
 
-Day of week interpolation function that returns the scale factor for a given time.
-Returns different emission scaling factors based on the day of week.
+Diurnal scale factor for a given UTC unix time and longitude (radians).
+Five named variants below — one per emission-species profile — are each thin
+table-lookup wrappers so that `@register_symbolic` can attach to a distinct
+top-level function per profile.
 """
-function dayofweek_itp_CO(t, lon)
-    ut = Dates.unix2datetime(t)
+diurnal_itp(t, lon) = DIURNAL_FACTORS[_local_hour_index(t, lon)]
+diurnal_itp_NOx(t, lon) = DIURNAL_FACTORS_NOx[_local_hour_index(t, lon)]
+diurnal_itp_ISOP(t, lon) = DIURNAL_FACTORS_ISOP[_local_hour_index(t, lon)]
 
-    # Convert radians to degrees for timezone calculation
-    lon_deg = rad2deg(lon)
-    dt = floor(lon_deg / 15) # in hours (timezone offset)
-    t_local = t + dt * 3600 # in seconds
-    ut_local = Dates.unix2datetime(t_local)
-    day_of_week = Dates.dayofweek(ut_local)
+"""
+$(SIGNATURES)
 
-    return DayofWeekFactors_CO[day_of_week]
-end
-
-function dayofweek_itp_NOx(t, lon)
-    ut = Dates.unix2datetime(t)
-
-    # Convert radians to degrees for timezone calculation
-    lon_deg = rad2deg(lon)
-    dt = floor(lon_deg / 15) # in hours (timezone offset)
-    t_local = t + dt * 3600 # in seconds
-    ut_local = Dates.unix2datetime(t_local)
-    day_of_week = Dates.dayofweek(ut_local)
-
-    return DayofWeekFactors_NOx[day_of_week]
-end
+Day-of-week scale factor for a given UTC unix time and longitude (radians).
+See `diurnal_itp` for the rationale behind the per-profile wrappers.
+"""
+dayofweek_itp_CO(t, lon) = DayofWeekFactors_CO[_local_dow_index(t, lon)]
+dayofweek_itp_NOx(t, lon) = DayofWeekFactors_NOx[_local_dow_index(t, lon)]
 
 # Register the symbolic function
 @register_symbolic diurnal_itp(t, lon)
@@ -153,31 +111,46 @@ $(SIGNATURES)
 Archived CMAQ emissions data.
 
 Currently, only data for year 2016 is available.
+
+Parameterized on the sector type `S` and dataset type `D` so that downstream
+dispatch (notably the GPU-targeted `interp_unsafe` hot path through
+`FileSetWithRegridder`) can stay type-stable. Previously both fields were
+`::Any`, which erased the element type of `fs.ds` and forced abstract
+dispatch in every NetCDF read.
 """
-struct NEI2016MonthlyEmisFileSet <: FileSet
-    mirror::AbstractString
-    sector::Any
-    ds::Any
+struct NEI2016MonthlyEmisFileSet{S, D} <: FileSet
+    mirror::String
+    sector::S
+    ds::D
     freq_info::DataFrequencyInfo
-    function NEI2016MonthlyEmisFileSet(sector, starttime, endtime)
-        NEI2016MonthlyEmisFileSet("https://gaftp.epa.gov/Air/", sector, starttime, endtime)
-    end
-    function NEI2016MonthlyEmisFileSet(mirror, sector, starttime, endtime)
-        floormonth(t) = DateTime(Dates.year(t), Dates.month(t))
-        check_times = (floormonth(starttime - Day(16))):Month(1):(endtime + Day(16))
-        fs = new(mirror, sector, nothing, DataFrequencyInfo(starttime, Day(1), check_times))
-        filepaths = maybedownload.((fs,), check_times)
+end
 
-        start = floormonth(starttime)
-        frequency = ((start + Dates.Month(1)) - start) # Only true for the first month.
-        centerpoints = [t + Second(t + Month(1) - t) / 2 for t in check_times]
-        dfi = DataFrequencyInfo(start, frequency, centerpoints)
+function NEI2016MonthlyEmisFileSet(sector, starttime::DateTime, endtime::DateTime)
+    NEI2016MonthlyEmisFileSet("https://gaftp.epa.gov/Air/", sector, starttime, endtime)
+end
 
-        lock(nclock) do
-            ds = NCDataset(filepaths, aggdim = "TSTEP")
-            new(mirror, sector, ds, dfi)
-        end
+function NEI2016MonthlyEmisFileSet(mirror::AbstractString, sector,
+        starttime::DateTime, endtime::DateTime)
+    floormonth(t) = DateTime(Dates.year(t), Dates.month(t))
+    check_times = (floormonth(starttime - Day(16))):Month(1):(endtime + Day(16))
+    # Temporary fileset with `ds = nothing`, used only to compute download
+    # paths via `relpath` / `localpath`.  The `freq_info` here is a stub —
+    # the real one is built below from monthly centerpoints.
+    tmp = NEI2016MonthlyEmisFileSet{typeof(sector), Nothing}(
+        String(mirror), sector, nothing,
+        DataFrequencyInfo(starttime, Day(1), check_times))
+    filepaths = maybedownload.((tmp,), check_times)
+
+    start = floormonth(starttime)
+    frequency = ((start + Dates.Month(1)) - start) # Only true for the first month.
+    centerpoints = [t + Second(t + Month(1) - t) / 2 for t in check_times]
+    dfi = DataFrequencyInfo(start, frequency, centerpoints)
+
+    ds = lock(nclock) do
+        NCDataset(filepaths, aggdim = "TSTEP")
     end
+    return NEI2016MonthlyEmisFileSet{typeof(sector), typeof(ds)}(
+        String(mirror), sector, ds, dfi)
 end
 
 """
@@ -324,6 +297,28 @@ Base.close(fs::NEI2016MonthlyEmisFileSet) =
         close(fs.ds);
     end
 
+# Verify that `varname`'s grid metadata matches `ref_meta` on every dimension
+# the shared regridder depends on.  Throws if any of {native_sr, xdim, ydim,
+# zdim, staggering, varsize, coords} disagree.  Cheap because each
+# `loadmetadata` call is just NetCDF attribute reads under `nclock`.
+function _validate_shared_grid(fs::NEI2016MonthlyEmisFileSet, varname, ref_var, ref_meta)
+    m = loadmetadata(fs, varname)
+    mismatches = String[]
+    m.native_sr == ref_meta.native_sr || push!(mismatches, "native_sr")
+    m.xdim == ref_meta.xdim || push!(mismatches, "xdim")
+    m.ydim == ref_meta.ydim || push!(mismatches, "ydim")
+    m.zdim == ref_meta.zdim || push!(mismatches, "zdim")
+    m.staggering == ref_meta.staggering || push!(mismatches, "staggering")
+    m.varsize == ref_meta.varsize || push!(mismatches, "varsize")
+    m.coords == ref_meta.coords || push!(mismatches, "coords")
+    isempty(mismatches) && return nothing
+    error("NEI variable `$(varname)` has a different spatial grid than the " *
+          "reference variable `$(ref_var)` (mismatched: $(join(mismatches, ", "))).  " *
+          "The regridder is shared across all NEI variables and would produce " *
+          "incorrect mass mappings here.  Per-variable regridders are not " *
+          "currently supported for `NEI2016MonthlyEmis`.")
+end
+
 struct NEI2016MonthlyEmisCoupler
     sys::Any
 end
@@ -365,8 +360,17 @@ function NEI2016MonthlyEmis(
 )
     starttime, endtime = get_tspan_datetime(domaininfo)
     _fs = NEI2016MonthlyEmisFileSet(sector, starttime, endtime)
-    fs = FileSetWithRegridder(_fs,
-        regridder(_fs, loadmetadata(_fs, first(varnames(_fs))), domaininfo))
+    # The regridder is built from the first variable's grid metadata and
+    # reused across every variable; if any later variable's grid disagrees,
+    # the regridder would silently mis-map its emissions.  Validate up-front
+    # rather than letting the mismatch produce wrong numbers at solve time.
+    ref_var = first(varnames(_fs))
+    ref_meta = loadmetadata(_fs, ref_var)
+    for varname in varnames(_fs)
+        varname == ref_var && continue
+        _validate_shared_grid(_fs, varname, ref_var, ref_meta)
+    end
+    fs = FileSetWithRegridder(_fs, regridder(_fs, ref_meta, domaininfo))
     pvdict = Dict([Symbol(v) => v for v in EarthSciMLBase.pvars(domaininfo)]...)
     @assert :x in keys(pvdict)||:lon in keys(pvdict) "x or lon must be specified in the domaininfo"
     @assert :y in keys(pvdict)||:lat in keys(pvdict) "y or lat must be specified in the domaininfo"
