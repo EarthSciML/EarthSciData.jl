@@ -63,9 +63,9 @@ end
 $(SIGNATURES)
 
 Diurnal scale factor for a given UTC unix time and longitude (radians).
-Five named variants below — one per emission-species profile — are each thin
-table-lookup wrappers so that `@register_symbolic` can attach to a distinct
-top-level function per profile.
+Named variants — one per emission-species profile — are each thin table-lookup
+wrappers so that `@register_symbolic` can attach to a distinct top-level
+function per profile.
 """
 diurnal_itp(t, lon) = DIURNAL_FACTORS[_local_hour_index(t, lon)]
 diurnal_itp_NOx(t, lon) = DIURNAL_FACTORS_NOx[_local_hour_index(t, lon)]
@@ -80,18 +80,31 @@ See `diurnal_itp` for the rationale behind the per-profile wrappers.
 dayofweek_itp_CO(t, lon) = DayofWeekFactors_CO[_local_dow_index(t, lon)]
 dayofweek_itp_NOx(t, lon) = DayofWeekFactors_NOx[_local_dow_index(t, lon)]
 
+# Combined day-of-week × diurnal factors.  Species that need *both* scalings
+# (CO, NOx) compose two registered symbolic calls per RHS evaluation in the
+# original formulation.  These fused variants do the same table lookups but
+# expose a single registered symbolic call to MTK, so the compiled RHS holds
+# one wrapper invocation per grid point per stage instead of two.  The plain
+# `dayofweek_itp_*` and `diurnal_itp_*` functions above are preserved for
+# direct callers / tests.
+nei_scale_CO(t, lon) = dayofweek_itp_CO(t, lon) * diurnal_itp(t, lon)
+nei_scale_NOx(t, lon) = dayofweek_itp_NOx(t, lon) * diurnal_itp_NOx(t, lon)
+
 # Register the symbolic function
 @register_symbolic diurnal_itp(t, lon)
 @register_symbolic diurnal_itp_NOx(t, lon)
 @register_symbolic diurnal_itp_ISOP(t, lon)
 @register_symbolic dayofweek_itp_CO(t, lon)
 @register_symbolic dayofweek_itp_NOx(t, lon)
+@register_symbolic nei_scale_CO(t, lon)
+@register_symbolic nei_scale_NOx(t, lon)
 @register_symbolic delp_dry_surface_itp(lon, lat)
 
 # Tell SymbolicUtils these registered functions return scalars (needed for maketerm rebuild
 # during substitute to avoid Unknown(-1) shapes breaking ifelse).
 for f in (diurnal_itp, diurnal_itp_NOx, diurnal_itp_ISOP,
-    dayofweek_itp_CO, dayofweek_itp_NOx, delp_dry_surface_itp)
+    dayofweek_itp_CO, dayofweek_itp_NOx,
+    nei_scale_CO, nei_scale_NOx, delp_dry_surface_itp)
     @eval Symbolics.SymbolicUtils.promote_shape(::typeof($f),
         ::Symbolics.SymbolicUtils.ShapeT, ::Symbolics.SymbolicUtils.ShapeT) = _scalar_shape
 end
@@ -103,7 +116,22 @@ diurnal_itp_NOx(t::DynamicQuantities.Quantity, lon) = 1.0
 diurnal_itp_ISOP(t::DynamicQuantities.Quantity, lon) = 1.0
 dayofweek_itp_CO(t::DynamicQuantities.Quantity, lon) = 1.0
 dayofweek_itp_NOx(t::DynamicQuantities.Quantity, lon) = 1.0
+nei_scale_CO(t::DynamicQuantities.Quantity, lon) = 1.0
+nei_scale_NOx(t::DynamicQuantities.Quantity, lon) = 1.0
 delp_dry_surface_itp(lon::DynamicQuantities.Quantity, lat::DynamicQuantities.Quantity) = 1.0
+
+# Per-species temporal scaling factor: maps a NEI variable name to the
+# symbolic function that supplies its diurnal (× day-of-week, where relevant)
+# multiplier.  Species not listed receive an implicit factor of 1.0.  Used by
+# the wrapper-equation builder in `NEI2016MonthlyEmis` to keep the
+# species-dispatch in one table instead of an `if/elseif` chain.
+const _NEI_SCALING_FN = Dict{String, Function}(
+    "CO"   => nei_scale_CO,
+    "FORM" => diurnal_itp,
+    "ISOP" => diurnal_itp_ISOP,
+    "NO"   => nei_scale_NOx,
+    "NO2"  => nei_scale_NOx,
+)
 
 """
 $(SIGNATURES)
@@ -404,32 +432,18 @@ function NEI2016MonthlyEmis(
         zero_emis = ModelingToolkit.unwrap(zero_emis) # Unsure why this is necessary.
         push!(params, zero_emis)
 
-        # Apply diurnal scaling and mixing ratio conversion to certain chemical species
-        # The conversion is: mixing_ratio = flux / (g0_100 * delp_dry_surface(x, y))
-        if varname in ["CO"]
-            wrapper_f = (eq) -> ifelse(lev < 2,
-                eq / Δz * scale * dayofweek_itp_CO(t + t_ref, x) *
-                diurnal_itp(t + t_ref, x) / (g0_100 * delp_dry_surface_itp(x, y)),
-                zero_emis)
-        elseif varname in ["FORM"]
-            wrapper_f = (eq) -> ifelse(lev < 2,
-                eq / Δz * scale * diurnal_itp(t + t_ref, x) /
-                (g0_100 * delp_dry_surface_itp(x, y)),
-                zero_emis)
-        elseif varname in ["ISOP"]
-            wrapper_f = (eq) -> ifelse(lev < 2,
-                eq / Δz * scale * diurnal_itp_ISOP(t + t_ref, x) /
-                (g0_100 * delp_dry_surface_itp(x, y)),
-                zero_emis)
-        elseif varname in ["NO2", "NO"]
-            wrapper_f = (eq) -> ifelse(lev < 2,
-                eq / Δz * scale * dayofweek_itp_NOx(t + t_ref, x) *
-                diurnal_itp_NOx(t + t_ref, x) / (g0_100 * delp_dry_surface_itp(x, y)),
-                zero_emis)
-        else
-            wrapper_f = (eq) -> ifelse(
-                lev < 2, eq / Δz * scale / (g0_100 * delp_dry_surface_itp(x, y)), zero_emis)
-        end
+        # Apply diurnal scaling and mixing ratio conversion to certain chemical species.
+        # The conversion is: mixing_ratio = flux / (g0_100 * delp_dry_surface(x, y)).
+        # Species-specific diurnal/DoW factor (or `1` for species with no
+        # temporal scaling) comes from `_NEI_SCALING_FN`; the rest of the
+        # wrapper is identical across species.  Symbolic `1 * eq` simplifies
+        # to `eq` during compilation, so the no-scaling case incurs no
+        # runtime overhead.
+        scaling_fn = get(_NEI_SCALING_FN, varname, nothing)
+        diurnal = scaling_fn === nothing ? 1 : scaling_fn(t + t_ref, x)
+        wrapper_f = (eq) -> ifelse(lev < 2,
+            eq / Δz * scale * diurnal / (g0_100 * delp_dry_surface_itp(x, y)),
+            zero_emis)
 
         eq, discretes,
         constants,
