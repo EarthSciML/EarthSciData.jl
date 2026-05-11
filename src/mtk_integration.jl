@@ -509,20 +509,28 @@ function build_interp_event(interp_infos, starttime::DateTime)
 
     # The full-grid data buffer lives on the parameter object itself.  Each
     # data parameter starts out wrapping a 2^N sentinel array (see
-    # `_make_array_discrete`); the `initialize` affect below grows it to the
-    # full grid via `similar(domain.u_proto, ...)` and loads the first window
-    # of data.  The steady-state `update` affect then reuses the parameter's
-    # array in place via `lazyload!`, so steady-state memory is exactly one
-    # full-grid buffer per live variable (plus, for cross-device runs, a host
-    # staging array inside `cache.host_scratch`).  Variables whose `live[]`
-    # has been cleared by `_apply_live_mask!` keep their sentinel buffer —
-    # no NetCDF read, no full-grid allocation.
+    # `_make_array_discrete`); the first fire of the affect below grows it to
+    # the full grid via `similar(domain.u_proto, ...)` and loads the first
+    # window of data.  Subsequent fires reuse the parameter's array in place
+    # via `lazyload!`, so steady-state memory is exactly one full-grid buffer
+    # per live variable (plus, for cross-device runs, a host staging array
+    # inside `cache.host_scratch`).  Variables whose `live[]` has been
+    # cleared by `_apply_live_mask!` keep their sentinel buffer — no NetCDF
+    # read, no full-grid allocation.
     #
-    # `SolverStrangThreads` fires the update affect from multiple threads
+    # `SolverStrangThreads` fires the affect from multiple threads
     # concurrently, so it is guarded by a lock.  The lock only covers callback
     # invocation (rare, at tstops), not the RHS hot path, so the cost is
-    # negligible.  The init affect runs exactly once at problem build and
-    # doesn't need the lock for correctness, but shares it for symmetry.
+    # negligible.  The same closure is registered as both the `affect` (fires
+    # at each tstop in `all_tstops`) and the `initialize` affect (fires once
+    # at problem build, before any RHS evaluation).  A separate init affect
+    # would be cleaner, but some operator-split solvers
+    # (`SolverStrangSerial/Threads`) build inner sub-integrators that never
+    # receive the `initialize` fire on the data-loading callback — they go
+    # straight into the regular affect at the first tstop.  Using the same
+    # closure means the first fire on each path does both the grow and the
+    # load, regardless of whether MTK's `initialize` callback reached this
+    # integrator.
     update_lock = ReentrantLock()
 
     # Per-interp_info `live` Refs captured so the affect can skip variables
@@ -533,33 +541,48 @@ function build_interp_event(interp_infos, starttime::DateTime)
     # NetCDF read, no full-grid allocation.
     lives = [info.live for info in interp_infos]
 
-    # `initialize` affect: fires exactly once at problem build (via MTK's
-    # `init(prob, alg)`), *before* any solve-time tstop fire.  Handles:
-    #   (1) auto-prune fallback for paths that bypass the convert-time
-    #       `SysDiscreteEvent` factory walk (plain `compose + mtkcompile`);
-    #       skipped for operator-split solvers whose inner integrator has
-    #       `integ.f.sys === nothing`, since pruning has already run.
-    #   (2) growing each live buffer from the 2^N sentinel to the full grid
-    #       via `similar(domain.u_proto, ...)` so the array backend matches
-    #       the state vector.
-    #   (3) seeding the first window of data via `lazyload!` and updating
-    #       the `tstart`/`tstep` parameters.
-    # After this returns, MTK stores the full-size buffers in the parameter
-    # object; the update affect below reuses them in place.
-    function init_affect!(modified, observed, ctx, integ)
+    # Per-interp first-fire flags.  The parameter starts out wrapping a 2^N
+    # sentinel; the first fire allocates a full-grid buffer via
+    # `similar(domain.u_proto, ...)` so the array backend matches the state
+    # vector.  An explicit flag (rather than `size(buf) != full_size`) is
+    # robust for the pathological case of a test domain whose grid happens to
+    # be 2^N.
+    grown = falses(length(interp_infos))
+
+    # First-fire auto-prune flag.  On the very first affect invocation we
+    # walk `integ.f.sys` and apply `_apply_live_mask!` to settle the `live`
+    # Refs, so `compose + mtkcompile` paths (which bypass
+    # `convert(::Type{System}, ::CoupledSystem)` and therefore the
+    # `SysDiscreteEvent` factory walk) get the same gating as the coupled
+    # path.  Idempotent w.r.t. the factory: if pruning already ran at convert
+    # time, the second pass leaves the `false` flags alone.  Some operator-
+    # split solvers (`SolverStrangSerial/Threads`, `SolverIMEX`) build inner
+    # integrators whose `integ.f.sys` is `nothing`; in those cases we skip
+    # auto-pruning and rely on the convert-time factory walk, which has
+    # already settled `live[]` for that path.
+    prune_done = Ref(false)
+
+    function update_data!(modified, observed, ctx, integ)
         lock(update_lock) do
-            sys = isdefined(integ.f, :sys) ? integ.f.sys : nothing
-            if sys !== nothing
-                _apply_live_mask!(interp_infos, sys)
+            if !prune_done[]
+                sys = isdefined(integ.f, :sys) ? integ.f.sys : nothing
+                if sys !== nothing
+                    _apply_live_mask!(interp_infos, sys)
+                end
+                prune_done[] = true
             end
             updates = modified
             for (i, dsi) in enumerate(ctx)
                 lives[i][] || continue
                 dkey, tskey, dtkey = per_interp_keys[i]
                 current = modified[dkey]::DataBufferType
-                buf = similar(dsi.domain.u_proto, eltype(current.data),
-                    dsi.grid_size..., dsi.cache_size)
-                fill!(buf, zero(eltype(buf)))
+                buf = current.data
+                if !grown[i]
+                    buf = similar(dsi.domain.u_proto, eltype(buf),
+                        dsi.grid_size..., dsi.cache_size)
+                    fill!(buf, zero(eltype(buf)))
+                    grown[i] = true
+                end
                 lazyload!(dsi, integ.t + t_ref, buf)
                 ts, tstep = get_time_grid_params(dsi)
                 updates = merge(updates, NamedTuple{(dkey, tskey, dtkey)}(
@@ -569,30 +592,8 @@ function build_interp_event(interp_infos, starttime::DateTime)
         end
     end
 
-    # Steady-state `affect`: fires at each tstop in `all_tstops`.  Buffers are
-    # already full-size and seeded by `init_affect!`, so this path just slides
-    # the time window via `lazyload!` (in-place on the parameter's buffer) and
-    # refreshes `tstart`/`tstep`.
-    function update_affect!(modified, observed, ctx, integ)
-        lock(update_lock) do
-            updates = modified
-            for (i, dsi) in enumerate(ctx)
-                lives[i][] || continue
-                dkey, tskey, dtkey = per_interp_keys[i]
-                current = modified[dkey]::DataBufferType
-                lazyload!(dsi, integ.t + t_ref, current.data)
-                ts, tstep = get_time_grid_params(dsi)
-                updates = merge(updates, NamedTuple{(tskey, dtkey)}((ts, tstep)))
-            end
-            updates
-        end
-    end
-
-    init_affect = ModelingToolkit.ImperativeAffect(
-        init_affect!; modified = modified_nt, observed = NamedTuple(),
-        ctx = ctx_nt)
-    update_affect = ModelingToolkit.ImperativeAffect(
-        update_affect!; modified = modified_nt, observed = NamedTuple(),
+    affect = ModelingToolkit.ImperativeAffect(
+        update_data!; modified = modified_nt, observed = NamedTuple(),
         ctx = ctx_nt)
 
     # `initialize_save_discretes = false`: the data buffer parameters are
@@ -603,7 +604,7 @@ function build_interp_event(interp_infos, starttime::DateTime)
     # may still produce extra entries; downstream code should use
     # `sol(saveat)` rather than `sol.u` indexing for fixed-size sampling.
     return ModelingToolkit.SymbolicDiscreteCallback(
-        all_tstops, update_affect; initialize = init_affect,
+        all_tstops, affect; initialize = affect,
         initialize_save_discretes = false)
 end
 
