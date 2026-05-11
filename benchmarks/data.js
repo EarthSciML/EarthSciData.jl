@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1778097141011,
+  "lastUpdate": 1778510600532,
   "repoUrl": "https://github.com/EarthSciML/EarthSciData.jl",
   "entries": {
     "Julia benchmark result": [
@@ -4763,6 +4763,90 @@ window.BENCHMARK_DATA = {
             "value": 399697009732,
             "unit": "ns",
             "extra": "gctime=27347293506\nmemory=262092429016\nallocs=3760378912\nparams={\"evals\":1,\"evals_set\":false,\"gcsample\":false,\"gctrial\":true,\"memory_tolerance\":0.01,\"overhead\":0,\"samples\":10000,\"seconds\":5,\"time_tolerance\":0.05}"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "ctessum@gmail.com",
+            "name": "Christopher Tessum",
+            "username": "ctessum"
+          },
+          "committer": {
+            "email": "ctessum@gmail.com",
+            "name": "Christopher Tessum",
+            "username": "ctessum"
+          },
+          "distinct": true,
+          "id": "4cdcad93179639d0e5a38b9097119f6e5b259a4a",
+          "message": "Document analytical lev dependence in pressure-levels test\n\nThe `[1, 1.5, 2, 72, 72.5, 73]` lev values exercise the\npiecewise-linear `Ap(lev) + Bp(lev) * PS` formula at one fixed\n(lon, lat); the data read for `I3.PS` does not vary with `lev`.\nSpell that out so a future reader can see why the six values differ\n(analytical, not data interpolation), and why the high-lev rows\ncollapse to `Ap(lev)` once `Bp(lev) = 0`.\n\nCo-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>",
+          "timestamp": "2026-05-08T22:54:00-05:00",
+          "tree_id": "9d97b3317fc318a991462c4a7cdafde7b5dff8e1",
+          "url": "https://github.com/EarthSciML/EarthSciData.jl/commit/4cdcad93179639d0e5a38b9097119f6e5b259a4a"
+        },
+        "date": 1778510599697,
+        "tool": "julia",
+        "benches": [
+          {
+            "name": "Interpolation hot path/2D linear",
+            "value": 8.32032032032032,
+            "unit": "ns",
+            "extra": "gctime=0\nmemory=0\nallocs=0\nparams={\"evals\":999,\"evals_set\":false,\"gcsample\":false,\"gctrial\":true,\"memory_tolerance\":0.01,\"overhead\":0,\"samples\":10000,\"seconds\":5,\"time_tolerance\":0.05}"
+          },
+          {
+            "name": "Interpolation hot path/2D nearest",
+            "value": 5.608,
+            "unit": "ns",
+            "extra": "gctime=0\nmemory=0\nallocs=0\nparams={\"evals\":1000,\"evals_set\":false,\"gcsample\":false,\"gctrial\":true,\"memory_tolerance\":0.01,\"overhead\":0,\"samples\":10000,\"seconds\":5,\"time_tolerance\":0.05}"
+          },
+          {
+            "name": "Interpolation hot path/3D linear",
+            "value": 13.607214428857715,
+            "unit": "ns",
+            "extra": "gctime=0\nmemory=0\nallocs=0\nparams={\"evals\":998,\"evals_set\":false,\"gcsample\":false,\"gctrial\":true,\"memory_tolerance\":0.01,\"overhead\":0,\"samples\":10000,\"seconds\":5,\"time_tolerance\":0.05}"
+          },
+          {
+            "name": "Interpolation hot path/3D nearest",
+            "value": 7.448448448448448,
+            "unit": "ns",
+            "extra": "gctime=0\nmemory=0\nallocs=0\nparams={\"evals\":999,\"evals_set\":false,\"gcsample\":false,\"gctrial\":true,\"memory_tolerance\":0.01,\"overhead\":0,\"samples\":10000,\"seconds\":5,\"time_tolerance\":0.05}"
+          },
+          {
+            "name": "Interpolation hot path/4D linear",
+            "value": 21.87863590772317,
+            "unit": "ns",
+            "extra": "gctime=0\nmemory=0\nallocs=0\nparams={\"evals\":997,\"evals_set\":false,\"gcsample\":false,\"gctrial\":true,\"memory_tolerance\":0.01,\"overhead\":0,\"samples\":10000,\"seconds\":5,\"time_tolerance\":0.05}"
+          },
+          {
+            "name": "Interpolation hot path/4D linear (grid-aligned)",
+            "value": 21.888665997993982,
+            "unit": "ns",
+            "extra": "gctime=0\nmemory=0\nallocs=0\nparams={\"evals\":997,\"evals_set\":false,\"gcsample\":false,\"gctrial\":true,\"memory_tolerance\":0.01,\"overhead\":0,\"samples\":10000,\"seconds\":5,\"time_tolerance\":0.05}"
+          },
+          {
+            "name": "Interpolation hot path/4D nearest",
+            "value": 10.776776776776776,
+            "unit": "ns",
+            "extra": "gctime=0\nmemory=0\nallocs=0\nparams={\"evals\":999,\"evals_set\":false,\"gcsample\":false,\"gctrial\":true,\"memory_tolerance\":0.01,\"overhead\":0,\"samples\":10000,\"seconds\":5,\"time_tolerance\":0.05}"
+          },
+          {
+            "name": "Interpolation hot path/4D nearest (grid-aligned)",
+            "value": 10.776776776776776,
+            "unit": "ns",
+            "extra": "gctime=0\nmemory=0\nallocs=0\nparams={\"evals\":999,\"evals_set\":false,\"gcsample\":false,\"gctrial\":true,\"memory_tolerance\":0.01,\"overhead\":0,\"samples\":10000,\"seconds\":5,\"time_tolerance\":0.05}"
+          },
+          {
+            "name": "NEI Simulator/Serial",
+            "value": 337644721011,
+            "unit": "ns",
+            "extra": "gctime=31567691427\nmemory=260168039224\nallocs=3698725960\nparams={\"evals\":1,\"evals_set\":false,\"gcsample\":false,\"gctrial\":true,\"memory_tolerance\":0.01,\"overhead\":0,\"samples\":10000,\"seconds\":5,\"time_tolerance\":0.05}"
+          },
+          {
+            "name": "NEI Simulator/Threads",
+            "value": 377525104096,
+            "unit": "ns",
+            "extra": "gctime=26373960774\nmemory=262092429016\nallocs=3760378912\nparams={\"evals\":1,\"evals_set\":false,\"gcsample\":false,\"gctrial\":true,\"memory_tolerance\":0.01,\"overhead\":0,\"samples\":10000,\"seconds\":5,\"time_tolerance\":0.05}"
           }
         ]
       }
