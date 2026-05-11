@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1778520984361,
+  "lastUpdate": 1778538097459,
   "repoUrl": "https://github.com/EarthSciML/EarthSciData.jl",
   "entries": {
     "Julia benchmark result": [
@@ -5015,6 +5015,90 @@ window.BENCHMARK_DATA = {
             "value": 121830746020,
             "unit": "ns",
             "extra": "gctime=28602093094\nmemory=214027517912\nallocs=1800799750\nparams={\"evals\":1,\"evals_set\":false,\"gcsample\":false,\"gctrial\":true,\"memory_tolerance\":0.01,\"overhead\":0,\"samples\":10000,\"seconds\":5,\"time_tolerance\":0.05}"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "ctessum@gmail.com",
+            "name": "Christopher Tessum",
+            "username": "ctessum"
+          },
+          "committer": {
+            "email": "ctessum@gmail.com",
+            "name": "Christopher Tessum",
+            "username": "ctessum"
+          },
+          "distinct": true,
+          "id": "d01a2f3b75a58f6d356a8f874e61c9a6fb76de82",
+          "message": "Fix data buffers staying zero on subsequent ODEProblems\n\nMultiple `ODEProblem(compiled_sys, ...)` calls from the same compiled\nsystem each construct fresh MTKParameters with their own sentinel-\nsized data buffers.  The interp event's affect closure is shared, so\nits per-interp first-fire bookkeeping needs to recognise each fresh\nsentinel and grow it independently.\n\nTwo coupled bugs led to subsequent problems' buffers staying at zero:\n\n1.  The closure-captured `grown[]` BitVector was set true by the first\n    problem's first fire, so subsequent problems' fires skipped the\n    `similar(...)` allocation and kept their sentinel-sized buffer.\n    Replace with a per-call `size(buf) != full_size` check.\n\n2.  Even with a grown buffer, `lazyload!` short-circuited.  The DSI's\n    `TemporalCache` is shared across all problems built from the\n    compiled system; after the first problem's load, `tc.times`\n    recorded the time window that was written into *that* problem's\n    buffer.  When the second problem's fire grew its own fresh buffer\n    and called `lazyload!`, `update!` computed a new-times window that\n    matched `tc.times`, `_plan_cache_advance` reported \"full overlap,\n    nothing to load,\" and `_fill_missing_slices!` wrote nothing into\n    the zero-filled new buffer.  Reset `tc.times` (along with\n    `initialized` and `currenttime`) when growing so the plan\n    correctly sees no slots are valid for this target.\n\nSurfaced by `wrf_solve_test.jl`: the first `ODEProblem(wrf_compiled,\n...)` test passed, then the three follow-up tests that reused\n`wrf_compiled` got `[0.0, 0.0, …]` instead of real interpolated\nvalues.  Both `wrf_solve_test.jl` and `solve_test.jl` now pass.\n\nCo-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>",
+          "timestamp": "2026-05-11T16:13:26-05:00",
+          "tree_id": "9a5b92a2d8625e018ddd2b81f6664cef29b6993a",
+          "url": "https://github.com/EarthSciML/EarthSciData.jl/commit/d01a2f3b75a58f6d356a8f874e61c9a6fb76de82"
+        },
+        "date": 1778538095739,
+        "tool": "julia",
+        "benches": [
+          {
+            "name": "Interpolation hot path/2D linear",
+            "value": 9.206206206206206,
+            "unit": "ns",
+            "extra": "gctime=0\nmemory=0\nallocs=0\nparams={\"evals\":999,\"evals_set\":false,\"gcsample\":false,\"gctrial\":true,\"memory_tolerance\":0.01,\"overhead\":0,\"samples\":10000,\"seconds\":5,\"time_tolerance\":0.05}"
+          },
+          {
+            "name": "Interpolation hot path/2D nearest",
+            "value": 5.677,
+            "unit": "ns",
+            "extra": "gctime=0\nmemory=0\nallocs=0\nparams={\"evals\":1000,\"evals_set\":false,\"gcsample\":false,\"gctrial\":true,\"memory_tolerance\":0.01,\"overhead\":0,\"samples\":10000,\"seconds\":5,\"time_tolerance\":0.05}"
+          },
+          {
+            "name": "Interpolation hot path/3D linear",
+            "value": 17.70240480961924,
+            "unit": "ns",
+            "extra": "gctime=0\nmemory=0\nallocs=0\nparams={\"evals\":998,\"evals_set\":false,\"gcsample\":false,\"gctrial\":true,\"memory_tolerance\":0.01,\"overhead\":0,\"samples\":10000,\"seconds\":5,\"time_tolerance\":0.05}"
+          },
+          {
+            "name": "Interpolation hot path/3D nearest",
+            "value": 7.028,
+            "unit": "ns",
+            "extra": "gctime=0\nmemory=0\nallocs=0\nparams={\"evals\":1000,\"evals_set\":false,\"gcsample\":false,\"gctrial\":true,\"memory_tolerance\":0.01,\"overhead\":0,\"samples\":10000,\"seconds\":5,\"time_tolerance\":0.05}"
+          },
+          {
+            "name": "Interpolation hot path/4D linear",
+            "value": 26.29145728643216,
+            "unit": "ns",
+            "extra": "gctime=0\nmemory=0\nallocs=0\nparams={\"evals\":995,\"evals_set\":false,\"gcsample\":false,\"gctrial\":true,\"memory_tolerance\":0.01,\"overhead\":0,\"samples\":10000,\"seconds\":5,\"time_tolerance\":0.05}"
+          },
+          {
+            "name": "Interpolation hot path/4D linear (grid-aligned)",
+            "value": 26.30251256281407,
+            "unit": "ns",
+            "extra": "gctime=0\nmemory=0\nallocs=0\nparams={\"evals\":995,\"evals_set\":false,\"gcsample\":false,\"gctrial\":true,\"memory_tolerance\":0.01,\"overhead\":0,\"samples\":10000,\"seconds\":5,\"time_tolerance\":0.05}"
+          },
+          {
+            "name": "Interpolation hot path/4D nearest",
+            "value": 9.567567567567568,
+            "unit": "ns",
+            "extra": "gctime=0\nmemory=0\nallocs=0\nparams={\"evals\":999,\"evals_set\":false,\"gcsample\":false,\"gctrial\":true,\"memory_tolerance\":0.01,\"overhead\":0,\"samples\":10000,\"seconds\":5,\"time_tolerance\":0.05}"
+          },
+          {
+            "name": "Interpolation hot path/4D nearest (grid-aligned)",
+            "value": 9.552552552552553,
+            "unit": "ns",
+            "extra": "gctime=0\nmemory=0\nallocs=0\nparams={\"evals\":999,\"evals_set\":false,\"gcsample\":false,\"gctrial\":true,\"memory_tolerance\":0.01,\"overhead\":0,\"samples\":10000,\"seconds\":5,\"time_tolerance\":0.05}"
+          },
+          {
+            "name": "NEI Simulator/Serial",
+            "value": 159037378982,
+            "unit": "ns",
+            "extra": "gctime=27023018637\nmemory=212103128120\nallocs=1739146798\nparams={\"evals\":1,\"evals_set\":false,\"gcsample\":false,\"gctrial\":true,\"memory_tolerance\":0.01,\"overhead\":0,\"samples\":10000,\"seconds\":5,\"time_tolerance\":0.05}"
+          },
+          {
+            "name": "NEI Simulator/Threads",
+            "value": 110427483679,
+            "unit": "ns",
+            "extra": "gctime=24612388465\nmemory=212104367384\nallocs=1739160310\nparams={\"evals\":1,\"evals_set\":false,\"gcsample\":false,\"gctrial\":true,\"memory_tolerance\":0.01,\"overhead\":0,\"samples\":10000,\"seconds\":5,\"time_tolerance\":0.05}"
           }
         ]
       }
