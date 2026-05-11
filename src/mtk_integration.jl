@@ -501,21 +501,22 @@ function build_interp_event(interp_infos, starttime::DateTime)
     end
     ctx_nt = NamedTuple{Tuple(ctx_keys)}(Tuple(ctx_vals))
 
-    # The full-grid data buffer lives on the parameter object itself: the
-    # affect reads the current `DataBufferType` from `modified`, hands its
-    # underlying array to `lazyload!` as the regrid target, and writes the
-    # (possibly grown) wrapper back into the returned NamedTuple.  The
-    # parameter starts out wrapping a 2^N sentinel array (see
-    # `_make_array_discrete`); the first fire grows it to the full grid
-    # via `similar(domain.u_proto, ...)`.  Subsequent fires reuse the
-    # parameter's array in place, so steady-state memory is exactly one
-    # full-grid buffer per variable (plus, for cross-device runs, a host
-    # staging array inside `cache.host_scratch`).
+    # The full-grid data buffer lives on the parameter object itself.  Each
+    # data parameter starts out wrapping a 2^N sentinel array (see
+    # `_make_array_discrete`); the `initialize` affect below grows it to the
+    # full grid via `similar(domain.u_proto, ...)` and loads the first window
+    # of data.  The steady-state `update` affect then reuses the parameter's
+    # array in place via `lazyload!`, so steady-state memory is exactly one
+    # full-grid buffer per live variable (plus, for cross-device runs, a host
+    # staging array inside `cache.host_scratch`).  Variables whose `live[]`
+    # has been cleared by `_apply_live_mask!` keep their sentinel buffer —
+    # no NetCDF read, no full-grid allocation.
     #
-    # `SolverStrangThreads` fires the same callback closure from multiple
-    # threads concurrently, so the affect is guarded by a lock.  The lock
-    # only covers callback invocation (rare, at tstops), not the RHS hot
-    # path, so the cost is negligible.
+    # `SolverStrangThreads` fires the update affect from multiple threads
+    # concurrently, so it is guarded by a lock.  The lock only covers callback
+    # invocation (rare, at tstops), not the RHS hot path, so the cost is
+    # negligible.  The init affect runs exactly once at problem build and
+    # doesn't need the lock for correctness, but shares it for symmetry.
     n_interps = length(interp_infos)
     # Hoisted: `result_vals` and the NamedTuple key-tuple are reused across
     # every callback fire instead of being rebuilt each time. The callback is
@@ -532,64 +533,43 @@ function build_interp_event(interp_infos, starttime::DateTime)
     # NetCDF read, no full-grid allocation.
     lives = [info.live for info in interp_infos]
 
-    # Per-interp first-fire flags.  The parameter starts out wrapping a 2^N
-    # sentinel; the first fire allocates a full-grid buffer via
-    # `similar(domain.u_proto, ...)` so the array backend matches the state
-    # vector.  An explicit flag (rather than `size(buf) != full_size`) is
-    # robust for the pathological case of a test domain whose grid happens
-    # to be 2^N.  The full grid + cache sizes are taken from the per-DSI
-    # `grid_size`/`cache_size` fields rather than parallel arrays, since
-    # those fields are already populated at DSI construction.
-    grown = falses(n_interps)
+    # Pre-fill `result_vals` with the current parameter values, then overwrite
+    # only the live entries.  Used by both init and update affects.
+    @inline function _seed_result_vals!(mod_input)
+        @inbounds for k in 1:length(mod_keys_tuple)
+            result_vals[k] = mod_input[k]
+        end
+    end
 
-    # First-fire auto-prune flag.  On the very first affect invocation we
-    # walk `integ.f.sys` and apply `_apply_live_mask!` to settle the `live`
-    # Refs, so `compose + mtkcompile` paths (which bypass
-    # `convert(::Type{System}, ::CoupledSystem)` and therefore the
-    # `SysDiscreteEvent` factory walk) get the same gating as the coupled
-    # path.  Idempotent w.r.t. the factory: if pruning already ran at
-    # convert time, the second pass leaves the `false` flags alone.  Some
-    # operator-split solvers (`SolverStrangSerial/Threads`, `SolverIMEX`)
-    # build inner integrators whose `integ.f.sys` is `nothing`; in those
-    # cases we skip auto-pruning and rely on the convert-time factory walk,
-    # which has already settled `live[]` for that path.
-    prune_done = Ref(false)
-
-    function update_data!(modified, observed, ctx, integ)
+    # `initialize` affect: fires exactly once at problem build (via MTK's
+    # `init(prob, alg)`), *before* any solve-time tstop fire.  Handles:
+    #   (1) auto-prune fallback for paths that bypass the convert-time
+    #       `SysDiscreteEvent` factory walk (plain `compose + mtkcompile`);
+    #       skipped for operator-split solvers whose inner integrator has
+    #       `integ.f.sys === nothing`, since pruning has already run.
+    #   (2) growing each live buffer from the 2^N sentinel to the full grid
+    #       via `similar(domain.u_proto, ...)` so the array backend matches
+    #       the state vector.
+    #   (3) seeding the first window of data via `lazyload!` and updating
+    #       the `tstart`/`tstep` parameters.
+    # After this returns, MTK stores the full-size buffers in the parameter
+    # object; the update affect below reuses them in place.
+    function init_affect!(modified, observed, ctx, integ)
         lock(update_lock) do
-            if !prune_done[]
-                sys = isdefined(integ.f, :sys) ? integ.f.sys : nothing
-                if sys !== nothing
-                    _apply_live_mask!(interp_infos, sys)
-                end
-                prune_done[] = true
+            sys = isdefined(integ.f, :sys) ? integ.f.sys : nothing
+            if sys !== nothing
+                _apply_live_mask!(interp_infos, sys)
             end
             mod_input = values(modified)
-            # Pre-fill so dead slots and the scalar tstart/tstep slots have
-            # valid current values when we assemble the return NamedTuple.
-            @inbounds for k in 1:length(mod_keys_tuple)
-                result_vals[k] = mod_input[k]
-            end
+            _seed_result_vals!(mod_input)
             i = 0
             for (_, dsi) in pairs(ctx)
                 i += 1
                 lives[i][] || continue
-                # Current parameter value — the `DataBufferType` MTK is
-                # holding for `info.data_sym`.  The data slot is at index
-                # `3i - 2` (matches the modified-NamedTuple layout in
-                # `mod_keys`).
                 current = mod_input[3i - 2]::DataBufferType
-                buf = current.data
-                if !grown[i]
-                    # First fire: grow the parameter's buffer to the full
-                    # grid.  After this, MTK stores the full-size buffer in
-                    # the parameter object and subsequent fires reuse it
-                    # in place via `lazyload!`.
-                    buf = similar(dsi.domain.u_proto, eltype(buf),
-                        dsi.grid_size..., dsi.cache_size)
-                    fill!(buf, zero(eltype(buf)))
-                    grown[i] = true
-                end
+                buf = similar(dsi.domain.u_proto, eltype(current.data),
+                    dsi.grid_size..., dsi.cache_size)
+                fill!(buf, zero(eltype(buf)))
                 lazyload!(dsi, integ.t + t_ref, buf)
                 result_vals[3i - 2] = DataBufferType(buf)
                 ts, tstep = get_time_grid_params(dsi)
@@ -600,8 +580,34 @@ function build_interp_event(interp_infos, starttime::DateTime)
         end
     end
 
-    affect = ModelingToolkit.ImperativeAffect(
-        update_data!; modified = modified_nt, observed = NamedTuple(), ctx = ctx_nt)
+    # Steady-state `affect`: fires at each tstop in `all_tstops`.  Buffers are
+    # already full-size and seeded by `init_affect!`, so this path just slides
+    # the time window via `lazyload!` (in-place on the parameter's buffer) and
+    # refreshes `tstart`/`tstep`.
+    function update_affect!(modified, observed, ctx, integ)
+        lock(update_lock) do
+            mod_input = values(modified)
+            _seed_result_vals!(mod_input)
+            i = 0
+            for (_, dsi) in pairs(ctx)
+                i += 1
+                lives[i][] || continue
+                current = mod_input[3i - 2]::DataBufferType
+                lazyload!(dsi, integ.t + t_ref, current.data)
+                ts, tstep = get_time_grid_params(dsi)
+                result_vals[3i - 1] = ts
+                result_vals[3i] = tstep
+            end
+            NamedTuple{mod_keys_tuple}(Tuple(result_vals))
+        end
+    end
+
+    init_affect = ModelingToolkit.ImperativeAffect(
+        init_affect!; modified = modified_nt, observed = NamedTuple(),
+        ctx = ctx_nt)
+    update_affect = ModelingToolkit.ImperativeAffect(
+        update_affect!; modified = modified_nt, observed = NamedTuple(),
+        ctx = ctx_nt)
 
     # `initialize_save_discretes = false`: the data buffer parameters are
     # internal bookkeeping, not user-visible state, so we don't need MTK to
@@ -611,7 +617,7 @@ function build_interp_event(interp_infos, starttime::DateTime)
     # may still produce extra entries; downstream code should use
     # `sol(saveat)` rather than `sol.u` indexing for fixed-size sampling.
     return ModelingToolkit.SymbolicDiscreteCallback(
-        all_tstops, affect; initialize = affect,
+        all_tstops, update_affect; initialize = init_affect,
         initialize_save_discretes = false)
 end
 
