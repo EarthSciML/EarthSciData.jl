@@ -468,9 +468,17 @@ end
 function build_interp_event(interp_infos, starttime::DateTime)
     t_ref = datetime2unix(starttime)
 
-    # Compute all time stops across all interpolators.
+    # Compute all time stops across all interpolators, validating that each
+    # interpolator's data centerpoints actually bracket its domain's tspan.
+    # Without this check, a domain whose tspan extends past the last
+    # centerpoint passes silently here: the discrete callback stops firing
+    # after the final tstop, the cache window never advances, and the first
+    # solver step past that point hits `@boundscheck` in `interp_unsafe`
+    # with the cryptic "time index outside loaded cache range".  Catching
+    # the misalignment here points at the actual problem.
     all_tstops = Float64[]
     for info in interp_infos
+        _validate_tspan_coverage(info)
         append!(all_tstops, get_tstops(info.itp, starttime))
     end
     all_tstops = unique(all_tstops) .- t_ref
@@ -654,6 +662,27 @@ extra = EarthSciMLBase.operator_vars(csys, parent_sys, domain)
 EarthSciData.prune_unused_interps!(emis, parent_sys; extra_needed = extra)
 ```
 """
+# Assert that the interpolator's data centerpoints bracket its domain's
+# tspan.  Called from `build_interp_event` for every interp_info; failures
+# raise at problem build time rather than partway through `solve`.
+function _validate_tspan_coverage(info)
+    itp = info.itp
+    domain = itp.domain
+    sim_start, sim_end = EarthSciMLBase.get_tspan_datetime(domain)
+    dfi = DataFrequencyInfo(itp.fs)
+    isempty(dfi.centerpoints) && return  # nothing to validate against
+    data_start = first(dfi.centerpoints)
+    data_end = last(dfi.centerpoints)
+    if sim_start < data_start || sim_end > data_end
+        error("Interpolator `$(info.var_sym)` has data centerpoints " *
+              "[$data_start, $data_end] which do not cover the domain's " *
+              "simulation tspan [$sim_start, $sim_end].  Queries outside " *
+              "the data range would fail mid-solve with " *
+              "`interp_unsafe: time index outside loaded cache range`.")
+    end
+    return
+end
+
 # Single source of truth for the live-mask walk: substitute observed equations
 # into each state equation's RHS and collect the names of every referenced
 # variable.  Then mark each `interp_info` whose data symbol does not appear in
