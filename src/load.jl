@@ -2,9 +2,46 @@ export interp_unsafe, interp!, make_data_buffer, GridSpec
 
 const _LONLAT_SR = "+proj=longlat +datum=WGS84 +no_defs"
 
+# Memoization for the cache-writability probe in `download_cache()`.  Storing
+# the verified directory (not just a Bool) means a mid-session change to
+# `ENV["EARTHSCIDATADIR"]` re-triggers the check against the new path
+# instead of silently trusting the previous one.
+const _cache_verified = Ref{String}("")
+
+# Probe-write `dir` to surface "read-only filesystem" / "disk full" /
+# "directory does not exist and cannot be created" up front, rather than
+# letting the failure show up partway through `maybedownload` (after the
+# user has already paid the precompile + MTK build cost).  Idempotent: the
+# probe-file is unconditionally cleaned up, and repeated calls for the same
+# `dir` short-circuit via `_cache_verified`.
+function _verify_cache_writable!(dir::AbstractString)
+    _cache_verified[] == dir && return
+    try
+        isdir(dir) || mkpath(dir)
+    catch e
+        error("EarthSciData download cache `$dir` could not be created: $e. " *
+              "Set ENV[\"EARTHSCIDATADIR\"] to a writable directory.")
+    end
+    probe = joinpath(dir, ".earthscidata_write_probe")
+    try
+        open(probe, "w") do io
+            write(io, "ok")
+        end
+    catch e
+        error("EarthSciData download cache `$dir` is not writable: $e. " *
+              "Set ENV[\"EARTHSCIDATADIR\"] to a writable directory.")
+    finally
+        rm(probe; force = true)
+    end
+    _cache_verified[] = dir
+    return
+end
+
 function download_cache()
-    ("EARTHSCIDATADIR" ∈ keys(ENV)) ? ENV["EARTHSCIDATADIR"] :
-    @get_scratch!("earthsci_data")
+    dir = ("EARTHSCIDATADIR" ∈ keys(ENV)) ? ENV["EARTHSCIDATADIR"] :
+          @get_scratch!("earthsci_data")
+    _verify_cache_writable!(dir)
+    return dir
 end
 
 """
