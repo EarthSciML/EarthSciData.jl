@@ -173,11 +173,43 @@ function NEI2016MonthlyEmisFileSet(mirror::AbstractString, sector,
     centerpoints = [t + Second(t + Month(1) - t) / 2 for t in check_times]
     dfi = DataFrequencyInfo(start, frequency, centerpoints)
 
-    ds = lock(nclock) do
-        NCDataset(filepaths, aggdim = "TSTEP")
-    end
+    ds = _open_aggregated_or_redownload(tmp, filepaths, check_times)
     return NEI2016MonthlyEmisFileSet{typeof(sector), typeof(ds)}(
         String(mirror), sector, ds, dfi)
+end
+
+# Open the aggregated monthly-NEI NCDataset, with a single-shot recovery for
+# corrupt cached files.  `Downloads.download` already deletes its in-flight
+# file on a transport-level error, so the corrupt case here is a previous
+# successful download that the filesystem subsequently truncated (kill -9,
+# interrupted copy, etc.).  Without recovery, the user sees an opaque HDF5
+# error at FileSet construction and has to manually find and `rm` the bad
+# file under `$EARTHSCIDATADIR`.
+#
+# The retry is intentionally a one-shot blanket re-download: pinpointing
+# the single bad file would mean opening each NetCDF in isolation, and the
+# expected case is "user's cache was once written and now has a problem,"
+# not "the upstream is intermittently corrupt."  If the second attempt also
+# fails, the second error propagates with a fresh stack.
+function _open_aggregated_or_redownload(tmp::NEI2016MonthlyEmisFileSet,
+        filepaths, check_times)
+    try
+        return lock(nclock) do
+            NCDataset(filepaths, aggdim = "TSTEP")
+        end
+    catch e
+        @warn "NEI aggregated NCDataset open failed; deleting cache and retrying " *
+              "once" exception = (e, catch_backtrace())
+        for path in filepaths
+            isfile(path) && rm(path; force = true)
+        end
+        for t in check_times
+            maybedownload(tmp, t)
+        end
+        return lock(nclock) do
+            NCDataset(filepaths, aggdim = "TSTEP")
+        end
+    end
 end
 
 """
