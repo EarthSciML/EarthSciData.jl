@@ -541,27 +541,41 @@ function build_interp_event(interp_infos, starttime::DateTime)
     # NetCDF read, no full-grid allocation.
     lives = [info.live for info in interp_infos]
 
-    # Per-interp first-fire flags.  The parameter starts out wrapping a 2^N
-    # sentinel; the first fire allocates a full-grid buffer via
-    # `similar(domain.u_proto, ...)` so the array backend matches the state
-    # vector.  An explicit flag (rather than `size(buf) != full_size`) is
-    # robust for the pathological case of a test domain whose grid happens to
-    # be 2^N.
-    grown = falses(length(interp_infos))
-
-    # First-fire auto-prune flag.  On the very first affect invocation we
-    # walk `integ.f.sys` and apply `_apply_live_mask!` to settle the `live`
-    # Refs, so `compose + mtkcompile` paths (which bypass
+    # Auto-prune fallback flag.  On the first affect invocation against a
+    # given integrator we walk `integ.f.sys` and apply `_apply_live_mask!` to
+    # settle the `live` Refs, so `compose + mtkcompile` paths (which bypass
     # `convert(::Type{System}, ::CoupledSystem)` and therefore the
     # `SysDiscreteEvent` factory walk) get the same gating as the coupled
     # path.  Idempotent w.r.t. the factory: if pruning already ran at convert
-    # time, the second pass leaves the `false` flags alone.  Some operator-
-    # split solvers (`SolverStrangSerial/Threads`, `SolverIMEX`) build inner
-    # integrators whose `integ.f.sys` is `nothing`; in those cases we skip
-    # auto-pruning and rely on the convert-time factory walk, which has
-    # already settled `live[]` for that path.
+    # time, the second pass leaves the `false` flags alone.  This Ref is
+    # closure-captured (shared across every problem built from the compiled
+    # system); that's fine because the live mask is a property of the
+    # compiled system, not the problem.  Some operator-split solvers
+    # (`SolverStrangSerial/Threads`, `SolverIMEX`) build inner integrators
+    # whose `integ.f.sys` is `nothing`; in those cases we skip auto-pruning
+    # and rely on the convert-time factory walk, which has already settled
+    # `live[]` for that path.
     prune_done = Ref(false)
 
+    # Each first-fire detects "this buffer is still sentinel-sized" by
+    # comparing its actual size to the per-interp full-grid size, and if
+    # different, allocates a full-grid replacement.  We use a size check
+    # rather than a closure-captured per-interp `grown[]` flag so that
+    # building multiple `ODEProblem`s from the same compiled system works
+    # correctly: each problem has its own MTKParameters with its own fresh
+    # sentinel buffer, and each one's first fire must grow that buffer
+    # independently.  A `grown[]` flag would be set true by the first
+    # problem and incorrectly leave the second problem's sentinel in place.
+    # The pathological "full grid happens to be 2×…×2 in every dim" case
+    # would skip the grow; no current test domain hits it.
+    #
+    # When we do grow, we also reset the DSI's `TemporalCache` state.  The
+    # cache's `currenttime`/`times`/`initialized` track what was last
+    # written into the *previous* target buffer (from a prior ODEProblem
+    # built from the same compiled system).  Without the reset,
+    # `lazyload!` sees `currenttime == t` (or `t` in `tc.times` range) and
+    # short-circuits — leaving the fresh full-grid buffer at its
+    # zero-filled state, which silently produces a `[0.0, 0.0, …]` solve.
     function update_data!(modified, observed, ctx, integ)
         lock(update_lock) do
             if !prune_done[]
@@ -577,11 +591,23 @@ function build_interp_event(interp_infos, starttime::DateTime)
                 dkey, tskey, dtkey = per_interp_keys[i]
                 current = modified[dkey]::DataBufferType
                 buf = current.data
-                if !grown[i]
-                    buf = similar(dsi.domain.u_proto, eltype(buf),
-                        dsi.grid_size..., dsi.cache_size)
+                full_size = (dsi.grid_size..., dsi.cache_size)
+                if size(buf) != full_size
+                    buf = similar(dsi.domain.u_proto, eltype(buf), full_size...)
                     fill!(buf, zero(eltype(buf)))
-                    grown[i] = true
+                    # Reset *all* of the cache's "what's loaded into target"
+                    # state: `initialized`, `currenttime`, and crucially
+                    # `times`.  Without resetting `times`, the next
+                    # `update!` call computes a new-times window that
+                    # overlaps the old `times` (e.g. both `[00:00, 01:00]`
+                    # for the same hourly data), `_plan_cache_advance`
+                    # reports "full overlap, nothing to load," and
+                    # `_fill_missing_slices!` writes nothing into the
+                    # fresh zero-filled buffer.
+                    dsi.cache.initialized = false
+                    dsi.cache.currenttime = DateTime(1, 1, 1)
+                    dsi.cache.times = [DateTime(0, 1, 1) + Hour(j)
+                                       for j in 1:dsi.cache_size]
                 end
                 lazyload!(dsi, integ.t + t_ref, buf)
                 ts, tstep = get_time_grid_params(dsi)
