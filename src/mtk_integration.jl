@@ -778,7 +778,7 @@ function make_prune_factory(interp_infos)
 end
 
 Latexify.@latexrecipe function f(itp::EarthSciData.DataSetInterpolator)
-    return "$(split(string(typeof(itp.fs.fs)), ".")[end]).$(itp.varname)"
+    return "$(split(string(typeof(itp.fs)), ".")[end]).$(itp.varname)"
 end
 
 function _get_staggering(var)

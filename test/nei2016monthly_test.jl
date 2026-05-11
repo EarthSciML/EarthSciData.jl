@@ -41,11 +41,12 @@ import Proj
 
     @testset "projections" begin
         (; domain, ts, te, sample_time, fileset) = setup()
-        fs = EarthSciData.FileSetWithRegridder(fileset,
-            EarthSciData.regridder(fileset,
-                EarthSciData.loadmetadata(fileset, first(EarthSciData.varnames(fileset))), domain))
+        shared_rg = EarthSciData.regridder(fileset,
+            EarthSciData.loadmetadata(fileset, first(EarthSciData.varnames(fileset))),
+            domain)
         @testset "correct projection" begin
-            itp = EarthSciData.DataSetInterpolator{Float32}(fs, "NOX", ts, te, domain)
+            itp = EarthSciData.DataSetInterpolator{Float32}(fileset, "NOX", ts, te, domain;
+                regrid_f = shared_rg)
             buf = EarthSciData.make_data_buffer(itp)
             result = interp!(itp, buf, sample_time, deg2rad(-97.0f0), deg2rad(40.0f0))
             @test result > 0.0f0
@@ -53,7 +54,8 @@ import Proj
         end
 
         @testset "Out of domain" begin
-            itp = EarthSciData.DataSetInterpolator{Float32}(fs, "NOX", ts, te, domain)
+            itp = EarthSciData.DataSetInterpolator{Float32}(fileset, "NOX", ts, te, domain;
+                regrid_f = shared_rg)
             buf = EarthSciData.make_data_buffer(itp)
             @test interp!(itp, buf, sample_time, deg2rad(0.0f0), deg2rad(40.0f0)) ≈ 0.0
         end
@@ -87,7 +89,7 @@ import Proj
         itp = EarthSciData.DataSetInterpolator{Float32}(fileset, "NOX", ts, te, domain)
         buf = EarthSciData.make_data_buffer(itp)
         EarthSciData.lazyload!(itp, sample_time, buf)
-        ti = EarthSciData.DataFrequencyInfo(itp.fs.fs)
+        ti = EarthSciData.DataFrequencyInfo(itp.fs)
         @test month(itp.cache.times[1]) == 4
         @test month(itp.cache.times[2]) == 5
 
@@ -279,10 +281,10 @@ import Proj
             ts, te = get_tspan_datetime(domain)
             fileset = EarthSciData.NEI2016MonthlyEmisFileSet("mrggrid_withbeis_withrwc", ts, te)
             # Use the unified DataSetInterpolator with conservative regridding via regridder()
-            fs = EarthSciData.FileSetWithRegridder(fileset,
-                EarthSciData.regridder(fileset,
-                    EarthSciData.loadmetadata(fileset, "NO"), domain))
-            itp = EarthSciData.DataSetInterpolator{Float64}(fs, "NO", ts, te, domain)
+            rg = EarthSciData.regridder(fileset,
+                EarthSciData.loadmetadata(fileset, "NO"), domain)
+            itp = EarthSciData.DataSetInterpolator{Float64}(fileset, "NO", ts, te, domain;
+                regrid_f = rg)
             @test itp.varname == "NO"
             @test itp.metadata !== nothing
 
@@ -302,10 +304,10 @@ import Proj
             )
             ts, te = get_tspan_datetime(domain)
             fileset = EarthSciData.NEI2016MonthlyEmisFileSet("mrggrid_withbeis_withrwc", ts, te)
-            fs = EarthSciData.FileSetWithRegridder(fileset,
-                EarthSciData.regridder(fileset,
-                    EarthSciData.loadmetadata(fileset, "NO"), domain))
-            itp = EarthSciData.DataSetInterpolator{Float64}(fs, "NO", ts, te, domain)
+            rg = EarthSciData.regridder(fileset,
+                EarthSciData.loadmetadata(fileset, "NO"), domain)
+            itp = EarthSciData.DataSetInterpolator{Float64}(fileset, "NO", ts, te, domain;
+                regrid_f = rg)
 
             # Test that interpolation works at a specific location
             buf = EarthSciData.make_data_buffer(itp)

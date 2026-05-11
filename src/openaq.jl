@@ -643,9 +643,8 @@ function OpenAQ(
     # 0.0 because the DataSetInterpolator builds a BSpline over the data array
     # and NaN in any cell propagates to the entire interpolated field.
     copy_regridder = (dst, src; extrapolate_type = nothing) -> copyto!(dst, src)
-    fswr = FileSetWithRegridder(fs, copy_regridder)
-    itp = DataSetInterpolator{dt}(fswr, parameter, starttime, endtime, domaininfo;
-        stream = stream)
+    itp = DataSetInterpolator{dt}(fs, parameter, starttime, endtime, domaininfo;
+        stream = stream, regrid_f = copy_regridder)
 
     eq, discretes,
     constants,

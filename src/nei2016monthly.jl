@@ -113,10 +113,9 @@ Archived CMAQ emissions data.
 Currently, only data for year 2016 is available.
 
 Parameterized on the sector type `S` and dataset type `D` so that downstream
-dispatch (notably the GPU-targeted `interp_unsafe` hot path through
-`FileSetWithRegridder`) can stay type-stable. Previously both fields were
-`::Any`, which erased the element type of `fs.ds` and forced abstract
-dispatch in every NetCDF read.
+dispatch (notably the GPU-targeted `interp_unsafe` hot path) can stay
+type-stable. Previously both fields were `::Any`, which erased the element
+type of `fs.ds` and forced abstract dispatch in every NetCDF read.
 """
 struct NEI2016MonthlyEmisFileSet{S, D} <: FileSet
     mirror::String
@@ -359,18 +358,18 @@ function NEI2016MonthlyEmis(
         spatial_interp::Symbol = :linear
 )
     starttime, endtime = get_tspan_datetime(domaininfo)
-    _fs = NEI2016MonthlyEmisFileSet(sector, starttime, endtime)
+    fs = NEI2016MonthlyEmisFileSet(sector, starttime, endtime)
     # The regridder is built from the first variable's grid metadata and
     # reused across every variable; if any later variable's grid disagrees,
     # the regridder would silently mis-map its emissions.  Validate up-front
     # rather than letting the mismatch produce wrong numbers at solve time.
-    ref_var = first(varnames(_fs))
-    ref_meta = loadmetadata(_fs, ref_var)
-    for varname in varnames(_fs)
+    ref_var = first(varnames(fs))
+    ref_meta = loadmetadata(fs, ref_var)
+    for varname in varnames(fs)
         varname == ref_var && continue
-        _validate_shared_grid(_fs, varname, ref_var, ref_meta)
+        _validate_shared_grid(fs, varname, ref_var, ref_meta)
     end
-    fs = FileSetWithRegridder(_fs, regridder(_fs, ref_meta, domaininfo))
+    shared_regridder = regridder(fs, ref_meta, domaininfo)
     pvdict = Dict([Symbol(v) => v for v in EarthSciMLBase.pvars(domaininfo)]...)
     @assert :x in keys(pvdict)||:lon in keys(pvdict) "x or lon must be specified in the domaininfo"
     @assert :y in keys(pvdict)||:lat in keys(pvdict) "y or lat must be specified in the domaininfo"
@@ -391,10 +390,10 @@ function NEI2016MonthlyEmis(
     interp_infos = []
     lhs_vars = Num[]
 
-    for varname in varnames(fs.fs)
+    for varname in varnames(fs)
         dt = EarthSciMLBase.eltype(domaininfo)
         itp = DataSetInterpolator{dt}(fs, varname, starttime, endtime, domaininfo;
-            stream = stream)
+            stream = stream, regrid_f = shared_regridder)
 
         # Don't pre-declare units - let ModelingToolkit infer from the actual equation
         # The conversion formula divides flux (kg/m²/s) by (g0_100 * delp), giving kg/kg/s

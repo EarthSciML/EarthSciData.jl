@@ -111,10 +111,8 @@ using Test
             EarthSciData._nearest_interpolate_from!(dst, src, metadata, model_grid, domain;
                 extrapolate_type = extrapolate_type)
         end
-        fswr=EarthSciData.FileSetWithRegridder(fs, regrid_f)
-
         itp=EarthSciData.DataSetInterpolator{Float32}(
-            fswr, "fuel_model", ts, te, domain; stream = true)
+            fs, "fuel_model", ts, te, domain; stream = true, regrid_f = regrid_f)
         lon_c=deg2rad(-121.60)
         lat_c=deg2rad(39.78)
         buf=EarthSciData.make_data_buffer(itp)

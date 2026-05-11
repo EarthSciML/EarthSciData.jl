@@ -262,11 +262,10 @@ function LANDFIRE(domaininfo::DomainInfo; name = :LANDFIRE,
         _nearest_interpolate_from!(dst, src, metadata, model_grid, domaininfo;
             extrapolate_type = extrapolate_type)
     end
-    fswr = FileSetWithRegridder(fs, regrid_f)
-
     dt = eltype(domaininfo)
     itp = DataSetInterpolator{dt}(
-        fswr, "fuel_model", starttime, endtime, domaininfo; stream = stream)
+        fs, "fuel_model", starttime, endtime, domaininfo;
+        stream = stream, regrid_f = regrid_f)
     dims = dimnames(itp)
     coords = _match_domain_coords(dims, pvdict, pvs)
     eq, discretes,

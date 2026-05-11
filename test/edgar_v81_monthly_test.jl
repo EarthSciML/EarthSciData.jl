@@ -72,7 +72,7 @@ using Test
         itp=EarthSciData.DataSetInterpolator{Float32}(fileset, varname, ts, te, domain)
         buf=EarthSciData.make_data_buffer(itp)
         EarthSciData.lazyload!(itp, sample_time, buf)
-        ti=EarthSciData.DataFrequencyInfo(itp.fs.fs)
+        ti=EarthSciData.DataFrequencyInfo(itp.fs)
         @test length(ti.centerpoints) >= 2
         # The cached times should bracket the query month
         @test itp.cache.times[1] <= sample_time

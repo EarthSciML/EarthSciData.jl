@@ -37,11 +37,6 @@ Subtypes with per-variable files should override this.
 """
 relpath(fs::FileSet, t::DateTime, ::Nothing) = relpath(fs, t)
 
-struct FileSetWithRegridder{FS, RF}
-    fs::FS
-    regridder::RF
-end
-
 """
 A lightweight specification of a model grid, providing an alternative to
 `EarthSciMLBase.DomainInfo` for use cases that don't require ModelingToolkit integration.
@@ -337,8 +332,13 @@ data records for the times immediately before and after the current time step.
 the interpolator. `spatial_ref` is the spatial reference system that the simulation will be using.
 `stream` specifies whether the data should be streamed in as needed or loaded all at once.
 """
-mutable struct DataSetInterpolator{To, N, N2, FT, DomT, ET, FSRG}
-    fs::FSRG
+mutable struct DataSetInterpolator{To, N, N2, FT, DomT, ET, FS, RG}
+    fs::FS
+    "Callable that maps a data-grid array to a model-grid array.  Defaults to a
+    BSpline-interpolating closure built from the variable's `MetaData`; pass
+    the `regrid_f` kwarg to override (e.g. with a `ConservativeRegridderCallable`
+    or a nearest-neighbour callable)."
+    regridder::RG
     varname::String
     cache::TemporalCache{To, N, N2}
     metadata::MetaData
@@ -360,27 +360,26 @@ mutable struct DataSetInterpolator{To, N, N2, FT, DomT, ET, FSRG}
 
     function DataSetInterpolator{To}(fs::FileSet, varname::AbstractString,
             starttime::DateTime, endtime::DateTime, domain;
-            stream = true, extrapolate_type = Flat()) where {To <: Real}
+            stream = true, extrapolate_type = Flat(),
+            regrid_f = nothing) where {To <: Real}
         metadata = loadmetadata(fs, varname)
-        model_grid = _compute_grid(domain, metadata.staggering)
-        regrid_f = (dst::AbstractArray,
-            src::AbstractArray;
-            extrapolate_type = extrapolate_type) -> begin
-            interpolate_from!(dst, src, metadata, model_grid, domain;
-                extrapolate_type = extrapolate_type)
-        end
-        fswr = FileSetWithRegridder(fs, regrid_f)
-        DataSetInterpolator{To}(fswr, varname, starttime, endtime, domain;
-            stream = stream, extrapolate_type = extrapolate_type)
-    end
 
-    function DataSetInterpolator{To}(fs::FileSetWithRegridder, varname::AbstractString,
-            starttime::DateTime, endtime::DateTime, domain;
-            stream = true, extrapolate_type = Flat()) where {To <: Real}
-        metadata = loadmetadata(fs.fs, varname)
+        # Default regridder: BSpline interpolation onto the (possibly
+        # staggered) model grid.  Callers that need conservative or
+        # nearest-neighbour regridding pass `regrid_f` explicitly.
+        rg = if regrid_f === nothing
+            model_grid = _compute_grid(domain, metadata.staggering)
+            (dst::AbstractArray, src::AbstractArray;
+                extrapolate_type = extrapolate_type) -> begin
+                interpolate_from!(dst, src, metadata, model_grid, domain;
+                    extrapolate_type = extrapolate_type)
+            end
+        else
+            regrid_f
+        end
 
         # Check how many time indices we will need.
-        dfi = DataFrequencyInfo(fs.fs)
+        dfi = DataFrequencyInfo(fs)
         cache_size = 2
         if !stream
             cache_size = sum(
@@ -411,8 +410,10 @@ mutable struct DataSetInterpolator{To, N, N2, FT, DomT, ET, FSRG}
             load_cache, nothing, times,
             DateTime(1, 1, 1), false
         )
-        itp = new{To, N, N2, FT, typeof(domain), typeof(extrapolate_type), typeof(fs)}(
+        itp = new{To, N, N2, FT, typeof(domain), typeof(extrapolate_type),
+            typeof(fs), typeof(rg)}(
             fs,
+            rg,
             String(varname),
             tc,
             metadata,
@@ -448,7 +449,7 @@ function tuple_from_vals(index1::Int, v1::T, index2::Int, v2::T,
 end
 
 function Base.show(io::IO, itp::DataSetInterpolator)
-    print(io, "DataSetInterpolator{$(typeof(itp.fs.fs)), $(itp.varname)}")
+    print(io, "DataSetInterpolator{$(typeof(itp.fs)), $(itp.varname)}")
 end
 
 """
@@ -498,7 +499,7 @@ end
 Return the previous interpolation time point for this interpolator.
 """
 function prevtimepoint(itp::DataSetInterpolator, t::DateTime)
-    ti = DataFrequencyInfo(itp.fs.fs)
+    ti = DataFrequencyInfo(itp.fs)
     ci = centerpoint_index(ti, t)
     ti.centerpoints[max(1, ci - 1)]
 end
@@ -507,7 +508,7 @@ end
 Return the current interpolation time point for this interpolator.
 """
 function currenttimepoint(itp::DataSetInterpolator, t::DateTime)
-    ti = DataFrequencyInfo(itp.fs.fs)
+    ti = DataFrequencyInfo(itp.fs)
     ci = centerpoint_index(ti, t)
     ti.centerpoints[ci]
 end
@@ -517,7 +518,7 @@ Load the time points that should be cached in this interpolator.
 """
 function interp_cache_times!(itp::DataSetInterpolator, t::DateTime)
     cache_size = length(itp.cache.times)
-    dfi = DataFrequencyInfo(itp.fs.fs)
+    dfi = DataFrequencyInfo(itp.fs)
     ti = centerpoint_index(dfi, t)
     n = length(dfi.centerpoints)
     # Currently assuming we're going forwards in time.
@@ -536,7 +537,7 @@ The time points when integration should be stopped to update the interpolator
 (as Unix timestamps).
 """
 function get_tstops(itp::DataSetInterpolator, starttime::DateTime)
-    dfi = DataFrequencyInfo(itp.fs.fs)
+    dfi = DataFrequencyInfo(itp.fs)
     datetime2unix.(sort([starttime, dfi.centerpoints...]))
 end
 
@@ -583,7 +584,7 @@ end
 end
 
 function load_data_for_time!(itp::DataSetInterpolator, t::DateTime)
-    loadslice!(itp.cache.load_cache, itp.fs.fs, t, itp.varname)
+    loadslice!(itp.cache.load_cache, itp.fs, t, itp.varname)
     return t
 end
 
@@ -681,7 +682,7 @@ function _fill_missing_slices!(rt::AbstractArray, itp::DataSetInterpolator,
         _slot_in_overlap(plan, idx) && continue
         d = selectdim(rt, N, idx)
         load_data_for_time!(itp, new_times[idx])
-        itp.fs.regridder(d, tc.load_cache; extrapolate_type = itp.extrapolate_type)
+        itp.regridder(d, tc.load_cache; extrapolate_type = itp.extrapolate_type)
     end
     return
 end
@@ -1089,7 +1090,7 @@ Base.close(::FileSet) = nothing
 Close resources associated with a DataSetInterpolator,
 including the underlying FileSet.
 """
-Base.close(itp::DataSetInterpolator) = close(itp.fs.fs)
+Base.close(itp::DataSetInterpolator) = close(itp.fs)
 
 """
 Map data dimension names to domain coordinate variables.
