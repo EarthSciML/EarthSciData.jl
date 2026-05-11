@@ -475,31 +475,29 @@ function build_interp_event(interp_infos, starttime::DateTime)
     end
     all_tstops = unique(all_tstops) .- t_ref
 
-    # Build modified NamedTuple using bare subsystem syms.
+    # Build modified NamedTuple using bare subsystem syms, plus parallel
+    # per-interp key tuples `(data, tstart, tstep)` so the affects can index
+    # by interpolator number rather than reasoning about a 3-stride layout.
+    per_interp_keys = NTuple{3, Symbol}[]
     mod_keys = Symbol[]
     mod_vals = []
     for info in interp_infos
-        push!(mod_keys, EarthSciMLBase.var2symbol(info.data_sym))
-        push!(mod_vals, info.data_sym)
-        push!(mod_keys, EarthSciMLBase.var2symbol(info.tstart_sym))
-        push!(mod_vals, info.tstart_sym)
-        push!(mod_keys, EarthSciMLBase.var2symbol(info.tstep_sym))
-        push!(mod_vals, info.tstep_sym)
+        keys = (
+            EarthSciMLBase.var2symbol(info.data_sym),
+            EarthSciMLBase.var2symbol(info.tstart_sym),
+            EarthSciMLBase.var2symbol(info.tstep_sym),
+        )
+        push!(per_interp_keys, keys)
+        append!(mod_keys, keys)
+        append!(mod_vals,
+            (info.data_sym, info.tstart_sym, info.tstep_sym))
     end
     modified_nt = NamedTuple{Tuple(mod_keys)}(Tuple(mod_vals))
 
-    # Build context NamedTuple: `DataSetInterpolator` objects.  Field order
-    # matches `interp_infos`, and each info contributes a 3-stride block of
-    # entries to `mod_keys` in the same order (data, tstart, tstep), so the
-    # callback can index `mod_keys[3i-2 : 3i]` from the i-th ctx pair without
-    # a key lookup.
-    ctx_keys = Symbol[]
-    ctx_vals = []
-    for info in interp_infos
-        push!(ctx_keys, Symbol(:itp_, info.var_sym))
-        push!(ctx_vals, info.itp)
-    end
-    ctx_nt = NamedTuple{Tuple(ctx_keys)}(Tuple(ctx_vals))
+    # Build context NamedTuple: `DataSetInterpolator` objects, one per interp.
+    ctx_keys = Tuple(Symbol(:itp_, info.var_sym) for info in interp_infos)
+    ctx_vals = Tuple(info.itp for info in interp_infos)
+    ctx_nt = NamedTuple{ctx_keys}(ctx_vals)
 
     # The full-grid data buffer lives on the parameter object itself.  Each
     # data parameter starts out wrapping a 2^N sentinel array (see
@@ -517,12 +515,6 @@ function build_interp_event(interp_infos, starttime::DateTime)
     # invocation (rare, at tstops), not the RHS hot path, so the cost is
     # negligible.  The init affect runs exactly once at problem build and
     # doesn't need the lock for correctness, but shares it for symmetry.
-    n_interps = length(interp_infos)
-    # Hoisted: `result_vals` and the NamedTuple key-tuple are reused across
-    # every callback fire instead of being rebuilt each time. The callback is
-    # serialized by `update_lock`, so in-place mutation is safe.
-    result_vals = Vector{Any}(undef, 3 * n_interps)
-    mod_keys_tuple = Tuple(mod_keys)
     update_lock = ReentrantLock()
 
     # Per-interp_info `live` Refs captured so the affect can skip variables
@@ -532,14 +524,6 @@ function build_interp_event(interp_infos, starttime::DateTime)
     # buffer was set to at problem construction (the 2^N sentinel) — no
     # NetCDF read, no full-grid allocation.
     lives = [info.live for info in interp_infos]
-
-    # Pre-fill `result_vals` with the current parameter values, then overwrite
-    # only the live entries.  Used by both init and update affects.
-    @inline function _seed_result_vals!(mod_input)
-        @inbounds for k in 1:length(mod_keys_tuple)
-            result_vals[k] = mod_input[k]
-        end
-    end
 
     # `initialize` affect: fires exactly once at problem build (via MTK's
     # `init(prob, alg)`), *before* any solve-time tstop fire.  Handles:
@@ -560,23 +544,20 @@ function build_interp_event(interp_infos, starttime::DateTime)
             if sys !== nothing
                 _apply_live_mask!(interp_infos, sys)
             end
-            mod_input = values(modified)
-            _seed_result_vals!(mod_input)
-            i = 0
-            for (_, dsi) in pairs(ctx)
-                i += 1
+            updates = modified
+            for (i, dsi) in enumerate(ctx)
                 lives[i][] || continue
-                current = mod_input[3i - 2]::DataBufferType
+                dkey, tskey, dtkey = per_interp_keys[i]
+                current = modified[dkey]::DataBufferType
                 buf = similar(dsi.domain.u_proto, eltype(current.data),
                     dsi.grid_size..., dsi.cache_size)
                 fill!(buf, zero(eltype(buf)))
                 lazyload!(dsi, integ.t + t_ref, buf)
-                result_vals[3i - 2] = DataBufferType(buf)
                 ts, tstep = get_time_grid_params(dsi)
-                result_vals[3i - 1] = ts
-                result_vals[3i] = tstep
+                updates = merge(updates, NamedTuple{(dkey, tskey, dtkey)}(
+                    (DataBufferType(buf), ts, tstep)))
             end
-            NamedTuple{mod_keys_tuple}(Tuple(result_vals))
+            updates
         end
     end
 
@@ -586,19 +567,16 @@ function build_interp_event(interp_infos, starttime::DateTime)
     # refreshes `tstart`/`tstep`.
     function update_affect!(modified, observed, ctx, integ)
         lock(update_lock) do
-            mod_input = values(modified)
-            _seed_result_vals!(mod_input)
-            i = 0
-            for (_, dsi) in pairs(ctx)
-                i += 1
+            updates = modified
+            for (i, dsi) in enumerate(ctx)
                 lives[i][] || continue
-                current = mod_input[3i - 2]::DataBufferType
+                dkey, tskey, dtkey = per_interp_keys[i]
+                current = modified[dkey]::DataBufferType
                 lazyload!(dsi, integ.t + t_ref, current.data)
                 ts, tstep = get_time_grid_params(dsi)
-                result_vals[3i - 1] = ts
-                result_vals[3i] = tstep
+                updates = merge(updates, NamedTuple{(tskey, dtkey)}((ts, tstep)))
             end
-            NamedTuple{mod_keys_tuple}(Tuple(result_vals))
+            updates
         end
     end
 
