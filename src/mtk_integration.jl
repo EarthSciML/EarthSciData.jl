@@ -270,17 +270,25 @@ function create_interp_equation(itp::DataSetInterpolator{To}, filename, t, t_ref
     const_defaults[unit_scale] = 1.0
 
     # `live`: per-variable run-time gate.  Flipped to `false` by
-    # `build_interp_event`'s init affect for variables that no compiled equation
-    # references, suppressing both `lazyload!` (no NetCDF read) and the
-    # first-fire grow-from-sentinel allocation in the affect.  Defaults to
-    # `true` so standalone `mtkcompile(loader)` (no parent system to prune
-    # against) loads everything.
+    # `_apply_live_mask!` for variables that no compiled equation references,
+    # suppressing both the eager NetCDF read in `_preload_interp!` and the
+    # affect's per-tstop `lazyload!`.  Defaults to `true` so standalone
+    # `mtkcompile(loader)` (no parent system to prune against) loads
+    # everything.
+    #
+    # `preloaded_buf`: closure-shared full-grid buffer for this interp,
+    # populated by `_preload_interp!` from `_apply_live_mask!` (at
+    # `couple+convert` time or during a manual `prune_unused_interps!` call),
+    # with a lazy first-fire fallback in the affect for the `compose +
+    # mtkcompile` path.  Shared by reference across every `ODEProblem` built
+    # from the same compiled system, so memory stays at one buffer per live
+    # interp regardless of how many problems are built.
     interp_info = (data_sym = p_data, tstart_sym = p_tstart, tstep_sym = p_tstep,
         spatial_consts = spatial_consts, extrap_const = p_extrap,
         unit_const = unit_scale, itp = itp, var_sym = n,
         data_dims = data_dims, data_eltype = To,
         const_defaults = const_defaults, spatial_interp = spatial_interp,
-        live = Ref(true))
+        live = Ref(true), preloaded_buf = Ref{Any}(nothing))
 
     # Single source of truth for the interp formula.
     rhs = wrapper_f(build_interp_expr(interp_info, t_ref + t, coords))
@@ -507,16 +515,19 @@ function build_interp_event(interp_infos, starttime::DateTime)
     ctx_vals = Tuple(info.itp for info in interp_infos)
     ctx_nt = NamedTuple{ctx_keys}(ctx_vals)
 
-    # The full-grid data buffer lives on the parameter object itself.  Each
-    # data parameter starts out wrapping a 2^N sentinel array (see
-    # `_make_array_discrete`); the first fire of the affect below grows it to
-    # the full grid via `similar(domain.u_proto, ...)` and loads the first
-    # window of data.  Subsequent fires reuse the parameter's array in place
-    # via `lazyload!`, so steady-state memory is exactly one full-grid buffer
-    # per live variable (plus, for cross-device runs, a host staging array
-    # inside `cache.host_scratch`).  Variables whose `live[]` has been
-    # cleared by `_apply_live_mask!` keep their sentinel buffer — no NetCDF
-    # read, no full-grid allocation.
+    # The full-grid data buffer lives on `info.preloaded_buf[]`, allocated
+    # and NetCDF-loaded by `_preload_interp!` (see `_apply_live_mask!`) so by
+    # the time the affect fires it usually just needs to swap the buffer into
+    # `MTKParameters` (overwriting the 2^N sentinel that `_make_array_discrete`
+    # installed as the parameter default) and refresh the cache window via
+    # `lazyload!`.  Steady-state memory is one full-grid buffer per live
+    # variable (plus, for cross-device runs, a host staging array inside
+    # `cache.host_scratch`); variables whose `live[]` has been cleared by
+    # `_apply_live_mask!` have `preloaded_buf[] === nothing` and keep their
+    # sentinel buffer — no NetCDF read, no full-grid allocation.  In the
+    # `compose + mtkcompile` path the affect's first fire calls
+    # `_preload_interp!` itself, so the same buffer-sharing semantics apply
+    # whether pruning ran at convert time or at problem-init.
     #
     # `SolverStrangThreads` fires the affect from multiple threads
     # concurrently, so it is guarded by a lock.  The lock only covers callback
@@ -528,18 +539,10 @@ function build_interp_event(interp_infos, starttime::DateTime)
     # (`SolverStrangSerial/Threads`) build inner sub-integrators that never
     # receive the `initialize` fire on the data-loading callback — they go
     # straight into the regular affect at the first tstop.  Using the same
-    # closure means the first fire on each path does both the grow and the
-    # load, regardless of whether MTK's `initialize` callback reached this
-    # integrator.
+    # closure means the first fire on each path performs the sentinel→full
+    # buffer swap and refreshes the cache window, regardless of whether MTK's
+    # `initialize` callback reached this integrator.
     update_lock = ReentrantLock()
-
-    # Per-interp_info `live` Refs captured so the affect can skip variables
-    # that no compiled equation in the parent system references.  Refs
-    # default to `true`; [`prune_unused_interps!`] (opt-in) flips them to
-    # `false` after compilation.  Dead variables keep whatever the parameter
-    # buffer was set to at problem construction (the 2^N sentinel) — no
-    # NetCDF read, no full-grid allocation.
-    lives = [info.live for info in interp_infos]
 
     # Auto-prune fallback flag.  On the first affect invocation against a
     # given integrator we walk `integ.f.sys` and apply `_apply_live_mask!` to
@@ -557,38 +560,6 @@ function build_interp_event(interp_infos, starttime::DateTime)
     # `live[]` for that path.
     prune_done = Ref(false)
 
-    # Per-interp closure-cached full-grid buffer.  The parameter that each
-    # `ODEProblem` is built from holds a 2^N sentinel as its default
-    # (see `create_interp_equation`); when an affect fire detects the
-    # sentinel, it swaps in a full-grid buffer drawn from `shared_bufs`,
-    # allocating on first fire and reusing thereafter.
-    #
-    # Why one buffer per *closure*, not one per `ODEProblem`:
-    #   - Multiple `ODEProblem`s can be built from the same compiled
-    #     system (e.g. `wrf_solve_test.jl` builds five problems from one
-    #     `wrf_compiled`).  Each problem's `MTKParameters` is constructed
-    #     fresh from the defaults, so each starts with its own sentinel.
-    #   - If we allocated a *new* full-grid buffer for each problem,
-    #     production-scale WRF (108 interps × 601×251×32×2 ≈ 8 GB per
-    #     full set) would OOM after a few problems even on a workstation.
-    #   - If we relied on a closure-captured `grown[]` BitVector — like
-    #     the pre-existing code did — the first problem flips it `true`
-    #     and subsequent problems skip the swap entirely, leaving their
-    #     sentinel buffer in place.  The next `lazyload!` then writes the
-    #     regridded data into a 2^N slice and the solver silently sees
-    #     zeros.
-    # The shared-buffer approach gives each new problem a populated
-    # buffer immediately (the cache state inside the DSI describes
-    # *this* buffer's contents) and caps steady-state memory at one
-    # full-grid buffer per live interp regardless of how many problems
-    # are built from the compiled system.
-    #
-    # `Vector{Any}` rather than a typed vector because per-interp element
-    # types differ (Float32 / Float64, CPU `Array` / device arrays); the
-    # type stability of the affect loop body doesn't matter for the RHS
-    # hot path, which reads the buffer through `interp_unsafe`.
-    shared_bufs = Vector{Any}(nothing, length(interp_infos))
-
     function update_data!(modified, observed, ctx, integ)
         lock(update_lock) do
             if !prune_done[]
@@ -600,20 +571,21 @@ function build_interp_event(interp_infos, starttime::DateTime)
             end
             updates = modified
             for (i, dsi) in enumerate(ctx)
-                lives[i][] || continue
+                info = interp_infos[i]
+                info.live[] || continue
                 dkey, tskey, dtkey = per_interp_keys[i]
                 current = modified[dkey]::DataBufferType
                 buf = current.data
                 full_size = (dsi.grid_size..., dsi.cache_size)
                 if size(buf) != full_size
-                    cached = shared_bufs[i]
-                    if cached === nothing
-                        cached = similar(dsi.domain.u_proto, eltype(buf),
-                            full_size...)
-                        fill!(cached, zero(eltype(buf)))
-                        shared_bufs[i] = cached
-                    end
-                    buf = cached
+                    # `MTKParameters` was built from the sentinel default;
+                    # swap in the (possibly already-loaded) full-grid buffer.
+                    # `_preload_interp!` no-ops if `info.preloaded_buf[]` is
+                    # already populated (the common case after convert-time
+                    # pruning), and allocates+loads on first call otherwise
+                    # (compose+mtkcompile fallback).
+                    _preload_interp!(info)
+                    buf = info.preloaded_buf[]
                 end
                 lazyload!(dsi, integ.t + t_ref, buf)
                 ts, tstep = get_time_grid_params(dsi)
@@ -646,8 +618,12 @@ $(SIGNATURES)
 Mark each interpolator in `loader_sys`'s [`InterpInfos`] metadata that no
 compiled equation in `parent_sys` references as `live[] = false`, so
 [`build_interp_event`]'s affect skips its `lazyload!` call (no NetCDF read,
-no first-fire grow-from-sentinel allocation).  `parent_sys` should be the
-post-`mtkcompile` system that `loader_sys` is part of.
+no full-grid allocation).  For every interpolator that survives the cut, the
+full-grid buffer is allocated immediately and the first cache window is
+read from NetCDF into it — so any I/O errors surface here rather than at
+solve time, and downstream `ODEProblem` construction reuses the same
+buffer by reference.  `parent_sys` should be the post-`mtkcompile` system
+that `loader_sys` is part of.
 
 `extra_needed` is an extra set of symbolic variables to treat as needed
 (beyond what `equations(parent_sys)` and `observed(parent_sys)` reach).
@@ -716,11 +692,34 @@ function _validate_tspan_coverage(info)
     return
 end
 
+# Allocate the full-grid data buffer for `info` and populate it with the
+# first cache window of NetCDF data.  Idempotent — returns immediately if a
+# buffer is already attached, so it is safe to call from both the convert-time
+# pruning walk and the affect's first-fire fallback without double-allocating
+# or double-reading.  The buffer is stored on `info.preloaded_buf` so that
+# every `ODEProblem` built from the same compiled system shares it by
+# reference; see the affect in `build_interp_event` for the runtime swap-in.
+function _preload_interp!(info)
+    info.preloaded_buf[] === nothing || return info.preloaded_buf[]
+    itp = info.itp
+    domain = itp.domain
+    full_size = (itp.grid_size..., itp.cache_size)
+    buf = similar(domain.u_proto, info.data_eltype, full_size...)
+    fill!(buf, zero(info.data_eltype))
+    t_ref_val = EarthSciMLBase.get_tref(domain)
+    tspan = EarthSciMLBase.get_tspan(domain)
+    lazyload!(itp, Float64(t_ref_val) + Float64(tspan[1]), buf)
+    info.preloaded_buf[] = buf
+    return buf
+end
+
 # Single source of truth for the live-mask walk: substitute observed equations
 # into each state equation's RHS and collect the names of every referenced
 # variable.  Then mark each `interp_info` whose data symbol does not appear in
-# the resulting set as `live[] = false`.  Used by `prune_unused_interps!`,
-# `make_prune_factory`, and the affect's first-fire auto-prune path.
+# the resulting set as `live[] = false`, and eagerly preload the NetCDF data
+# for every remaining live interp so the buffer is ready before any solver
+# touches it.  Used by `prune_unused_interps!`, `make_prune_factory`, and the
+# affect's first-fire auto-prune path.
 function _apply_live_mask!(interp_infos, parent_sys; extra_needed = ())
     bare_data_syms = [string(EarthSciMLBase.var2symbol(info.data_sym))
                       for info in interp_infos]
@@ -761,6 +760,15 @@ function _apply_live_mask!(interp_infos, parent_sys; extra_needed = ())
         @debug "Live-mask pruning: kept $(length(kept)) of $(length(interp_infos)) " *
                "interpolators, dropped $(length(dropped))" kept dropped
     end
+    # Eagerly populate the full-grid buffer for every live interp so callers
+    # can rely on the data being present without waiting for the affect's
+    # first fire.  In the safety fallback path (no needed variables found,
+    # e.g. standalone `mtkcompile(loader)`) this iterates over *all* interps,
+    # which matches the standalone semantics of loading everything.
+    for info in interp_infos
+        info.live[] || continue
+        _preload_interp!(info)
+    end
     return is_needed
 end
 
@@ -797,12 +805,14 @@ Build a `SysDiscreteEvent`-shaped factory closing over `interp_infos`.
 EarthSciMLBase's `convert(::Type{System}, ::CoupledSystem)` walks every
 subsystem's `SysDiscreteEvent` metadata and calls each factory with the
 temp coupled+`mtkcompile`d parent system; this factory side-effects the
-captured `interp_info.live` Refs and returns `nothing`, so the discrete
-event list passed to the parent is empty.  EarthSciMLBase's walker
-filters `nothing` returns, so registering this factory adds no new
-discrete events to the parent system — the existing loader-attached
-`build_interp_event` callback fires as before, just with a settled live
-mask by the time it runs.
+captured `interp_info.live` Refs, eagerly allocates and NetCDF-loads the
+full-grid buffer for every surviving interp (so the data is present in
+`info.preloaded_buf[]` before any `ODEProblem` is built), and returns
+`nothing`, so the discrete event list passed to the parent is empty.
+EarthSciMLBase's walker filters `nothing` returns, so registering this
+factory adds no new discrete events to the parent system — the existing
+loader-attached `build_interp_event` callback fires as before, just with
+a settled live mask and pre-populated buffers by the time it runs.
 
 `operator_vars` is *not* consulted here because the factory only sees the
 post-compile `System` (no `CoupledSystem` access).  Workflows using
