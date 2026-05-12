@@ -557,25 +557,38 @@ function build_interp_event(interp_infos, starttime::DateTime)
     # `live[]` for that path.
     prune_done = Ref(false)
 
-    # Each first-fire detects "this buffer is still sentinel-sized" by
-    # comparing its actual size to the per-interp full-grid size, and if
-    # different, allocates a full-grid replacement.  We use a size check
-    # rather than a closure-captured per-interp `grown[]` flag so that
-    # building multiple `ODEProblem`s from the same compiled system works
-    # correctly: each problem has its own MTKParameters with its own fresh
-    # sentinel buffer, and each one's first fire must grow that buffer
-    # independently.  A `grown[]` flag would be set true by the first
-    # problem and incorrectly leave the second problem's sentinel in place.
-    # The pathological "full grid happens to be 2×…×2 in every dim" case
-    # would skip the grow; no current test domain hits it.
+    # Per-interp closure-cached full-grid buffer.  The parameter that each
+    # `ODEProblem` is built from holds a 2^N sentinel as its default
+    # (see `create_interp_equation`); when an affect fire detects the
+    # sentinel, it swaps in a full-grid buffer drawn from `shared_bufs`,
+    # allocating on first fire and reusing thereafter.
     #
-    # When we do grow, we also reset the DSI's `TemporalCache` state.  The
-    # cache's `currenttime`/`times`/`initialized` track what was last
-    # written into the *previous* target buffer (from a prior ODEProblem
-    # built from the same compiled system).  Without the reset,
-    # `lazyload!` sees `currenttime == t` (or `t` in `tc.times` range) and
-    # short-circuits — leaving the fresh full-grid buffer at its
-    # zero-filled state, which silently produces a `[0.0, 0.0, …]` solve.
+    # Why one buffer per *closure*, not one per `ODEProblem`:
+    #   - Multiple `ODEProblem`s can be built from the same compiled
+    #     system (e.g. `wrf_solve_test.jl` builds five problems from one
+    #     `wrf_compiled`).  Each problem's `MTKParameters` is constructed
+    #     fresh from the defaults, so each starts with its own sentinel.
+    #   - If we allocated a *new* full-grid buffer for each problem,
+    #     production-scale WRF (108 interps × 601×251×32×2 ≈ 8 GB per
+    #     full set) would OOM after a few problems even on a workstation.
+    #   - If we relied on a closure-captured `grown[]` BitVector — like
+    #     the pre-existing code did — the first problem flips it `true`
+    #     and subsequent problems skip the swap entirely, leaving their
+    #     sentinel buffer in place.  The next `lazyload!` then writes the
+    #     regridded data into a 2^N slice and the solver silently sees
+    #     zeros.
+    # The shared-buffer approach gives each new problem a populated
+    # buffer immediately (the cache state inside the DSI describes
+    # *this* buffer's contents) and caps steady-state memory at one
+    # full-grid buffer per live interp regardless of how many problems
+    # are built from the compiled system.
+    #
+    # `Vector{Any}` rather than a typed vector because per-interp element
+    # types differ (Float32 / Float64, CPU `Array` / device arrays); the
+    # type stability of the affect loop body doesn't matter for the RHS
+    # hot path, which reads the buffer through `interp_unsafe`.
+    shared_bufs = Vector{Any}(nothing, length(interp_infos))
+
     function update_data!(modified, observed, ctx, integ)
         lock(update_lock) do
             if !prune_done[]
@@ -593,21 +606,14 @@ function build_interp_event(interp_infos, starttime::DateTime)
                 buf = current.data
                 full_size = (dsi.grid_size..., dsi.cache_size)
                 if size(buf) != full_size
-                    buf = similar(dsi.domain.u_proto, eltype(buf), full_size...)
-                    fill!(buf, zero(eltype(buf)))
-                    # Reset *all* of the cache's "what's loaded into target"
-                    # state: `initialized`, `currenttime`, and crucially
-                    # `times`.  Without resetting `times`, the next
-                    # `update!` call computes a new-times window that
-                    # overlaps the old `times` (e.g. both `[00:00, 01:00]`
-                    # for the same hourly data), `_plan_cache_advance`
-                    # reports "full overlap, nothing to load," and
-                    # `_fill_missing_slices!` writes nothing into the
-                    # fresh zero-filled buffer.
-                    dsi.cache.initialized = false
-                    dsi.cache.currenttime = DateTime(1, 1, 1)
-                    dsi.cache.times = [DateTime(0, 1, 1) + Hour(j)
-                                       for j in 1:dsi.cache_size]
+                    cached = shared_bufs[i]
+                    if cached === nothing
+                        cached = similar(dsi.domain.u_proto, eltype(buf),
+                            full_size...)
+                        fill!(cached, zero(eltype(buf)))
+                        shared_bufs[i] = cached
+                    end
+                    buf = cached
                 end
                 lazyload!(dsi, integ.t + t_ref, buf)
                 ts, tstep = get_time_grid_params(dsi)
