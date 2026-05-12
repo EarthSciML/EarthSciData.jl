@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1778538097459,
+  "lastUpdate": 1778553113142,
   "repoUrl": "https://github.com/EarthSciML/EarthSciData.jl",
   "entries": {
     "Julia benchmark result": [
@@ -5099,6 +5099,90 @@ window.BENCHMARK_DATA = {
             "value": 110427483679,
             "unit": "ns",
             "extra": "gctime=24612388465\nmemory=212104367384\nallocs=1739160310\nparams={\"evals\":1,\"evals_set\":false,\"gcsample\":false,\"gctrial\":true,\"memory_tolerance\":0.01,\"overhead\":0,\"samples\":10000,\"seconds\":5,\"time_tolerance\":0.05}"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "ctessum@gmail.com",
+            "name": "Christopher Tessum",
+            "username": "ctessum"
+          },
+          "committer": {
+            "email": "ctessum@gmail.com",
+            "name": "Christopher Tessum",
+            "username": "ctessum"
+          },
+          "distinct": true,
+          "id": "78ff5f8d79b739891bf39572ad44c38311626429",
+          "message": "Share grown interp buffer across ODEProblems to avoid OOM\n\nThe previous fix (d01a2f3b) correctly recognized that each\n`ODEProblem` built from the same compiled system gets its own fresh\nsentinel parameter buffer and needs its own first-fire grow.  But it\nallocated a *new* full-grid buffer per problem, which compounded:\nfive `ODEProblem` constructions from `wrf_compiled` in\n`wrf_solve_test.jl` would each demand ~8 GB (108 interps × 601×251×32×2\n× 8 bytes), and the subprocess got SIGKILL'd by the OS OOM-killer\npartway through.  The kill happened during test execution with no\nflushed stdio, so `Pkg.test` reported a bare \"subprocess failed.\"\n\nCap the steady-state allocation with a closure-captured\n`shared_bufs::Vector{Any}` stash: the first fire that sees a sentinel\nswaps in a freshly allocated full-grid buffer; later fires (including\nfires from later `ODEProblem`s with their own fresh sentinels) reuse\nthe same shared buffer.  The DSI's `TemporalCache` state then\ncorrectly describes the contents of `shared_bufs[i]` for every problem\nin the closure, so the data-loading short-circuit works as intended\nand `lazyload!` doesn't overwrite valid data.  This also obsoletes the\n`tc.times` reset from the previous fix, which is removed.\n\n`wrf_solve_test.jl` 5/5 passes (5m35s, down from 9m54s).\n`solve_test.jl` 6/6 passes (6m41s) — no regression.\n\nCo-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>",
+          "timestamp": "2026-05-11T19:27:27-05:00",
+          "tree_id": "de29f5803b73a6ca71903620dc5c5e1b6e387285",
+          "url": "https://github.com/EarthSciML/EarthSciData.jl/commit/78ff5f8d79b739891bf39572ad44c38311626429"
+        },
+        "date": 1778553112404,
+        "tool": "julia",
+        "benches": [
+          {
+            "name": "Interpolation hot path/2D linear",
+            "value": 8.744744744744745,
+            "unit": "ns",
+            "extra": "gctime=0\nmemory=0\nallocs=0\nparams={\"evals\":999,\"evals_set\":false,\"gcsample\":false,\"gctrial\":true,\"memory_tolerance\":0.01,\"overhead\":0,\"samples\":10000,\"seconds\":5,\"time_tolerance\":0.05}"
+          },
+          {
+            "name": "Interpolation hot path/2D nearest",
+            "value": 5.58,
+            "unit": "ns",
+            "extra": "gctime=0\nmemory=0\nallocs=0\nparams={\"evals\":1000,\"evals_set\":false,\"gcsample\":false,\"gctrial\":true,\"memory_tolerance\":0.01,\"overhead\":0,\"samples\":10000,\"seconds\":5,\"time_tolerance\":0.05}"
+          },
+          {
+            "name": "Interpolation hot path/3D linear",
+            "value": 12.956956956956956,
+            "unit": "ns",
+            "extra": "gctime=0\nmemory=0\nallocs=0\nparams={\"evals\":999,\"evals_set\":false,\"gcsample\":false,\"gctrial\":true,\"memory_tolerance\":0.01,\"overhead\":0,\"samples\":10000,\"seconds\":5,\"time_tolerance\":0.05}"
+          },
+          {
+            "name": "Interpolation hot path/3D nearest",
+            "value": 7.12012012012012,
+            "unit": "ns",
+            "extra": "gctime=0\nmemory=0\nallocs=0\nparams={\"evals\":999,\"evals_set\":false,\"gcsample\":false,\"gctrial\":true,\"memory_tolerance\":0.01,\"overhead\":0,\"samples\":10000,\"seconds\":5,\"time_tolerance\":0.05}"
+          },
+          {
+            "name": "Interpolation hot path/4D linear",
+            "value": 22.68273092369478,
+            "unit": "ns",
+            "extra": "gctime=0\nmemory=0\nallocs=0\nparams={\"evals\":996,\"evals_set\":false,\"gcsample\":false,\"gctrial\":true,\"memory_tolerance\":0.01,\"overhead\":0,\"samples\":10000,\"seconds\":5,\"time_tolerance\":0.05}"
+          },
+          {
+            "name": "Interpolation hot path/4D linear (grid-aligned)",
+            "value": 22.67269076305221,
+            "unit": "ns",
+            "extra": "gctime=0\nmemory=0\nallocs=0\nparams={\"evals\":996,\"evals_set\":false,\"gcsample\":false,\"gctrial\":true,\"memory_tolerance\":0.01,\"overhead\":0,\"samples\":10000,\"seconds\":5,\"time_tolerance\":0.05}"
+          },
+          {
+            "name": "Interpolation hot path/4D nearest",
+            "value": 9.947947947947949,
+            "unit": "ns",
+            "extra": "gctime=0\nmemory=0\nallocs=0\nparams={\"evals\":999,\"evals_set\":false,\"gcsample\":false,\"gctrial\":true,\"memory_tolerance\":0.01,\"overhead\":0,\"samples\":10000,\"seconds\":5,\"time_tolerance\":0.05}"
+          },
+          {
+            "name": "Interpolation hot path/4D nearest (grid-aligned)",
+            "value": 9.957957957957959,
+            "unit": "ns",
+            "extra": "gctime=0\nmemory=0\nallocs=0\nparams={\"evals\":999,\"evals_set\":false,\"gcsample\":false,\"gctrial\":true,\"memory_tolerance\":0.01,\"overhead\":0,\"samples\":10000,\"seconds\":5,\"time_tolerance\":0.05}"
+          },
+          {
+            "name": "NEI Simulator/Serial",
+            "value": 145293792121,
+            "unit": "ns",
+            "extra": "gctime=22154087434\nmemory=212355569880\nallocs=1751768886\nparams={\"evals\":1,\"evals_set\":false,\"gcsample\":false,\"gctrial\":true,\"memory_tolerance\":0.01,\"overhead\":0,\"samples\":10000,\"seconds\":5,\"time_tolerance\":0.05}"
+          },
+          {
+            "name": "NEI Simulator/Threads",
+            "value": 121205700157,
+            "unit": "ns",
+            "extra": "gctime=28959841770\nmemory=212356809144\nallocs=1751782398\nparams={\"evals\":1,\"evals_set\":false,\"gcsample\":false,\"gctrial\":true,\"memory_tolerance\":0.01,\"overhead\":0,\"samples\":10000,\"seconds\":5,\"time_tolerance\":0.05}"
           }
         ]
       }
