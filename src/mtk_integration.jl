@@ -722,22 +722,9 @@ end
 # affect's first-fire auto-prune path.
 function _apply_live_mask!(interp_infos, parent_sys; extra_needed = ())
     bare_data_syms = [string(EarthSciMLBase.var2symbol(info.data_sym))
-                      for info in interp_infos]
-    obs_subst = Dict{Any, Any}()
-    for eq in ModelingToolkit.observed(parent_sys)
-        obs_subst[eq.lhs] = eq.rhs
-    end
-    referenced = Set{String}()
-    for eq in ModelingToolkit.equations(parent_sys)
-        substed = isempty(obs_subst) ? eq.rhs :
-                  Symbolics.fixpoint_sub(eq.rhs, obs_subst)
-        for v in Symbolics.get_variables(substed)
-            push!(referenced, string(EarthSciMLBase.var2symbol(v)))
-        end
-    end
-    for v in extra_needed
-        push!(referenced, string(EarthSciMLBase.var2symbol(v)))
-    end
+                    for info in interp_infos]
+    referenced = string.(EarthSciMLBase.var2symbol.(EarthSciMLBase.get_needed_vars_compiled(
+            parent_sys; extra_vars = extra_needed)))
     is_needed = [bare in referenced ||
                  any(s -> endswith(s, "₊" * bare), referenced)
                  for bare in bare_data_syms]
@@ -759,15 +746,6 @@ function _apply_live_mask!(interp_infos, parent_sys; extra_needed = ())
         # `JULIA_DEBUG=EarthSciData` to enable.
         @debug "Live-mask pruning: kept $(length(kept)) of $(length(interp_infos)) " *
                "interpolators, dropped $(length(dropped))" kept dropped
-    end
-    # Eagerly populate the full-grid buffer for every live interp so callers
-    # can rely on the data being present without waiting for the affect's
-    # first fire.  In the safety fallback path (no needed variables found,
-    # e.g. standalone `mtkcompile(loader)`) this iterates over *all* interps,
-    # which matches the standalone semantics of loading everything.
-    for info in interp_infos
-        info.live[] || continue
-        _preload_interp!(info)
     end
     return is_needed
 end
