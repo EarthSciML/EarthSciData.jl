@@ -913,6 +913,11 @@ function interp_unsafe(data::AbstractArray{T, 2}, fit, fi1, extrap) where {T}
     n1, nt = size(data)
     @boundscheck (fit < one(T) || fit > T(nt)) && _throw_fit_oor()
 
+    # NaN-safe early return: NaN coords can arise during init solves before
+    # the discrete data-load event has fired (data buffers are zero, so
+    # downstream expressions like log(0) or 1/0 produce NaN).
+    (isnan(fi1) | isnan(fit)) && return T(NaN)
+
     # Extrapolation check
     if extrap < one(T)
         if fi1 < one(T) || fi1 > T(n1) || fit < one(T) || fit > T(nt)
@@ -925,8 +930,8 @@ function interp_unsafe(data::AbstractArray{T, 2}, fit, fi1, extrap) where {T}
     fit = clamp(fit, one(T), T(nt))
 
     # Floor indices and weights
-    i1 = clamp(unsafe_trunc(Int, fi1), 1, n1)
-    it = clamp(unsafe_trunc(Int, fit), 1, nt)
+    i1 = clamp(trunc(Int, fi1), 1, n1)
+    it = clamp(trunc(Int, fit), 1, nt)
     w1 = fi1 - T(i1)
     wt = fit - T(it)
 
@@ -950,6 +955,8 @@ function interp_unsafe(data::AbstractArray{T, 3}, fit, fi1, fi2, extrap) where {
     n1, n2, nt = size(data)
     @boundscheck (fit < one(T) || fit > T(nt)) && _throw_fit_oor()
 
+    (isnan(fi1) | isnan(fi2) | isnan(fit)) && return T(NaN)
+
     # Extrapolation check
     if extrap < one(T)
         if fi1 < one(T) || fi1 > T(n1) || fi2 < one(T) || fi2 > T(n2) ||
@@ -964,9 +971,9 @@ function interp_unsafe(data::AbstractArray{T, 3}, fit, fi1, fi2, extrap) where {
     fit = clamp(fit, one(T), T(nt))
 
     # Floor indices and weights
-    i1 = clamp(unsafe_trunc(Int, fi1), 1, n1)
-    i2 = clamp(unsafe_trunc(Int, fi2), 1, n2)
-    it = clamp(unsafe_trunc(Int, fit), 1, nt)
+    i1 = clamp(trunc(Int, fi1), 1, n1)
+    i2 = clamp(trunc(Int, fi2), 1, n2)
+    it = clamp(trunc(Int, fit), 1, nt)
     w1 = fi1 - T(i1)
     w2 = fi2 - T(i2)
     wt = fit - T(it)
@@ -996,6 +1003,8 @@ function interp_unsafe(data::AbstractArray{T, 4}, fit, fi1, fi2, fi3, extrap) wh
     n1, n2, n3, nt = size(data)
     @boundscheck (fit < one(T) || fit > T(nt)) && _throw_fit_oor()
 
+    (isnan(fi1) | isnan(fi2) | isnan(fi3) | isnan(fit)) && return T(NaN)
+
     # Extrapolation check
     if extrap < one(T)
         if fi1 < one(T) || fi1 > T(n1) || fi2 < one(T) || fi2 > T(n2) ||
@@ -1011,10 +1020,10 @@ function interp_unsafe(data::AbstractArray{T, 4}, fit, fi1, fi2, fi3, extrap) wh
     fit = clamp(fit, one(T), T(nt))
 
     # Floor indices and weights
-    i1 = clamp(unsafe_trunc(Int, fi1), 1, n1)
-    i2 = clamp(unsafe_trunc(Int, fi2), 1, n2)
-    i3 = clamp(unsafe_trunc(Int, fi3), 1, n3)
-    it = clamp(unsafe_trunc(Int, fit), 1, nt)
+    i1 = clamp(trunc(Int, fi1), 1, n1)
+    i2 = clamp(trunc(Int, fi2), 1, n2)
+    i3 = clamp(trunc(Int, fi3), 1, n3)
+    it = clamp(trunc(Int, fit), 1, nt)
     w1 = fi1 - T(i1)
     w2 = fi2 - T(i2)
     w3 = fi3 - T(i3)
@@ -1058,6 +1067,8 @@ function interp_time_only(data::AbstractArray{T, 2}, fit, fi1, extrap) where {T}
     n1, nt = size(data)
     @boundscheck (fit < one(T) || fit > T(nt)) && _throw_fit_oor()
 
+    (isnan(fi1) | isnan(fit)) && return T(NaN)
+
     # Extrapolation check (zero outside range if extrap < 1)
     if extrap < one(T)
         if fi1 < one(T) || fi1 > T(n1)
@@ -1065,8 +1076,8 @@ function interp_time_only(data::AbstractArray{T, 2}, fit, fi1, extrap) where {T}
         end
     end
 
-    i1 = clamp(unsafe_trunc(Int, fi1 + T(0.5)), 1, n1)
-    it = clamp(unsafe_trunc(Int, fit), 1, nt)
+    i1 = clamp(trunc(Int, fi1 + T(0.5)), 1, n1)
+    it = clamp(trunc(Int, fit), 1, nt)
     wt = fit - T(it)
     jt = min(it + 1, nt)
     return (one(T) - wt) * data[i1, it] + wt * data[i1, jt]
@@ -1079,15 +1090,17 @@ function interp_time_only(data::AbstractArray{T, 3}, fit, fi1, fi2, extrap) wher
     n1, n2, nt = size(data)
     @boundscheck (fit < one(T) || fit > T(nt)) && _throw_fit_oor()
 
+    (isnan(fi1) | isnan(fi2) | isnan(fit)) && return T(NaN)
+
     if extrap < one(T)
         if fi1 < one(T) || fi1 > T(n1) || fi2 < one(T) || fi2 > T(n2)
             return zero(T)
         end
     end
 
-    i1 = clamp(unsafe_trunc(Int, fi1 + T(0.5)), 1, n1)
-    i2 = clamp(unsafe_trunc(Int, fi2 + T(0.5)), 1, n2)
-    it = clamp(unsafe_trunc(Int, fit), 1, nt)
+    i1 = clamp(trunc(Int, fi1 + T(0.5)), 1, n1)
+    i2 = clamp(trunc(Int, fi2 + T(0.5)), 1, n2)
+    it = clamp(trunc(Int, fit), 1, nt)
     wt = fit - T(it)
     jt = min(it + 1, nt)
     return (one(T) - wt) * data[i1, i2, it] + wt * data[i1, i2, jt]
@@ -1101,6 +1114,8 @@ function interp_time_only(
     n1, n2, n3, nt = size(data)
     @boundscheck (fit < one(T) || fit > T(nt)) && _throw_fit_oor()
 
+    (isnan(fi1) | isnan(fi2) | isnan(fi3) | isnan(fit)) && return T(NaN)
+
     if extrap < one(T)
         if fi1 < one(T) || fi1 > T(n1) || fi2 < one(T) || fi2 > T(n2) ||
            fi3 < one(T) || fi3 > T(n3)
@@ -1108,10 +1123,10 @@ function interp_time_only(
         end
     end
 
-    i1 = clamp(unsafe_trunc(Int, fi1 + T(0.5)), 1, n1)
-    i2 = clamp(unsafe_trunc(Int, fi2 + T(0.5)), 1, n2)
-    i3 = clamp(unsafe_trunc(Int, fi3 + T(0.5)), 1, n3)
-    it = clamp(unsafe_trunc(Int, fit), 1, nt)
+    i1 = clamp(trunc(Int, fi1 + T(0.5)), 1, n1)
+    i2 = clamp(trunc(Int, fi2 + T(0.5)), 1, n2)
+    i3 = clamp(trunc(Int, fi3 + T(0.5)), 1, n3)
+    it = clamp(trunc(Int, fit), 1, nt)
     wt = fit - T(it)
     jt = min(it + 1, nt)
     return (one(T) - wt) * data[i1, i2, i3, it] + wt * data[i1, i2, i3, jt]

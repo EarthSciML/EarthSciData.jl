@@ -367,9 +367,10 @@ const _Bp_data = [
 # Piecewise linear interpolation over integer knots `1..length(coeffs)`.
 # `levx` outside the knot range is clamped (Flat extrapolation, matching
 # the previous DataInterpolations default).
-@inline function _hybrid_lerp(coeffs::AbstractVector, levx)
+@inline function _hybrid_lerp(coeffs::AbstractVector, levx::T) where T
+    isnan(levx) && return T(NaN)
     n = length(coeffs)
-    i = clamp(unsafe_trunc(Int, levx), 1, n - 1)
+    i = clamp(trunc(Int, levx), 1, n - 1)
     f = levx - i
     return coeffs[i] * (1 - f) + coeffs[i + 1] * f
 end
