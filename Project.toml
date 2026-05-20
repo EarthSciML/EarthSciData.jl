@@ -1,6 +1,6 @@
 name = "EarthSciData"
 uuid = "a293c155-435f-439d-9c11-a083b6b47337"
-version = "0.16.1"
+version = "0.16.2"
 authors = ["EarthSciML Authors"]
 
 [deps]
@@ -37,7 +37,7 @@ DocStringExtensions = "0.9.3"
 DomainSets = "0.7.15"
 Downloads = "1"
 DynamicQuantities = "1"
-EarthSciMLBase = "0.25.11"
+EarthSciMLBase = "0.25.12"
 Interpolations = "0.16"
 JLD2 = "0.5, 0.6"
 JSON3 = "1.14.3"
