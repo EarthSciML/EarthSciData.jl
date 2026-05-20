@@ -375,10 +375,15 @@ const _Bp_data = [
 end
 
 # Piecewise constant slope between adjacent knots — the closed-form
-# derivative of `_hybrid_lerp` w.r.t. `levx`.
+# derivative of `_hybrid_lerp` w.r.t. `levx`.  At an integer knot this
+# returns the *left*-segment slope (segment `[i-1, i]`), matching the
+# convention of the `DataInterpolations.LinearInterpolation.derivative`
+# that this function replaces.  Callers (e.g. EnvironmentalTransport's
+# advection operator via `δPδlev`) evaluate the derivative at exact
+# integer model levels, so the choice of one-sided limit is observable.
 @inline function _hybrid_lerp_deriv(coeffs::AbstractVector, levx)
     n = length(coeffs)
-    i = clamp(unsafe_trunc(Int, levx), 1, n - 1)
+    i = clamp(ceil(Int, levx) - 1, 1, n - 1)
     return coeffs[i + 1] - coeffs[i]
 end
 
@@ -423,6 +428,34 @@ ModelingToolkit.get_unit(::typeof(Bp_deriv), args) = 1.0
 # Ap/Bp shims and removing it from this file silently broke era5's unit
 # checking.
 ModelingToolkit.get_unit(::typeof(DataInterpolations.derivative), args) = 1.0
+
+# Exact inverse of the hybrid-grid pressure map.  Given a pressure `P` and
+# surface pressure `Ps` (both Pa), return the fractional level argument `x`
+# satisfying  P = P_unit*Ap(x) + Bp(x)*Ps.  `Ap`/`Bp` are piecewise linear
+# and the combination is strictly decreasing in `x`, so the inverse is exact:
+# bracket the integer knot containing `P`, then interpolate linearly within
+# that segment.  `P_unit` is 1 Pa, so the `_Ap_data` values (already in Pa)
+# enter directly.  `P` outside the grid saturates at the first / last level.
+function lev_from_pressure(P::Real, Ps::Real)
+    n = length(_Ap_data)
+    Pknot(i) = Ap(float(i)) + Bp(float(i)) * Ps
+    P >= Pknot(1) && return one(float(P))
+    P <= Pknot(n) && return float(n)
+    for i in 1:(n - 1)
+        Phi, Plo = Pknot(i), Pknot(i + 1)
+        Plo <= P <= Phi && return i + (P - Phi) / (Plo - Phi)
+    end
+    return float(n)   # unreachable: P is bracketed by the checks above
+end
+
+# `lev_from_pressure` returns a dimensionless level; the shims keep MTK's unit
+# walker from invoking it with `DynamicQuantities.Quantity` arguments, exactly
+# as for the `Ap`/`Bp` shims above.  No derivative is registered: the only
+# caller (the Sofiev plume-rise coupler) uses it in finite-difference probes,
+# matching how the GEOS-FP interpolators are used on that code path.
+ModelingToolkit.get_unit(::typeof(lev_from_pressure)) = 1.0
+ModelingToolkit.get_unit(::typeof(lev_from_pressure), args) = 1.0
+@register_symbolic lev_from_pressure(P::Real, Ps::Real)
 
 struct GEOSFPCoupler
     sys::Any

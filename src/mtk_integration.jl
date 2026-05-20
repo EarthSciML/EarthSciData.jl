@@ -713,21 +713,98 @@ function _preload_interp!(info)
     return buf
 end
 
-# Single source of truth for the live-mask walk: substitute observed equations
-# into each state equation's RHS and collect the names of every referenced
-# variable.  Then mark each `interp_info` whose data symbol does not appear in
-# the resulting set as `live[] = false`, and eagerly preload the NetCDF data
-# for every remaining live interp so the buffer is ready before any solver
-# touches it.  Used by `prune_unused_interps!`, `make_prune_factory`, and the
-# affect's first-fire auto-prune path.
+# Single source of truth for the live-mask walk.  An interpolator is "needed"
+# unless it is *orphaned*: consumed by nothing the simulation or a downstream
+# output actually evaluates.
+#
+# The walk collects every variable/parameter reachable (through the observed
+# equations, folded in with `fixpoint_sub`) from a set of *roots*:
+#   - state-equation RHSs — the dynamics the solver integrates;
+#   - initialization equations — constraints solved at problem build (e.g. the
+#     plume-rise `H_p ~ Z_agl` pin, which routes through the PBLH interpolator);
+#   - observed equations *outside the loader's own namespace* — coupling
+#     connectors (`GaussianPGB₊CLDTOT ~ GEOSFP₊A1₊CLDTOT`) and downstream
+#     diagnostics (the Gaussian-plume `C_gl`), so an interpolator feeding an
+#     observed-only output is kept even though no state equation touches it.
+# The loader's *own* observed equations — both `var ~ interp(data, ...)` loader
+# equations and derived quantities like GEOSFP's `Z_agl ~ f(T, QV, PS)` — are
+# deliberately excluded as roots: counting them would make a standalone
+# `mtkcompile(loader)` pin (and fail to prune) every variable its internal
+# diagnostics happen to reference.  An interpolator is then kept iff its loader
+# variable (`var_sym`) or data-buffer parameter (`data_sym`) appears in the
+# reachable set; `data_sym` is matched in addition to `var_sym` because
+# `interp_callable` builds equations that reference the data parameter directly.
+#
+# `EarthSciMLBase.get_needed_vars_compiled` is *not* usable here: it walks the
+# unknown-to-unknown dependency graph and never reports parameters or
+# observed-only diagnostics.
+#
+# As a safety fallback, if no interpolator is found to be needed (e.g. a
+# standalone `mtkcompile(loader)` with no parent dynamics) nothing is pruned.
+# NetCDF data is loaded lazily by `_preload_interp!` on the affect's first
+# fire, not here.  Used by `prune_unused_interps!`, `make_prune_factory`, and
+# the affect's first-fire auto-prune path.
 function _apply_live_mask!(interp_infos, parent_sys; extra_needed = ())
     bare_data_syms = [string(EarthSciMLBase.var2symbol(info.data_sym))
-                    for info in interp_infos]
-    referenced = string.(EarthSciMLBase.var2symbol.(EarthSciMLBase.get_needed_vars_compiled(
-            parent_sys; extra_vars = extra_needed)))
-    is_needed = [bare in referenced ||
-                 any(s -> endswith(s, "₊" * bare), referenced)
-                 for bare in bare_data_syms]
+                      for info in interp_infos]
+    bare_var_syms = [string(EarthSciMLBase.var2symbol(info.var_sym))
+                     for info in interp_infos]
+    # `matches(bare, name)`: true if `name` equals `bare` or is `bare` with a
+    # namespace prefix (e.g. `A1₊PBLH` matches `GEOSFP₊A1₊PBLH`).
+    matches(bare, name) = name == bare || endswith(name, "₊" * bare)
+
+    obs = ModelingToolkit.observed(parent_sys)
+    obs_subst = Dict{Any, Any}()
+    for eq in obs
+        obs_subst[eq.lhs] = eq.rhs
+    end
+
+    # Derive the loader's namespace prefix (e.g. `GEOSFP₊`) from one of its
+    # loader equations: `var_sym` is bare (`A1₊PBLH`) while the compiled LHS is
+    # namespaced (`GEOSFP₊A1₊PBLH`), so the prefix is what remains after
+    # chopping the bare suffix.  It stays empty for a top-level loader, in
+    # which case nothing is "external" and the safety fallback keeps every
+    # interpolator.
+    loader_ns = ""
+    for eq in obs
+        lhs_name = string(EarthSciMLBase.var2symbol(eq.lhs))
+        k = findfirst(b -> endswith(lhs_name, "₊" * b), bare_var_syms)
+        if k !== nothing
+            loader_ns = chop(lhs_name; tail = length(bare_var_syms[k]))
+            break
+        elseif lhs_name in bare_var_syms
+            break  # top-level (un-namespaced) loader
+        end
+    end
+
+    referenced = Set{String}()
+    function record!(expr)
+        substed = isempty(obs_subst) ? expr :
+                  Symbolics.fixpoint_sub(expr, obs_subst)
+        for v in Symbolics.get_variables(substed)
+            push!(referenced, string(EarthSciMLBase.var2symbol(v)))
+        end
+        return nothing
+    end
+    for eq in ModelingToolkit.equations(parent_sys)
+        record!(eq.rhs)
+    end
+    for eq in ModelingToolkit.get_initialization_eqs(parent_sys)
+        record!(eq.lhs)
+        record!(eq.rhs)
+    end
+    if !isempty(loader_ns)
+        for eq in obs
+            lhs_name = string(EarthSciMLBase.var2symbol(eq.lhs))
+            startswith(lhs_name, loader_ns) || record!(eq.rhs)
+        end
+    end
+    for v in extra_needed
+        push!(referenced, string(EarthSciMLBase.var2symbol(v)))
+    end
+    is_needed = [any(s -> matches(bare_data_syms[k], s), referenced) ||
+                 any(s -> matches(bare_var_syms[k], s), referenced)
+                 for k in eachindex(interp_infos)]
     if any(is_needed)
         kept = String[]
         dropped = String[]
