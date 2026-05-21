@@ -484,6 +484,43 @@ end
     return :(NamedTuple{$K}(($(exprs...),)))
 end
 
+# Function barrier for the per-interpolator work inside `update_data!`'s
+# hot loop. Both `interp_infos` (a `Vector`) and `ctx` (a `NamedTuple` keyed
+# by interp) carry heterogeneous element types, so inside the parent
+# closure `interp_infos[i]` and `ctx[i]` come back with abstract static
+# types. Every `info.live[]`, `info.preloaded_buf[]`, and
+# `lazyload!(dsi, ...)` call would then dispatch dynamically and box
+# returns — which is what shows up in the affect's profile as a wall of
+# `getproperty` / `generated_callfunc` frames. Bouncing through this
+# top-level helper lets Julia re-specialize on the concrete runtime
+# types of `info` and `dsi`, so the body compiles down to static calls.
+@inline function _update_one_interp!(info, dsi, t_abs,
+        data_wrappers::Vector{Any}, ts_buf::Vector{Float64},
+        tstep_buf::Vector{Float64}, i::Int)
+    info.live[] || return nothing
+    if data_wrappers[i] === nothing
+        info.preloaded_buf[] === nothing && _preload_interp!(info)
+        data_wrappers[i] = DataBufferType(info.preloaded_buf[])
+    end
+    buf = info.preloaded_buf[]
+    _lazyload_and_record!(dsi, t_abs, buf, ts_buf, tstep_buf, i)
+    return nothing
+end
+
+# Second-level barrier: `info.preloaded_buf` is intentionally `Ref{Any}`
+# so a single `interp_info` can carry `Array`/`CuArray`/etc. depending on
+# the domain backend, which means `buf` is statically `Any` at this point.
+# Re-specializing here turns `lazyload!`/`get_time_grid_params` into static
+# dispatch on the concrete buffer / `dsi` types.
+@inline function _lazyload_and_record!(dsi, t_abs, buf,
+        ts_buf::Vector{Float64}, tstep_buf::Vector{Float64}, i::Int)
+    lazyload!(dsi, t_abs, buf)
+    ts, tstep = get_time_grid_params(dsi)
+    @inbounds ts_buf[i] = ts
+    @inbounds tstep_buf[i] = tstep
+    return nothing
+end
+
 # Build a preset-time `SymbolicDiscreteCallback` that reloads the
 # interpolation data buffers at each dataset time stop. The event uses the
 # bare (un-namespaced) parameter symbols from `interp_infos`; MTK's
@@ -629,27 +666,22 @@ function build_interp_event(interp_infos, starttime::DateTime)
                 live_keys_val_ref[] = Val(Tuple(live_keys))
                 live_idx_val_ref[] = Val(Tuple(live_idx))
             end
-            for (i, dsi) in enumerate(ctx)
-                info = interp_infos[i]
-                info.live[] || continue
-                # Bypass `modified[dkey]` entirely: that lookup boxes the
-                # NamedTuple value (heterogeneous union return) for a
-                # one-bit "is this the sentinel?" signal we already have in
-                # `data_wrappers[i] === nothing` (true on the first fire of
-                # this affect, false thereafter). On first fire we ensure
-                # the full-grid buffer exists (`_preload_interp!` no-ops if
-                # `info.preloaded_buf[]` is already populated by convert-time
-                # pruning, allocates+loads otherwise) and cache the
-                # `DataBufferType` wrapper for reuse.
-                if data_wrappers[i] === nothing
-                    info.preloaded_buf[] === nothing && _preload_interp!(info)
-                    data_wrappers[i] = DataBufferType(info.preloaded_buf[])
-                end
-                buf = info.preloaded_buf[]
-                lazyload!(dsi, integ.t + t_ref, buf)
-                ts, tstep = get_time_grid_params(dsi)
-                ts_buf[i] = ts
-                tstep_buf[i] = tstep
+            # Per-interp work goes through `_update_one_interp!` to get a
+            # function barrier: that's what makes `info.preloaded_buf[]`,
+            # `lazyload!(dsi, …)`, etc. dispatch statically on the concrete
+            # runtime types instead of through the heterogeneous
+            # `interp_infos[i]` / `ctx[i]` containers. On first fire the
+            # full-grid buffer exists (`_preload_interp!` no-ops if
+            # `info.preloaded_buf[]` is already populated by convert-time
+            # pruning, allocates+loads otherwise) and the `DataBufferType`
+            # wrapper for reuse is cached. The full-grid buffer / wrapper
+            # signal `data_wrappers[i] === nothing` replaces a
+            # `modified[dkey]` probe whose heterogeneous-union return would
+            # otherwise box.
+            t_abs = integ.t + t_ref
+            for i in 1:n_interp
+                _update_one_interp!(interp_infos[i], ctx[i], t_abs,
+                    data_wrappers, ts_buf, tstep_buf, i)
             end
             _build_updates_nt(live_keys_val_ref[], live_idx_val_ref[],
                 data_wrappers, ts_buf, tstep_buf)
