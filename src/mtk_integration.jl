@@ -460,6 +460,30 @@ function needed_vars(sys)
     EarthSciMLBase.var2symbol.(collect(all_vars))
 end
 
+# Type-stable, allocation-free assembler for the affect's update bundle.
+# The interleaved key layout `(data₁, ts₁, tstep₁, data₂, ts₂, tstep₂, …)` is
+# unrolled at compile time from `K` (key tuple) and `LIDX` (per-live-interp
+# index into the closure-shared buffers). `data_cache` holds cached
+# `DataBufferType` wrappers (one per interp index, populated on first fire);
+# `ts_buf`/`tstep_buf` are typed `Vector{Float64}` so the resulting NamedTuple
+# fields stay concrete `Float64` instead of boxing through a `Vector{Any}`
+# intermediate.
+@generated function _build_updates_nt(::Val{K}, ::Val{LIDX},
+        data_cache::Vector{Any},
+        ts_buf::Vector{Float64},
+        tstep_buf::Vector{Float64}) where {K, LIDX}
+    n_live = length(LIDX)
+    @assert length(K) == 3 * n_live "K/LIDX length mismatch ($(length(K)) vs 3*$n_live)"
+    exprs = Expr[]
+    for j in 1:n_live
+        i = LIDX[j]
+        push!(exprs, :(@inbounds data_cache[$i]))
+        push!(exprs, :(@inbounds ts_buf[$i]))
+        push!(exprs, :(@inbounds tstep_buf[$i]))
+    end
+    return :(NamedTuple{$K}(($(exprs...),)))
+end
+
 # Build a preset-time `SymbolicDiscreteCallback` that reloads the
 # interpolation data buffers at each dataset time stop. The event uses the
 # bare (un-namespaced) parameter symbols from `interp_infos`; MTK's
@@ -560,7 +584,32 @@ function build_interp_event(interp_infos, starttime::DateTime)
     # `live[]` for that path.
     prune_done = Ref(false)
 
-    function update_data!(modified, observed, ctx, integ)
+    # Cached `Val`-lifted tuples of the *live* keys and interp indices,
+    # settled on the first affect call after pruning runs. Non-live entries
+    # are skipped entirely from the return: `_generated_writeback` only writes
+    # keys present in the returned NamedTuple, so omitting non-live ones
+    # avoids the `modified[k]` lookups (which box the Float64 fields under
+    # union return types) and shrinks the per-call NamedTuple to just the
+    # entries that actually changed.
+    live_keys_val_ref = Ref{Any}(nothing)
+    live_idx_val_ref = Ref{Any}(nothing)
+
+    # Per-affect-call scratch, indexed by interp index. Sized for every
+    # interp (live or not) so the generated `_build_updates_nt` can index
+    # uniformly via `LIDX`. Allocated once and reused across every fire of
+    # this callback — no per-call `Vector{Any}` allocation, and no `Float64`
+    # boxing on the way into the result NamedTuple.
+    #
+    # `data_wrappers` caches `DataBufferType(buf)` lazily: once
+    # `info.preloaded_buf[]` is populated the wrapped reference is stable,
+    # so we wrap it exactly once and re-emit the same instance every fire.
+    n_interp = length(interp_infos)
+    data_wrappers = Vector{Any}(undef, n_interp)
+    fill!(data_wrappers, nothing)
+    ts_buf = Vector{Float64}(undef, n_interp)
+    tstep_buf = Vector{Float64}(undef, n_interp)
+
+    function update_data!(_modified, _observed, ctx, integ)
         lock(update_lock) do
             if !prune_done[]
                 sys = isdefined(integ.f, :sys) ? integ.f.sys : nothing
@@ -569,30 +618,41 @@ function build_interp_event(interp_infos, starttime::DateTime)
                 end
                 prune_done[] = true
             end
-            updates = modified
+            if live_keys_val_ref[] === nothing
+                live_keys = Symbol[]
+                live_idx = Int[]
+                for i in eachindex(interp_infos)
+                    interp_infos[i].live[] || continue
+                    append!(live_keys, per_interp_keys[i])
+                    push!(live_idx, i)
+                end
+                live_keys_val_ref[] = Val(Tuple(live_keys))
+                live_idx_val_ref[] = Val(Tuple(live_idx))
+            end
             for (i, dsi) in enumerate(ctx)
                 info = interp_infos[i]
                 info.live[] || continue
-                dkey, tskey, dtkey = per_interp_keys[i]
-                current = modified[dkey]::DataBufferType
-                buf = current.data
-                full_size = (dsi.grid_size..., dsi.cache_size)
-                if size(buf) != full_size
-                    # `MTKParameters` was built from the sentinel default;
-                    # swap in the (possibly already-loaded) full-grid buffer.
-                    # `_preload_interp!` no-ops if `info.preloaded_buf[]` is
-                    # already populated (the common case after convert-time
-                    # pruning), and allocates+loads on first call otherwise
-                    # (compose+mtkcompile fallback).
-                    _preload_interp!(info)
-                    buf = info.preloaded_buf[]
+                # Bypass `modified[dkey]` entirely: that lookup boxes the
+                # NamedTuple value (heterogeneous union return) for a
+                # one-bit "is this the sentinel?" signal we already have in
+                # `data_wrappers[i] === nothing` (true on the first fire of
+                # this affect, false thereafter). On first fire we ensure
+                # the full-grid buffer exists (`_preload_interp!` no-ops if
+                # `info.preloaded_buf[]` is already populated by convert-time
+                # pruning, allocates+loads otherwise) and cache the
+                # `DataBufferType` wrapper for reuse.
+                if data_wrappers[i] === nothing
+                    info.preloaded_buf[] === nothing && _preload_interp!(info)
+                    data_wrappers[i] = DataBufferType(info.preloaded_buf[])
                 end
+                buf = info.preloaded_buf[]
                 lazyload!(dsi, integ.t + t_ref, buf)
                 ts, tstep = get_time_grid_params(dsi)
-                updates = merge(updates, NamedTuple{(dkey, tskey, dtkey)}(
-                    (DataBufferType(buf), ts, tstep)))
+                ts_buf[i] = ts
+                tstep_buf[i] = tstep
             end
-            updates
+            _build_updates_nt(live_keys_val_ref[], live_idx_val_ref[],
+                data_wrappers, ts_buf, tstep_buf)
         end
     end
 
