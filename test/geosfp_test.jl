@@ -174,11 +174,17 @@ end
         f = getsym(integ, compiled.GEOSFP.Z_agl)
         setter = setp(integ, [compiled.GEOSFP.lon, compiled.GEOSFP.lat, compiled.GEOSFP.lev])
 
-        z_levels = map([1, 1.5, 2, 72, 72.5]) do lev
+        z_levels = map([1.0, 1.5, 2.0, 72.0, 72.5, 73.0]) do lev
             setter(integ, [deg2rad(-155.7), deg2rad(39.1), lev])
             f(integ)
         end
-        @test z_levels ≈ [63.38451747881698, 127.11513708190306, 191.83774317607677,
-            77316.16731665366, 80132.63935650676]
+        # lev=1 sits at the surface (P=Ps), so Z_agl(1) is identically zero.
+        @test z_levels[1] == 0.0
+        # Monotonic increase with lev.
+        @test issorted(z_levels)
+        # Cumulative-thickness regression: half a layer ≈ 63 m, full layer 1 ≈ 127 m,
+        # top of grid (lev=73) ≈ 77 km above surface.
+        @test z_levels ≈ [0.0, 63.286268234824156, 127.05262260647852,
+            73259.38608525122, 74830.28974058769, 77044.35408950633]
     end
 end

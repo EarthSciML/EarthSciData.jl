@@ -571,8 +571,22 @@ function GEOSFP(
     push!(lhs_vars, P)
 
     # ------------------ Geopotential height via hypsometric relation ---------
+    # `Z_agl` is the geopotential height at simulation level `lev` above
+    # ground.  `lev` is the edge coordinate of the Ap/Bp tables (lev=1 sits
+    # at the surface, P(1)=Ps), so Z_agl(1) = 0 by construction.  Each layer
+    # k spans edges k → k+1; its thickness is computed from the hypsometric
+    # relation using the layer-mean virtual temperature, which we
+    # approximate by sampling the I3 T/QV interpolators at netCDF lev=k —
+    # those datasets store layer-center values, so a single sample per
+    # layer is the appropriate quadrature point.  Layers above floor(lev)
+    # are pruned via an ifelse cascade; the partial top layer is added
+    # between edge floor(lev) and fractional `lev`.
     @constants Rd = 287.05 [unit = u"J/(kg*K)", description = "Dry-air gas constant"]
     @constants g = 9.80665 [unit = u"m/s^2", description = "Gravity"]
+    # Symbolics simplifies `0 * x` to dimensionless `0`, which MTK's ifelse
+    # unit check then rejects against the unit-bearing other branch.  Use an
+    # explicit m-typed zero constant for the "layer not reached" branch.
+    @constants Z_zero = 0.0 [unit = u"m", description = "Zero meters"]
 
     syms = EarthSciMLBase.var2symbol.(lhs_vars)
     getvar(sym::Symbol) = begin
@@ -590,20 +604,54 @@ function GEOSFP(
     @variables Tv(t) [unit = u"K", description = "Virtual temperature"]
     @variables Tv_sfc(t) [
         unit = u"K", description = "Virtual temperature at 2 m (near-surface)"]
-    @variables Tv̄(t) [unit = u"K", description = "Layer-mean virtual temperature"]
     @variables Z_agl(t) [
-        unit = u"m", description = "Geopotential height above ground level"]
+        unit = u"m",
+        description = "Geopotential height above ground level at `lev`"]
 
     eq_Tv = Tv ~ T * (1 + 0.61 * QV)
     eq_Tv_sfc = Tv_sfc ~ T2M * (1 + 0.61 * QV2M)
-    eq_Tvbar = Tv̄ ~ 0.5 * (Tv + Tv_sfc)
 
-    Pmid = P_unit*Ap(lev+0.5) + Bp(lev+0.5)*PS
+    # Resample I3 T/QV at each integer layer center for the cumulative
+    # hypsometric integration.
+    function _info_for(sym::Symbol)
+        i = findfirst(info -> info.var_sym == sym, interp_infos)
+        @assert !isnothing(i) "interp_info for $(sym) not found"
+        interp_infos[i]
+    end
+    t_info = _info_for(:I3₊T)
+    qv_info = _info_for(:I3₊QV)
+    lon_var = get(pvdict, :lon, get(pvdict, :x, nothing))
+    lat_var = get(pvdict, :lat, get(pvdict, :y, nothing))
+    @assert !isnothing(lon_var) && !isnothing(lat_var) "Z_agl requires lon/lat (or x/y) coordinates"
 
-    eq_Z_agl = Z_agl ~ (Rd * Tv̄ / g) * log(PS / Pmid)
+    Tv_at(k_expr) =
+        build_interp_expr(t_info, t_ref + t, [lon_var, lat_var, k_expr]) *
+        (1 + 0.61 *
+             build_interp_expr(qv_info, t_ref + t, [lon_var, lat_var, k_expr]))
+    P_at(k_expr) = P_unit * Ap(k_expr) + Bp(k_expr) * PS
 
-    push!(eqs, eq_Tv, eq_Tv_sfc, eq_Tvbar, eq_Z_agl)
-    push!(lhs_vars, Tv, Tv_sfc, Tv̄, Z_agl)
+    # 73 Ap/Bp edges → 72 layers.  Each layer k contributes either its full
+    # hypsometric thickness (lev ≥ k+1), a partial thickness from edge k up
+    # to fractional `lev` (k < lev < k+1), or nothing (lev ≤ k).  T̄v for
+    # layer k is taken from the layer-center sample at netCDF lev=k, which
+    # matches the storage convention of the I3 dataset.
+    n_layers = length(_Ap_data) - 1
+    P_top = P_at(lev)
+    Z_terms = Any[]
+    for k in 1:n_layers
+        Tv_k = Tv_at(k)
+        P_bot = P_at(k)
+        P_full_top = P_at(k + 1)
+        full = (Rd / g) * Tv_k * log(P_bot / P_full_top)
+        partial = (Rd / g) * Tv_k * log(P_bot / P_top)
+        push!(Z_terms,
+            ifelse(lev >= k + 1, full,
+                ifelse(lev > k, partial, Z_zero)))
+    end
+    eq_Z_agl = Z_agl ~ sum(Z_terms)
+
+    push!(eqs, eq_Tv, eq_Tv_sfc, eq_Z_agl)
+    push!(lhs_vars, Tv, Tv_sfc, Z_agl)
     # ------------------------------------------------------------------------
 
     # Coordinate transforms.
@@ -632,15 +680,10 @@ function GEOSFP(
     push!(eqs, lev_trans)
     push!(lhs_vars, δPδlev)
 
-    @variables δZδlev(t) [unit = u"m", description = "∂Z_agl/∂lev"]
-    eq_dZ_dlev = δZδlev ~ expand_derivatives(Differential(lev)(eq_Z_agl.rhs))
-    push!(eqs, eq_dZ_dlev)
-    push!(lhs_vars, δZδlev)
-
     all_params = [
         get(pvdict, :lon, get(pvdict, :x, nothing)),
         get(pvdict, :lat, get(pvdict, :y, nothing)),
-        lev, P_unit, Rd, g,
+        lev, P_unit, Rd, g, Z_zero,
         (:lat in keys(pvdict) ? [lat2meters, lon2m] : [])...,
         all_constants..., all_discretes..., params...
     ]
