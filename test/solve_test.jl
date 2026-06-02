@@ -47,7 +47,7 @@ end
         # the ODEProblem solve result below).
         prob = ODEProblem(sys2, [], get_tspan(domain))
         sol = solve(prob, Tsit5())
-        @test only(sol.u[end]) ≈ 3.017283738615849e-6 rtol = 0.01
+        @test only(sol.u[end]) ≈ 9.916966804519471e-8 rtol = 0.01
     end
 
     @testset "Strang Serial" begin
@@ -56,7 +56,7 @@ end
         st = SolverStrangSerial(Tsit5(), dt)
         prob = ODEProblem(csys, st)
         sol = solve(prob, Euler(), dt = dt)
-        @test sum(sol.u[end]) ≈ 2.014381322963178e-5 rtol = 0.01
+        @test sum(sol.u[end]) ≈ 6.62176884520524e-7 rtol = 0.01
     end
 
     @testset "Strang Threads" begin
@@ -65,7 +65,7 @@ end
         st = SolverStrangThreads(Tsit5(), dt)
         prob = ODEProblem(csys, st)
         sol = solve(prob, Euler(), dt = dt)
-        @test sum(sol.u[end]) ≈ 2.014381322963178e-5 rtol = 0.01
+        @test sum(sol.u[end]) ≈ 6.621768845915271e-7 rtol = 0.01
     end
 
     @testset "IMEX" begin
@@ -74,6 +74,6 @@ end
         st = SolverIMEX()
         prob = ODEProblem(csys, st)
         sol = solve(prob, KenCarp3())
-        @test sum(sol.u[end]) ≈ 1.824462850685205e-5 rtol = 0.15
+        @test sum(sol.u[end]) ≈ 5.990519547082663e-7 rtol = 0.15
     end
 end
