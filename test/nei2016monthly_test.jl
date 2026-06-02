@@ -145,6 +145,45 @@ import Proj
         @test sol.u[end][end] != 0.0  # Ensure we get a nonzero result
     end
 
+    @testset "daysinmonth normalization" begin
+        # Regression test for https://github.com/EarthSciML/EarthSciData.jl/issues/209.
+        # The EPA gridded-merge monthly files carry a `units = "tons/day"`
+        # attribute but actually store monthly totals on a single 24-hour
+        # TSTEP.  `loadslice!` must divide by `daysinmonth(t)` so the value is
+        # a true daily rate before the tons/day→kg/s conversion; otherwise the
+        # injected emissions are ~daysinmonth (~30×) too high.
+        (; fileset) = setup()
+        varname = "NO"
+        meta = EarthSciData.loadmetadata(fileset, varname)
+        sample_time = DateTime(2016, 5, 15)
+
+        # Value the public loader actually feeds to the regridder.
+        loaded = zeros(Float64, meta.varsize...)
+        EarthSciData.loadslice!(loaded, fileset, sample_time, varname)
+
+        # Independently reconstruct the expected kg/s/m² value: pull the raw
+        # monthly slice for the same TSTEP (via the inner loader, which selects
+        # the time index exactly as the public one does), then apply the unit
+        # conversion, cell-area division, and the days-in-month normalization.
+        expected = zeros(Float64, meta.varsize...)
+        EarthSciData.lock(EarthSciData.nclock) do
+            tmp = reshape(expected, size(expected)..., 1)
+            var = EarthSciData.loadslice!(
+                tmp, fileset, fileset.ds, sample_time, varname, "TSTEP")
+            scale, _ = EarthSciData.to_unit(var.attrib["units"])
+            Δx = fileset.ds.attrib["XCELL"]
+            Δy = fileset.ds.attrib["YCELL"]
+            expected .*= scale
+            expected ./= (Δx * Δy)
+            expected ./= Dates.daysinmonth(sample_time)
+        end
+
+        @test Dates.daysinmonth(sample_time) == 31
+        @test loaded ≈ expected
+        # Sanity check: the normalization made a real difference (not a no-op).
+        @test !(loaded ≈ expected .* Dates.daysinmonth(sample_time))
+    end
+
     @testset "diurnal_itp function" begin
         # Test domain starts at 2016-05-01 00:00:00 UTC
         t_ref_numeric = datetime2unix(DateTime(2016, 5, 1))  # Domain starts at 2016-05-01 00:00:00

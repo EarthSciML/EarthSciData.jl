@@ -241,13 +241,24 @@ function loadslice!(
         data = reshape(data, size(data)..., 1)
         var = loadslice!(data, fs, fs.ds, t, varname, "TSTEP")
 
-        # Step 1: Apply unit conversion from the file (typically tons/day to kg/s)
+        # Step 1: Normalize the stored monthly totals to a per-day rate.
+        # Despite the `units = "tons/day"` attribute, the EPA gridded-merge
+        # monthly files store effectively *monthly* totals on a single 24-hour
+        # TSTEP, so the labeled `tons/day` value is really a whole month's
+        # worth of emissions.  Dividing by the number of days in the month
+        # converts it to a true daily rate before the unit conversion below
+        # treats it as `tons/day`.  Without this, the constant-rate value is
+        # applied on every model day and over-emits by ~daysinmonth (~30×).
+        # See https://github.com/EarthSciML/EarthSciData.jl/issues/209.
+        data ./= Dates.daysinmonth(t)
+
+        # Step 2: Apply unit conversion from the file (typically tons/day to kg/s)
         scale, _ = to_unit(var.attrib["units"])
         if scale != 1
             data .*= scale  # Now data is in kg/s per grid cell
         end
 
-        # Step 2: Convert from kg/s per grid cell to kg/s/m² for conservative regridding
+        # Step 3: Convert from kg/s per grid cell to kg/s/m² for conservative regridding
         # This is the flux density that can be conservatively regridded
         Δx = fs.ds.attrib["XCELL"]  # Cell width in meters
         Δy = fs.ds.attrib["YCELL"]  # Cell height in meters
