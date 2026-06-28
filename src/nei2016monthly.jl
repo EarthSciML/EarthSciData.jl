@@ -13,7 +13,12 @@ const DIURNAL_FACTORS_ISOP = [
     2.6616, 2.6184, 2.4408, 2.1288, 1.6896, 1.1448, 0.5136, 0, 0, 0, 0]
 
 const DayofWeekFactors_NOx = [1.0706, 1.0706, 1.0706, 1.0706, 1.0706, 0.863, 0.784]
-const DayofWeekFactors_CO = [1.076, 1.1076, 1.0706, 1.0706, 1.0706, 0.779, 0.683]
+# Renormalized to weekly mean 1.0 so the day-of-week redistribution conserves the
+# monthly CO total (the NOx array above and the diurnal profiles are already
+# mean-1.0). The raw NEI99 CO factors summed to 6.857 (mean 0.9796), which
+# under-emitted CO by ~2%.
+const DayofWeekFactors_CO_raw = [1.076, 1.1076, 1.0706, 1.0706, 1.0706, 0.779, 0.683]
+const DayofWeekFactors_CO = DayofWeekFactors_CO_raw .* (7 / sum(DayofWeekFactors_CO_raw))
 
 # Load and create interpolator for delp_dry_surface
 const DELP_DRY_SURFACE_ITP = let
