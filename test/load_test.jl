@@ -539,3 +539,78 @@ end
         @test isfinite(val)
     end
 end
+
+# ---------------------------------------------------------------------------
+# Guard test for the `lazyload!` backward window hysteresis (cache-window
+# thrashing fix). Offline: uses a synthetic FileSet whose `loadslice!`
+# counts how many slices are read from "disk".
+# ---------------------------------------------------------------------------
+
+struct HysteresisCountFS <: EarthSciData.FileSet
+    start::DateTime
+    finish::DateTime
+    nloads::Base.RefValue{Int}
+end
+HysteresisCountFS(start, finish) = HysteresisCountFS(start, finish, Ref(0))
+
+function EarthSciData.DataFrequencyInfo(
+        fs::HysteresisCountFS,
+)::EarthSciData.DataFrequencyInfo
+    frequency = Hour(1)
+    centerpoints = collect(fs.start:frequency:fs.finish)
+    EarthSciData.DataFrequencyInfo(fs.start, frequency, centerpoints)
+end
+function EarthSciData.loadslice!(
+        cache::AbstractArray, fs::HysteresisCountFS, t::DateTime, varname)
+    fs.nloads[] += 1
+    fill!(cache, 1.0)
+end
+function EarthSciData.loadmetadata(fs::HysteresisCountFS, varname)
+    EarthSciData.MetaData(
+        [[0.0, 1.0], [0.0, 1.0]],
+        "m", "test", ["x", "y"], [2, 2],
+        "+proj=longlat +datum=WGS84 +no_defs", 1, 2, -1, (false, false, false)
+    )
+end
+
+@testset "lazyload! backward hysteresis: no cache-window thrashing" begin
+    domain = DomainInfo(
+        DateTime(2024, 1, 1), DateTime(2024, 1, 2);
+        lonrange = deg2rad(0.0):deg2rad(1.0):deg2rad(1.0),
+        latrange = deg2rad(0.0):deg2rad(1.0):deg2rad(1.0),
+        levrange = 1:1
+    )
+    fs = HysteresisCountFS(DateTime(2024, 1, 1), DateTime(2024, 1, 2))
+    itp = EarthSciData.DataSetInterpolator{Float64}(
+        fs, "X", DateTime(2024, 1, 1), DateTime(2024, 1, 2), domain)
+    buf = EarthSciData.make_data_buffer(itp)
+
+    # Initial load at a centerpoint well inside the dataset: fills the whole
+    # streaming window (2 slots) -> exactly 2 slice reads.
+    t0 = DateTime(2024, 1, 1, 6)
+    EarthSciData.lazyload!(itp, t0, buf)
+    @test itp.cache.times == [DateTime(2024, 1, 1, 6), DateTime(2024, 1, 1, 7)]
+    n0 = fs.nloads[]
+    @test n0 == 2
+
+    # A backward dip of 0.4x the data interval (24 min < half an interval)
+    # stays inside the first loaded centerpoint's bucket: it must be served
+    # by the already-loaded window with NO reload. (This is the thrashing
+    # scenario: per-cell reinit! to the outer-step start time.)
+    t_small = t0 - Minute(24)
+    EarthSciData.lazyload!(itp, t_small, buf)
+    @test fs.nloads[] == n0
+    @test itp.cache.times == [DateTime(2024, 1, 1, 6), DateTime(2024, 1, 1, 7)]
+    # The relaxed low-edge assertion serves the dipped time by clamping to
+    # the first slot instead of throwing (field is constant 1.0).
+    @test EarthSciData.interp_unsafe(
+        itp, buf, t_small, itp.grid_starts[1], itp.grid_starts[2]) ≈ 1.0
+
+    # A backward dip of 0.6x the interval (36 min > half an interval) leaves
+    # the first centerpoint's bucket -> the window must slide back, reading
+    # exactly ONE new slice (the overlapping slot is shifted, not re-read).
+    t_big = t0 - Minute(36)
+    EarthSciData.lazyload!(itp, t_big, buf)
+    @test fs.nloads[] == n0 + 1
+    @test itp.cache.times == [DateTime(2024, 1, 1, 5), DateTime(2024, 1, 1, 6)]
+end
