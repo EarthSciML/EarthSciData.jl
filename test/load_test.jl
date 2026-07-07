@@ -641,3 +641,72 @@ end
     @test itp.cache.times ==
           [DateTime(2024, 1, 1, 5), DateTime(2024, 1, 1, 6), DateTime(2024, 1, 1, 7)]
 end
+
+# ---------------------------------------------------------------------------
+# Guard tests for the lock-free `lazyload!` fast path and the interp-event
+# affect NamedTuple cache (keyed by t_abs). Offline: reuses the counting
+# `HysteresisCountFS` fixture defined above.
+# ---------------------------------------------------------------------------
+
+@testset "lock-free lazyload! + interp-event affect NamedTuple cache" begin
+    domain = DomainInfo(
+        DateTime(2024, 1, 1), DateTime(2024, 1, 2);
+        lonrange = deg2rad(0.0):deg2rad(1.0):deg2rad(1.0),
+        latrange = deg2rad(0.0):deg2rad(1.0):deg2rad(1.0),
+        levrange = 1:1
+    )
+
+    @testset "repeated lazyload! at unchanged time performs no reload" begin
+        fs = HysteresisCountFS(DateTime(2024, 1, 1), DateTime(2024, 1, 2))
+        itp = EarthSciData.DataSetInterpolator{Float64}(
+            fs, "X", DateTime(2024, 1, 1), DateTime(2024, 1, 2), domain)
+        buf = EarthSciData.make_data_buffer(itp)
+        t0 = DateTime(2024, 1, 1, 6)
+        EarthSciData.lazyload!(itp, t0, buf)
+        n0 = fs.nloads[]
+        @test n0 == 2
+        # Repeats at the unchanged time, plus covered times inside the loaded
+        # window, are all served by the lock-free fast path: NO reload.
+        for tt in (t0, t0, t0 + Minute(10), t0 + Minute(45), t0 - Minute(20))
+            EarthSciData.lazyload!(itp, tt, buf)
+        end
+        @test fs.nloads[] == n0
+        @test itp.cache.times == [DateTime(2024, 1, 1, 6), DateTime(2024, 1, 1, 7)]
+    end
+
+    @testset "affect NamedTuple is identical (===) for a repeated t_abs" begin
+        fs = HysteresisCountFS(DateTime(2024, 1, 1), DateTime(2024, 1, 2))
+        starttime = DateTime(2024, 1, 1)
+        itp = EarthSciData.DataSetInterpolator{Float64}(
+            fs, "X", starttime, DateTime(2024, 1, 2), domain)
+        # Minimal interp_info (the NamedTuple shape built by
+        # `create_interp_equation`), restricted to the fields the event path
+        # touches.
+        @parameters lfx_data lfx_tstart lfx_tstep
+        info = (data_sym = lfx_data, tstart_sym = lfx_tstart,
+            tstep_sym = lfx_tstep, itp = itp, var_sym = :LFX,
+            data_eltype = Float64, live = Ref(true),
+            preloaded_buf = Ref{Any}(nothing))
+        ev = EarthSciData.build_interp_event([info], starttime)
+        aff = ev.affect
+        update_data! = aff.f
+        ctx = aff.ctx
+
+        # Minimal integrator stand-in: the affect only touches `integ.t` and
+        # (defensively, for the auto-prune fallback) `integ.f.sys`.
+        integ = (; t = 6.0 * 3600, f = nothing)
+        nt1 = update_data!(nothing, nothing, ctx, integ)
+        @test nt1 isa NamedTuple
+        nloads1 = fs.nloads[]
+        nt2 = update_data!(nothing, nothing, ctx, integ)
+        @test nt2 === nt1             # identical cached result, same t_abs
+        @test fs.nloads[] == nloads1  # ...and no additional slice reads
+
+        # A genuinely new t_abs (next data interval) rebuilds and reloads.
+        integ2 = (; t = 7.0 * 3600, f = nothing)
+        nt3 = update_data!(nothing, nothing, ctx, integ2)
+        @test nt3 isa NamedTuple
+        @test nt3 !== nt2
+        @test fs.nloads[] > nloads1
+    end
+end
