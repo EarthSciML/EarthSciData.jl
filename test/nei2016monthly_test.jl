@@ -460,3 +460,17 @@ import Proj
         @test ACET_map[1, 1, end] != 0.0  # Ensure we get nonzero emissions
     end
 end
+
+
+@testset "CO day-of-week factors conserve the weekly total" begin
+    # Regression for the renormalization: the raw NEI99 CO factors summed to
+    # 6.857 (mean 0.9796), silently under-emitting CO by ~2%. The applied
+    # factors must sum to exactly 7 (weekly mass conservation) while keeping
+    # the raw day-to-day proportions.
+    f = EarthSciData.DayofWeekFactors_CO
+    raw = EarthSciData.DayofWeekFactors_CO_raw
+    @test sum(f) ≈ 7.0 rtol = 1e-12
+    @test all(f ./ raw .≈ 7 / sum(raw))
+    t_mon = Dates.datetime2unix(Dates.DateTime(2016, 3, 7, 12))  # a Monday
+    @test EarthSciData.dayofweek_itp_CO(t_mon, 0.0) == f[1]
+end
