@@ -662,6 +662,11 @@ struct NEI2016InlineEmisCoupler
     sys::Any
 end
 
+# Default coupled species for an inline sector: the combustion gases every
+# supported mechanism carries (all stored "moles/s"). VOC/PM species can be
+# added via the `species` kwarg once their mechanism mapping is wired.
+const _INLINE_DEFAULT_SPECIES = ["SO2", "NO", "NO2", "CO", "NH3"]
+
 """
 $(SIGNATURES)
 
@@ -686,11 +691,6 @@ Differences from `NEI2016MonthlyEmis`:
 inline files as a documented proxy for 2016 (no 2016 model-ready inline is
 published). `scale` multiplies all emissions.
 """
-# Default coupled species for an inline sector: the combustion gases every
-# supported mechanism carries (all stored "moles/s"). VOC/PM species can be
-# added via the `species` kwarg once their mechanism mapping is wired.
-const _INLINE_DEFAULT_SPECIES = ["SO2", "NO", "NO2", "CO", "NH3"]
-
 function NEI2016InlineEmis(
         sector::AbstractString,
         domaininfo::DomainInfo;
