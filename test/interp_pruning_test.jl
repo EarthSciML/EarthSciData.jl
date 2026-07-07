@@ -144,3 +144,36 @@ using Test
     end
     @test length(initialized) == 1
 end
+
+
+using EarthSciData: make_prune_factory
+using ModelingToolkit: t_nounits, D_nounits
+
+using ModelingToolkit
+using ModelingToolkit: t_nounits as t, D_nounits as D
+
+# tiny real System: the 2-arg prune path inspects observed(parent_sys)
+@variables x(t)
+@named _mini = System([D(x) ~ 0], t)
+const _msys = mtkcompile(_mini)
+
+@testset "Data: prune factory 1-arg/2-arg contract" begin
+    # Empty interp_infos keeps the test independent of any dataset: the point is
+    # the DISPATCH branch, and _apply_live_mask! over [] is a well-defined no-op.
+    f = make_prune_factory(Any[])
+    @test f isa Function
+
+    # 1-arg (legacy walker): must return nothing AND not attempt to prune.
+    # A safe skip keeps callback-only met vars live — a callback-only met var
+    # (A1₊PBLH) sits in no compiled equation, so equation-only pruning would drop
+    # it. The legacy path therefore keeps every interp live.
+    @test f(nothing) === nothing
+
+    # 2-arg with an explicit keep-set: takes the prune path (no error on []).
+    @test f(_msys, String[]) === nothing
+    @test f(_msys, ["GEOSFP₊A1₊PBLH"]) === nothing
+
+    # the two branches are selected exactly as the convert() call site does it
+    @test applicable(f, _msys, String[])            # 2-arg method exists
+    @test applicable(f, nothing)                       # 1-arg (default extra_needed) too
+end
