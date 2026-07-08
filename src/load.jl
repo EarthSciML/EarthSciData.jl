@@ -761,6 +761,27 @@ function update!(itp::DataSetInterpolator, t::DateTime, target::AbstractArray)
 end
 
 function lazyload!(itp::DataSetInterpolator, t::DateTime, target::AbstractArray)
+    # Lock-free fast path. A reload is only needed once per data interval (per
+    # centerpoint crossing); the overwhelmingly common per-cell call finds the
+    # loaded window already covering `t`. Acquiring `itp.lock` on EVERY call
+    # serializes all solver threads on this shared per-interpolator lock — a
+    # non-issue at low thread counts but a hard scaling wall at high ones (a
+    # many solver threads then run slower than a few and the run can appear hung).
+    # `tc.times`/`tc.initialized` are mutated only inside `update!` under the
+    # lock, and DateTimes are immutable, so an unsynchronized read here is
+    # benign: a stale read at worst falls through to the locked slow path, which
+    # re-checks. When the loaded window already covers `t`, no reload is possible,
+    # so return without ever touching the lock. (Mirrors the slow-path guard
+    # below: within [times[begin] - half, times[end]) → no reload.)
+    let tc = itp.cache
+        if tc.initialized
+            times = tc.times
+            if length(times) > 1
+                half = (times[begin + 1] - times[begin]) ÷ 2
+                (times[begin] - half <= t < times[end]) && return itp
+            end
+        end
+    end
     lock(itp.lock) do
         tc = itp.cache
         if tc.currenttime == t
