@@ -971,21 +971,28 @@ $(SIGNATURES)
 Build a `SysDiscreteEvent`-shaped factory closing over `interp_infos`.
 EarthSciMLBase's `convert(::Type{System}, ::CoupledSystem)` walks every
 subsystem's `SysDiscreteEvent` metadata and calls each factory with the
-temp coupled+`mtkcompile`d parent system; this factory side-effects the
-captured `interp_info.live` Refs, eagerly allocates and NetCDF-loads the
-full-grid buffer for every surviving interp (so the data is present in
-`info.preloaded_buf[]` before any `ODEProblem` is built), and returns
-`nothing`, so the discrete event list passed to the parent is empty.
-EarthSciMLBase's walker filters `nothing` returns, so registering this
-factory adds no new discrete events to the parent system — the existing
-loader-attached `build_interp_event` callback fires as before, just with
-a settled live mask and pre-populated buffers by the time it runs.
+temp coupled+`mtkcompile`d parent system.  The returned closure accepts
+two calling conventions:
 
-`operator_vars` is *not* consulted here because the factory only sees the
-post-compile `System` (no `CoupledSystem` access).  Workflows using
-`EarthSciMLBase.Operator`s should bypass auto-pruning by calling
-[`prune_unused_interps!`](@ref) on the `CoupledSystem` directly (which
-does include `operator_vars`).
+  - Legacy 1-arg `f(parent_sys)`: performs *no* pruning.  With only the
+    compiled parent `System` there is no way to know which met fields
+    the coupled system's operators and init-callbacks consume
+    out-of-band, so pruning here would starve them (e.g. drop a
+    callback-only `A1₊PBLH`); every interpolator stays live and its
+    data loads lazily on first use.
+  - 2-arg `f(parent_sys, extra_needed)`: an EarthSciMLBase whose
+    `convert` forwards the operator- and callback-advertised variables
+    calls this form; the factory applies the live mask
+    (`_apply_live_mask!`), pruning interpolators referenced neither by
+    the compiled system's equations nor by `extra_needed`.
+
+Both forms return `nothing`, and EarthSciMLBase's walker filters
+`nothing` returns, so registering this factory adds no new discrete
+events to the parent system — the existing loader-attached
+`build_interp_event` callback fires as before, just with a settled live
+mask in the 2-arg case.  [`prune_unused_interps!`](@ref) on the
+`CoupledSystem` remains the explicit operator- and callback-aware prune
+path for callers who want it.
 """
 function make_prune_factory(interp_infos)
     # Backward-compatible with two `convert(System, ::CoupledSystem)` walker
