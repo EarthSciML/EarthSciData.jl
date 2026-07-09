@@ -1,4 +1,3 @@
-
 export WRF
 
 struct WRFFileSet <: EarthSciData.FileSet
@@ -34,6 +33,25 @@ struct WRFFileSet <: EarthSciData.FileSet
             return new(mirror, domain, ds, dfi)
         end
     end
+
+function WRFFileSet(::Val{:local}, filepath::AbstractString, domain)
+    isfile(filepath) ||
+        throw(ArgumentError("Local WRF file not found: $filepath"))
+
+    lock(nclock) do
+        ds = NCDataset(filepath)
+        times = vec(ds["XTIME"][:])
+        file_start = times[1]
+        Δt_ms = Dates.value(times[2] - times[1])
+        frequency = Second(round(Int, Δt_ms / 1000))
+
+        return new(
+            filepath,
+            domain,
+            ds,
+            DataFrequencyInfo(file_start, frequency, times),
+        )
+    end
 end
 
 function relpath(::WRFFileSet, time::DateTime)
@@ -46,9 +64,73 @@ end
 
 DataFrequencyInfo(fs::WRFFileSet)::DataFrequencyInfo = fs.freq_info
 
+
+function local_wrf_time_bounds(filepath::AbstractString)
+    ds = NCDataset(filepath)
+    try
+        haskey(ds, "XTIME") ||
+            error("Local WRF file has no XTIME variable:\n$filepath")
+        xtime = vec(ds["XTIME"][:])
+        isempty(xtime) &&
+            error("Local WRF file has an empty XTIME variable:\n$filepath")
+        return minimum(xtime), maximum(xtime)
+    finally
+        close(ds)
+    end
+end
+
+function find_local_wrf_file(
+    local_root::AbstractString,
+    domain;
+    prefix::AbstractString = "wrfout_d04_",
+)
+    starttime, endtime = get_tspan_datetime(domain)
+    isdir(local_root) ||
+        error("Local WRF directory does not exist:\n$local_root")
+    matches = Tuple{String, DateTime, DateTime}[]
+    for (dir, _, filenames) in walkdir(local_root)
+        for filename in filenames
+            startswith(filename, prefix) || continue
+            filepath = joinpath(dir, filename)
+            try
+                file_start, file_end = local_wrf_time_bounds(filepath)
+                if file_start <= starttime && endtime <= file_end
+                    push!(matches, (filepath, file_start, file_end))
+                end
+            catch err
+                @warn "Skipping unreadable local WRF candidate" filepath exception = (
+                    err,
+                    catch_backtrace(),
+                )
+            end
+        end
+    end
+
+    isempty(matches) && error(
+        "No local WRF file covers the requested simulation period.\n" *
+        "Requested start: $starttime\n" *
+        "Requested end:   $endtime\n" *
+        "Searched under:  $local_root",
+    )
+
+    sort!(matches; by = item -> item[2], rev = true)
+    return first(matches)[1]
+end
+
+function wrf_timedim(fs::WRFFileSet)
+    if haskey(fs.ds.dim, "time")
+        return "time"
+    elseif haskey(fs.ds.dim, "Time")
+        return "Time"
+    else
+        error("WRF dataset has neither a time nor Time dimension.")
+    end
+end
+
+
 function loadslice!(data::AbstractArray, fs::WRFFileSet, t::DateTime, varname)
     lock(nclock) do
-        var = loadslice!(data, fs, fs.ds, t, varname, "time")
+        var = loadslice!(data, fs, fs.ds, t, varname, wrf_timedim(fs))
 
         scale, _ = to_unit(var.attrib["units"])
         if scale != 1
@@ -60,7 +142,7 @@ end
 
 function loadmetadata(fs::WRFFileSet, varname)::MetaData
     lock(nclock) do
-        timedim = "time"
+        timedim = wrf_timedim(fs)
         var = fs.ds[varname]
         dims = collect(NCDatasets.dimnames(var))
         @assert timedim ∈ dims "Variable $varname does not have a dimension named '$timedim'."
@@ -85,11 +167,9 @@ function loadmetadata(fs::WRFFileSet, varname)::MetaData
         @assert fs.ds.attrib["MAP_PROJ"]==1 "Only Lambert Conformal Conic projection is currently supported for WRF data."
         truelat1 = fs.ds.attrib["TRUELAT1"]
         truelat2 = fs.ds.attrib["TRUELAT2"]
-        moad_cen_lat = fs.ds.attrib["MOAD_CEN_LAT"]
-        stand_lon = fs.ds.attrib["STAND_LON"]
-        prj = "+proj=lcc +lat_1=$(truelat1) +lat_2=$(truelat2) +lat_0=$(moad_cen_lat) +lon_0=$(stand_lon) +x_0=0 +y_0=0 +a=6370000 +b=6370000 +to_meter=1"
-        @assert moad_cen_lat≈fs.ds.attrib["CEN_LAT"] "CEN_LAT must match MOAD_CEN_LAT"
-        @assert stand_lon≈fs.ds.attrib["CEN_LON"] "CEN_LON must match STAND_LON"
+        cen_lat = Float64(fs.ds.attrib["CEN_LAT"])
+        cen_lon = Float64(fs.ds.attrib["CEN_LON"])
+        prj = "+proj=lcc +lat_1=$(truelat1) +lat_2=$(truelat2) +lat_0=$(cen_lat) +lon_0=$(cen_lon) +x_0=0 +y_0=0 +a=6370000 +b=6370000 +to_meter=1"
 
         coords = []
         for d in dims
@@ -141,7 +221,7 @@ function varnames(fs::WRFFileSet)
     lock(nclock) do
         exclude_vars = Set(keys(fs.ds.dim)) ∪
                        Set([
-            "XLAT", "XLONG", "XLAT_U", "XLAT_V", "XLONG_U", "XLONG_V", "Times"])
+            "XLAT", "XLONG", "XLAT_U", "XLAT_V", "XLONG_U", "XLONG_V", "Times", "XTIME"])
         return [name for name in keys(fs.ds) if name ∉ exclude_vars]
     end
 end
@@ -166,10 +246,64 @@ A data loader for WRF output data.
 spatial nearest-neighbour + time-only linear interpolation for ~8x speedup when queries
 are always at grid points.
 """
-function WRF(domaininfo::DomainInfo; name = :WRF, stream = true,
-        spatial_interp::Symbol = :linear)
+
+function WRF(domaininfo::DomainInfo; name = :WRF, stream = true, spatial_interp::Symbol = :linear, 
+    filepath = nothing, local_root = nothing, local_prefix = "wrfout_d04_", requested_vars = nothing)
     starttime, endtime = get_tspan_datetime(domaininfo)
-    fs = WRFFileSet("https://data.rda.ucar.edu/d340000/", domaininfo)
+
+    if !isnothing(filepath) && !isnothing(local_root)
+        error(
+            "Pass either filepath or local_root to WRF(...), not both.",
+        )
+    end
+
+    fs = if !isnothing(filepath)
+        WRFFileSet(
+            Val(:local),
+            filepath,
+            domaininfo,
+        )
+
+    elseif !isnothing(local_root)
+        selected_filepath = find_local_wrf_file(
+            local_root,
+            domaininfo;
+            prefix = local_prefix,
+        )
+
+        WRFFileSet(
+            Val(:local),
+            selected_filepath,
+            domaininfo,
+        )
+
+    else
+        WRFFileSet(
+            "https://data.rda.ucar.edu/d340000/",
+            domaininfo,
+        )
+    end
+
+    selected_varnames = isnothing(requested_vars) ?
+                        varnames(fs) :
+                        String.(requested_vars)
+
+    required_vars = ["P", "PB", "PH", "PHB"]
+
+    missing_required = setdiff(required_vars, selected_varnames)
+
+    isempty(missing_required) || error(
+        "WRF requested_vars must include: " *
+        join(missing_required, ", "),
+    )
+
+    available_vars = String.(collect(keys(fs.ds.group[:vars])))
+    missing_in_file = setdiff(selected_varnames, available_vars)
+
+    isempty(missing_in_file) || error(
+        "Requested WRF variables missing from file: " *
+        join(missing_in_file, ", "),
+    )
 
     pvs = EarthSciMLBase.pvars(domaininfo)
     pvdict = Dict([Symbol(v) => v for v in pvs]...)
@@ -195,7 +329,7 @@ function WRF(domaininfo::DomainInfo; name = :WRF, stream = true,
     )
 
     z_params = Dict()
-    for varname in varnames(fs)
+    for varname in selected_varnames
         dt = eltype(domaininfo)
         itp = DataSetInterpolator{dt}(
             fs,
@@ -304,7 +438,7 @@ end
 
 function couple2(mw::EarthSciMLBase.MeanWindCoupler, w::WRFCoupler)
     mw, w = mw.sys, w.sys
-    _couple_meanwind(mw, w, w.hourly₊U, w.hourly₊V, w.hourly₊W)
+    _couple_meanwind(mw, w, w.U, w.V, w.W)
 end
 
 # Return grid staggering for the given variable,
