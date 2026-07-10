@@ -67,4 +67,40 @@ using Test
         # Unregistered unit should error.
         @test_throws Exception EarthSciData.to_unit("furlongs/fortnight")
     end
+
+    @testset "_download_with_progress retries transient failures" begin
+        mktempdir() do dir
+            fileurl(p) = begin
+                pp = replace(p, '\\' => '/')
+                "file://" * (startswith(pp, '/') ? pp : "/" * pp)
+            end
+            # Happy path: a local file:// URL downloads on the first attempt.
+            src = joinpath(dir, "src.bin")
+            write(src, "payload")
+            dst = joinpath(dir, "dst.bin")
+            @test EarthSciData._download_with_progress(fileurl(src), dst) == dst
+            @test read(dst, String) == "payload"
+
+            # Failure path: an unresolvable URL fails fast per attempt; with
+            # retries=1 exactly one retry warning fires before the rethrow,
+            # and the partial file is cleaned up.
+            bad = joinpath(dir, "bad.bin")
+            badurl = fileurl(joinpath(dir, "nonexistent.bin"))
+            @test_logs (:warn, "Download failed; retrying") match_mode=:any begin
+                @test_throws Exception EarthSciData._download_with_progress(
+                    badurl, bad; retries = 1)
+            end
+            @test !isfile(bad)
+
+            # Environment overrides parse into the keyword defaults.
+            withenv("EARTHSCIDATA_DOWNLOAD_TIMEOUT" => "42.5",
+                "EARTHSCIDATA_DOWNLOAD_RETRIES" => "0") do
+                # retries=0 → no retry warning, single attempt, still throws.
+                @test_logs min_level=Base.CoreLogging.Warn begin
+                    @test_throws Exception EarthSciData._download_with_progress(
+                        badurl, bad)
+                end
+            end
+        end
+    end
 end

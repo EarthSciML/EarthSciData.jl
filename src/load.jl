@@ -173,25 +173,45 @@ function _progress_enabled()
 end
 
 """
-Download a file with a progress bar, deleting the partial file on error.
+Download a file with a progress bar, deleting the partial file on error and
+retrying transient failures.
+
+The per-attempt `timeout` (seconds) defaults to 1800 and can be overridden with
+the `EARTHSCIDATA_DOWNLOAD_TIMEOUT` environment variable; `retries` is the
+number of additional attempts after the first failure (default 2, overridable
+with `EARTHSCIDATA_DOWNLOAD_RETRIES`). Throttled data hosts can serve a file
+slower than a fixed short timeout allows — e.g. a 38 MB NEI file at
+~125 kB/s needs ~310 s, which reliably (not randomly) exceeded the previous
+300 s limit on CI — so slow-but-progressing downloads get generous time,
+while dead hosts still fail fast on connection errors and only cost the
+retry attempts.
 """
-function _download_with_progress(download_url::AbstractString, path::AbstractString; timeout::Real = 300)
-    try
-        prog = Progress(100;
-            desc = "Downloading $(basename(download_url)):",
-            dt = 0.1,
-            enabled = _progress_enabled())
-        Downloads.download(download_url, path,
-            timeout = timeout,
-            progress = (
-                total::Integer, now::Integer) -> begin
-                prog.n = total
-                ProgressMeter.update!(prog, now)
-            end
-        )
-    catch e
-        rm(path, force = true)
-        rethrow(e)
+function _download_with_progress(download_url::AbstractString, path::AbstractString;
+        timeout::Real = something(
+            tryparse(Float64, get(ENV, "EARTHSCIDATA_DOWNLOAD_TIMEOUT", "")), 1800.0),
+        retries::Integer = something(
+            tryparse(Int, get(ENV, "EARTHSCIDATA_DOWNLOAD_RETRIES", "")), 2))
+    for attempt in 0:retries
+        try
+            prog = Progress(100;
+                desc = "Downloading $(basename(download_url)):",
+                dt = 0.1,
+                enabled = _progress_enabled())
+            Downloads.download(download_url, path,
+                timeout = timeout,
+                progress = (
+                    total::Integer, now::Integer) -> begin
+                    prog.n = total
+                    ProgressMeter.update!(prog, now)
+                end
+            )
+            return path
+        catch e
+            rm(path, force = true)
+            (attempt == retries || e isa InterruptException) && rethrow(e)
+            @warn "Download failed; retrying" url=download_url attempt=(attempt + 1) retries_left=(retries - attempt) exception=(e,)
+            sleep(5.0 * (attempt + 1))
+        end
     end
     return path
 end
