@@ -46,7 +46,9 @@ inline_delp_hpa(levf::DynamicQuantities.Quantity) = 1.0
 # Counterpart to `NEI2016MonthlyEmis` (the 2-D surface-gridded merge), addressing
 # EarthSciML/EarthSciData.jl#211: the surface merge `mrggrid_withbeis_withrwc`
 # EXCLUDES every "inline-only" elevated point sector. `ptegu` alone (EGU power
-# plants) is ~2.2 of the ~2.5 Tg/yr CONUS SO2 budget and contributes ZERO to the
+# plants) injects a loader-measured 32.3 kg SO2/s in March 2016 (~1.0 Tg/yr
+# annualized, ~40% of the ~2.5 Tg/yr CONUS anthropogenic SO2 budget — the
+# largest single missing share of the inventory) and contributes ZERO to the
 # layer-1 surface merge. Those emissions exist only as CMAQ INLINE point sources:
 #
 #   merged/12US1_inln/2016fh_12US1_<sector>_inln.zip
@@ -673,8 +675,9 @@ $(SIGNATURES)
 Emissions System for CMAQ inline (elevated) NEI point sources for one `sector`
 (e.g. `"ptegu"` — EGU power plants). Companion to [`NEI2016MonthlyEmis`]: the
 2-D surface merge excludes every inline-only elevated sector (EarthSciData#211),
-so EGU SO2 (~all of the CONUS point-source sulfur) is entirely absent from the
-surface loader. This System adds it back.
+so EGU SO2 (a loader-measured 32.3 kg/s in March 2016, ~1.0 Tg/yr annualized —
+the largest single missing share of the CONUS SO2 inventory) is entirely absent
+from the surface loader. This System adds it back.
 
 Differences from `NEI2016MonthlyEmis`:
   * Emissions are TRUE hourly rates (CEM-driven for EGU), so NEITHER the

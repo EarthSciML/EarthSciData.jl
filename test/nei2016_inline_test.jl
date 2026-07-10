@@ -4,6 +4,24 @@ using EarthSciData: _briggs_plume_rise, inline_target_lev, inline_delp_hpa,
                     _INLINE_MIDALT, _INLINE_DELP, _tar_member_offsets,
                     _read_stack_groups, _inline_centerpoints,
                     NEI2016InlineEmisFileSet, loadslice!, loadmetadata
+using EarthSciMLBase
+using ModelingToolkit
+using ModelingToolkit: t, D
+using DynamicQuantities
+using OrdinaryDiffEqTsit5
+import Proj
+
+# Receiver species for `operator_compose` coupling in the System-builder
+# testset below (struct + couple2 method must be top-level; same pattern as
+# solve_test.jl's SysCoupler).
+struct InlineSysCoupler
+    sys::Any
+end
+function EarthSciMLBase.couple2(
+        sys::InlineSysCoupler, emis::EarthSciData.NEI2016InlineEmisCoupler)
+    sys, emis = sys.sys, emis.sys
+    operator_compose(sys, emis)
+end
 
 # ============================================================================
 # Synthetic fixtures (fully offline). File names/attrs mirror the EQUATES
@@ -177,6 +195,75 @@ end
         fs = NEI2016InlineEmisFileSet(TEST_SECTOR,
             DateTime(2016, 2, 27), DateTime(2016, 2, 29, 12); stage_dir = dir)
         @test fs.stacks.n == 3                            # constructed without error
+    end
+end
+
+@testset "System builder (NEI2016InlineEmis) + domain-top clamp" begin
+    mktempdir() do dir
+        write_stack_groups(dir)
+        # A day of margin on each side of the model day; the constructor only
+        # stages the model window, and the aggregate happily holds more.
+        for d in Date(2017, 3, 9):Day(1):Date(2017, 3, 13)
+            write_inln_day(dir, d)
+        end
+
+        # Model-space (lon/lat radians) center of 12US1 fixture cell (100, 150)
+        # — the cell holding the tall stack — by inverting the fixture's LCC
+        # (same pipeline idiom as src/load.jl's proj_trans).
+        lcc_sr = "+proj=lcc +lat_1=33.0 +lat_2=45.0 +lat_0=40.0 +lon_0=-97.0 " *
+                 "+x_0=0 +y_0=0 +a=6370997.0 +b=6370997.0 +to_meter=1"
+        to_lonlat = Proj.Transformation("+proj=pipeline +step +inv " * lcc_sr *
+                                        " +step +proj=longlat +datum=WGS84 +no_defs")
+        lon0, lat0 = to_lonlat(-2556000.0 + 12000.0 * (100 - 0.5),
+            -1728000.0 + 12000.0 * (150 - 0.5))
+
+        # The tall stack's Briggs altitude maps to a mean-profile level ABOVE
+        # the reduced domain's top level 3, so `min(target, lev_top)` must engage.
+        lev_briggs = inline_target_lev(_briggs_plume_rise(200.0, 8.0, 420.0, 25.0))
+        @test lev_briggs > 3.0
+
+        function build_sys(levtop)
+            domain = DomainInfo(
+                DateTime(2016, 3, 10), DateTime(2016, 3, 11);
+                lonrange = range(lon0 - deg2rad(2.0), lon0 + deg2rad(2.0), length = 5),
+                latrange = range(lat0 - deg2rad(2.0), lat0 + deg2rad(2.0), length = 5),
+                levrange = 1:levtop)
+            emis = NEI2016InlineEmis(TEST_SECTOR, domain; stage_dir = dir)
+            # It builds: the two plume-placement fields + the fixture's
+            # available species (SO2, NO) out of the five defaults.
+            @test length(equations(emis)) == 4
+            @variables SO2(t) = 0.0 [unit = u"kg/kg"]
+            recv = System([D(SO2) ~ 0], t; name = :recv,
+                metadata = Dict(CoupleType => InlineSysCoupler))
+            return convert(System, couple(recv, emis, domain))
+        end
+        # kg/kg of SO2 accumulated over 1 h at model level `levval`, probed at
+        # the tall stack's cell center (fixture rates are constant in time).
+        # The converted coupled system is flattened, so fish the coordinate
+        # parameters out by their namespaced suffix (the same idiom as
+        # nei2016monthly_test.jl); only the emissions subsystem carries them.
+        function so2_after(sys, levval)
+            ps = parameters(sys)
+            lon_p = only(filter(p -> endswith(string(Symbol(p)), "₊lon"), ps))
+            lat_p = only(filter(p -> endswith(string(Symbol(p)), "₊lat"), ps))
+            lev_p = only(filter(p -> endswith(string(Symbol(p)), "₊lev"), ps))
+            prob = ODEProblem(sys,
+                [lon_p => lon0, lat_p => lat0, lev_p => Float64(levval)],
+                (0.0, 3600.0))
+            sol = solve(prob, Tsit5())
+            return only(sol.u[end])
+        end
+
+        # Reduced-level domain (top level 3 < Briggs target): the clamp routes
+        # the plume into the domain's TOP layer; the surface stays clean.
+        sys3 = build_sys(3)
+        @test so2_after(sys3, 3.0) > 0.0            # effective target_lev == lev_top
+        @test so2_after(sys3, 1.0) == 0.0           # nothing at the surface
+        # Full-height domain: mass arrives at the (unclamped) Briggs level,
+        # confirming the reduced-domain hit at level 3 was the clamp at work.
+        sys10 = build_sys(10)
+        @test so2_after(sys10, lev_briggs) > 0.0
+        @test so2_after(sys10, 3.0) == 0.0
     end
 end
 
