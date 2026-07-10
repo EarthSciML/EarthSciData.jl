@@ -177,3 +177,144 @@ const _msys = mtkcompile(_mini)
     @test applicable(f, _msys, String[])            # 2-arg method exists
     @test applicable(f, nothing)                       # 1-arg (default extra_needed) too
 end
+
+# Regression test for the callback-aware prune (PR #217): `_apply_live_mask!`
+# must keep an interpolator alive when it appears in `extra_needed` — the
+# operator/init-callback keep-set that `_operator_and_callback_vars` forwards
+# through the 2-arg prune path — even though no compiled equation references
+# it.  Unlike the dispatch-contract testset above, this one runs the
+# live-masking logic on REAL `interp_info` entries (built by
+# `create_interp_equation` via the same offline synthetic-ERA5 fixture as the
+# first testset), so the mask actually executes on non-empty input.
+@testset "Regression: _apply_live_mask! keeps callback-needed interps live" begin
+    # Explicit bindings: the `t_nounits as t` import above is ignored by Julia
+    # (conflicting import warning), so grab the unitful iv/derivative directly.
+    tu = ModelingToolkit.t
+    Du = ModelingToolkit.D
+
+    era5_dir = mktempdir()
+
+    lon_vals = Float64.(-130.0:2.0:-60.0)
+    lat_vals = Float64.(20.0:2.0:50.0)
+    plev_vals = Float64.([1000, 975, 950, 925])
+    hours_per_day = 0:6:18
+
+    # Three variables, one per pruning role:
+    #   t — referenced by the parent system's only state equation (equation-needed);
+    #   q — referenced by NO equation: stands in for a callback-only met var
+    #       (the GEOSFP `A1₊PBLH` role — consumed out-of-band by
+    #       `PBLMixingCallback`'s observed function, so invisible to the
+    #       equation-reference scan);
+    #   u — needed by nothing (must actually be pruned, proving the mask ran).
+    era5_vars = Dict(
+        "t" => ("K", "Temperature", 260.0, 300.0),
+        "q" => ("kg kg**-1", "Specific humidity", 0.0, 0.02),
+        "u" => ("m s**-1", "U component of wind", -15.0, 15.0)
+    )
+
+    nlon, nlat, nplev = length(lon_vals), length(lat_vals), length(plev_vals)
+    fpath = joinpath(era5_dir, "era5_pl_2022_01.nc")
+    time_vals = DateTime[]
+    for d in 1:Dates.daysinmonth(2022, 1), h in hours_per_day
+        push!(time_vals, DateTime(2022, 1, d, h))
+    end
+    ntime = length(time_vals)
+
+    NCDataset(fpath, "c") do ds
+        defDim(ds, "longitude", nlon)
+        defDim(ds, "latitude", nlat)
+        defDim(ds, "pressure_level", nplev)
+        defDim(ds, "valid_time", ntime)
+        defVar(ds, "longitude", Float64, ("longitude",))[:] = lon_vals
+        defVar(ds, "latitude", Float64, ("latitude",))[:] = lat_vals
+        defVar(ds, "pressure_level", Float64, ("pressure_level",))[:] = plev_vals
+        nctime = defVar(ds, "valid_time", Float64, ("valid_time",),
+            attrib = Dict("units" => "hours since 1900-01-01 00:00:00",
+                "calendar" => "proleptic_gregorian"))
+        nctime[:] = time_vals
+        for (varname, (unit_str, long_name, vmin, vmax)) in era5_vars
+            ncvar = defVar(ds, varname, Float32,
+                ("longitude", "latitude", "pressure_level", "valid_time"),
+                attrib = Dict("units" => unit_str, "long_name" => long_name))
+            data = Array{Float32}(undef, nlon, nlat, nplev, ntime)
+            for ti in 1:ntime, k in 1:nplev, j in 1:nlat, i in 1:nlon
+                frac = (i + j + k + ti) / (nlon + nlat + nplev + ntime)
+                data[i, j, k, ti] = Float32(vmin + (vmax - vmin) * frac)
+            end
+            ncvar[:, :, :, :] = data
+        end
+    end
+
+    domain_reg = DomainInfo(
+        DateTime(2022, 1, 1), DateTime(2022, 1, 2);
+        latrange = deg2rad(20.0f0):deg2rad(2.0):deg2rad(50.0f0),
+        lonrange = deg2rad(-130.0f0):deg2rad(2.0):deg2rad(-60.0f0),
+        levrange = 1:4
+    )
+    era5 = ERA5(domain_reg; mirror = "file://$(era5_dir)",
+        variables = ["t", "q", "u"])
+
+    infos = ModelingToolkit.getmetadata(era5, EarthSciData.InterpInfos, nothing)
+    @test length(infos) == 3
+    info_for(n) = infos[findfirst(i -> i.var_sym == Symbol("pl₊", n), infos)]
+    t_info, q_info, u_info = info_for("t"), info_for("q"), info_for("u")
+    reset_live!() = foreach(i -> i.live[] = true, infos)
+    @test all(i.live[] for i in infos)
+
+    # Parent state equation references only the temperature interpolator.
+    @variables Creg(tu)=0.0 [unit = u"K*s"]
+    eq = Du(Creg) ~ era5.pl₊t
+    parent = mtkcompile(compose(
+        System([eq], tu, [Creg], []; name = :reg_state), era5))
+
+    # The callback-needed variable exactly as the real caller supplies it:
+    # `_operator_and_callback_vars` forwards symbolic variables of the compiled
+    # parent system (e.g. from `get_needed_vars(::PBLMixingCallback, ...)`), so
+    # pull `ERA5₊pl₊q` back out of the compiled system's observed equations.
+    qvar = only(filter(
+        v -> endswith(string(EarthSciMLBase.var2symbol(v)), "₊pl₊q"),
+        [obs_eq.lhs for obs_eq in ModelingToolkit.observed(parent)]))
+
+    # (a) Equation-only prune (no keep-set): the hazard PR #217 guards against.
+    # The callback-only variable is indistinguishable from an unused one and is
+    # dropped alongside it.
+    mask = EarthSciData._apply_live_mask!(infos, parent)
+    @test t_info.live[]
+    @test !q_info.live[]   # callback-only var wrongly dropped without keep-set
+    @test !u_info.live[]
+    @test mask == [i.live[] for i in infos]
+
+    # (b) THE regression: the same prune through the factory's 2-arg path with
+    # the keep-set the real caller forwards.  The callback-needed interpolator
+    # must survive, and the genuinely unused one must still be pruned (i.e. the
+    # mask actually executed rather than no-op'ing).
+    reset_live!()
+    f = make_prune_factory(infos)
+    @test f(parent, [qvar]) === nothing
+    @test t_info.live[]    # equation-needed: kept
+    @test q_info.live[]    # callback-needed: kept via extra_needed — the fix
+    @test !u_info.live[]   # unused: pruned
+
+    # (c) 2-arg with an EMPTY keep-set reproduces (a) through the factory:
+    # pruning still runs, so the callback-only variable is dropped again.
+    reset_live!()
+    @test f(parent, Any[]) === nothing
+    @test t_info.live[]
+    @test !q_info.live[]
+    @test !u_info.live[]
+
+    # (d) Legacy 1-arg factory call: no keep-set can exist, so no pruning at
+    # all — every interpolator stays live (the backward-compatible safe skip).
+    reset_live!()
+    @test f(parent) === nothing
+    @test all(i.live[] for i in infos)
+
+    # (e) Shipped safety fallback: pruning against a parent that references NO
+    # interpolator (with an empty keep-set) keeps everything live rather than
+    # dropping everything.
+    reset_live!()
+    @variables xreg(tu)
+    mini = mtkcompile(System([Du(xreg) ~ 0], tu; name = :reg_mini))
+    EarthSciData._apply_live_mask!(infos, mini)
+    @test all(i.live[] for i in infos)
+end
