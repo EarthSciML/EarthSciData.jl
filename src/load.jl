@@ -417,7 +417,14 @@ mutable struct DataSetInterpolator{To, N, N2, FT, DomT, ET, FS, RG}
 
         # Check how many time indices we will need.
         dfi = DataFrequencyInfo(fs)
-        cache_size = 2
+        # Streaming default: a 3-slot lookback window `[ti-1, ti, ti+1]`
+        # anchored on `centerpoint_index(t)`. Keeping the slot *before* the
+        # anchor resident means any query within half a data interval of the
+        # anchor — either side — is bracketed by loaded data, so backward
+        # excursions inside the anchor's bucket (e.g. `SolverStrangThreads`'
+        # per-cell reinit! to the outer-step start) interpolate exactly with
+        # zero reloads instead of thrashing the window or extrapolating.
+        cache_size = min(3, max(length(dfi.centerpoints), 1))
         if !stream
             cache_size = sum(
                 (starttime - dfi.frequency) .<=
@@ -558,14 +565,13 @@ function interp_cache_times!(itp::DataSetInterpolator, t::DateTime)
     dfi = DataFrequencyInfo(itp.fs)
     ti = centerpoint_index(dfi, t)
     n = length(dfi.centerpoints)
-    # Currently assuming we're going forwards in time.
-    if t < dfi.centerpoints[ti]  # Load data starting with previous time step.
-        ti_end = min(n, ti + cache_size - 2)
-        ti_start = max(1, ti_end - cache_size + 1)
-    else
-        ti_end = min(n, ti + cache_size - 1)
-        ti_start = max(1, ti_end - cache_size + 1)
-    end
+    # Lookback window anchored on `ti`: `[ti-1, ti, ti+1, ...]`, clamped to
+    # the dataset ends. Including the slot *before* the anchor means every
+    # query in `ti`'s bucket — both halves — is bracketed by resident data,
+    # so a query landing just below `centerpoints[ti]` is linearly
+    # interpolated from real data rather than extrapolated.
+    ti_start = max(1, min(ti - 1, n - cache_size + 1))
+    ti_end = min(n, ti_start + cache_size - 1)
     dfi.centerpoints[ti_start:ti_end]
 end
 
@@ -753,22 +759,22 @@ function lazyload!(itp::DataSetInterpolator, t::DateTime, target::AbstractArray)
             update!(itp, t, target)
             return
         end
-        # Backward hysteresis on the reload trigger. A query time that dips less
-        # than half a data interval below the loaded window's first centerpoint
-        # is still inside that centerpoint's bucket (`centerpoint_index` anchors
-        # it there), so the loaded window already serves it — reloading would
-        # only re-fetch identical slices. Without this guard the window
-        # *thrashes*: `SolverStrangThreads.single_ode_step!` reinit!s every cell
-        # to the outer-step START time, which lands just before a data
-        # centerpoint the inner solve then re-crosses, so the affect retreats the
-        # window (t < times[begin]) and the next sub-step re-advances it — once
-        # per cell, i.e. O(cells) redundant NetCDF reads at every centerpoint
-        # crossing (EarthSciData load blows up to large amounts of redundant I/O). The
-        # forward edge (t >= times[end]) keeps advancing normally.
-        half = length(tc.times) > 1 ?
-               (tc.times[begin + 1] - tc.times[begin]) ÷ 2 :
-               (tc.times[end] - tc.times[begin])
-        if t < tc.times[begin] - half || t >= tc.times[end]
+        # The resident 3-slot lookback window (`[ti-1, ti, ti+1]` anchored on
+        # `centerpoint_index`, see `interp_cache_times!`) covers every query in
+        # the anchor's bucket, so both reload triggers are exact
+        # window-coverage checks. In particular, a backward query that dips
+        # below the anchor centerpoint but stays at or above `times[begin]`
+        # (the lookback slot) is served by resident data with correct linear
+        # interpolation and NO reload. Without that lookback slot the window
+        # *thrashes*: `SolverStrangThreads.single_ode_step!` reinit!s every
+        # cell to the outer-step START time, which lands just before a data
+        # centerpoint the inner solve then re-crosses, so the affect retreats
+        # the window (t < times[begin]) and the next sub-step re-advances it —
+        # once per cell, i.e. O(cells) redundant NetCDF reads at every
+        # centerpoint crossing. The forward edge (t >= times[end]) advances
+        # normally: one new slice per boundary crossing, with the overlapping
+        # slots shifted in place.
+        if t < tc.times[begin] || t >= tc.times[end]
             update!(itp, t, target)
         end
     end
@@ -920,26 +926,13 @@ end
     "interp_unsafe: time index outside loaded cache range; the discrete " *
     "update event did not refresh the cache for the current integrator time.")
 
-# Fractional-index tolerance applied ONLY to the low (backward) edge of the
-# out-of-range assertion, matching `lazyload!`'s backward window hysteresis (half
-# a data interval). A query time up to half a centerpoint step *below* the loaded
-# window is served by `clamp`ing to the first slot (a few minutes of backward
-# extrapolation on smoothly-varying met fields) instead of tripping the assertion
-# — this is what lets `SolverStrangThreads`' per-cell reinit! to the outer-step
-# start not thrash the cache window. The high (forward) edge stays strict
-# (`fit > nt`): the primary cache-miss bug this assertion guards against is a
-# window that fails to advance while the integrator runs forward, and that is
-# still caught exactly. A genuine backward miss drifts many steps out and trips
-# the assertion once it exceeds this tolerance.
-const _FIT_OOR_TOL = 0.5
-
 """
 Multilinear interpolation on a 2D array (1 spatial dim + time).
 `fit` and `fi1` are fractional 1-based indices.
 """
 function interp_unsafe(data::AbstractArray{T, 2}, fit, fi1, extrap) where {T}
     n1, nt = size(data)
-    @boundscheck (fit < one(T) - T(_FIT_OOR_TOL) || fit > T(nt)) && _throw_fit_oor()
+    @boundscheck (fit < one(T) || fit > T(nt)) && _throw_fit_oor()
 
     # NaN-safe early return: NaN coords can arise during init solves before
     # the discrete data-load event has fired (data buffers are zero, so
@@ -981,7 +974,7 @@ Multilinear interpolation on a 3D array (2 spatial dims + time).
 """
 function interp_unsafe(data::AbstractArray{T, 3}, fit, fi1, fi2, extrap) where {T}
     n1, n2, nt = size(data)
-    @boundscheck (fit < one(T) - T(_FIT_OOR_TOL) || fit > T(nt)) && _throw_fit_oor()
+    @boundscheck (fit < one(T) || fit > T(nt)) && _throw_fit_oor()
 
     (isnan(fi1) | isnan(fi2) | isnan(fit)) && return T(NaN)
 
@@ -1029,7 +1022,7 @@ Multilinear interpolation on a 4D array (3 spatial dims + time).
 """
 function interp_unsafe(data::AbstractArray{T, 4}, fit, fi1, fi2, fi3, extrap) where {T}
     n1, n2, n3, nt = size(data)
-    @boundscheck (fit < one(T) - T(_FIT_OOR_TOL) || fit > T(nt)) && _throw_fit_oor()
+    @boundscheck (fit < one(T) || fit > T(nt)) && _throw_fit_oor()
 
     (isnan(fi1) | isnan(fi2) | isnan(fi3) | isnan(fit)) && return T(NaN)
 
@@ -1093,7 +1086,7 @@ integer-valued at a grid point.
 """
 function interp_time_only(data::AbstractArray{T, 2}, fit, fi1, extrap) where {T}
     n1, nt = size(data)
-    @boundscheck (fit < one(T) - T(_FIT_OOR_TOL) || fit > T(nt)) && _throw_fit_oor()
+    @boundscheck (fit < one(T) || fit > T(nt)) && _throw_fit_oor()
 
     (isnan(fi1) | isnan(fit)) && return T(NaN)
 
@@ -1116,7 +1109,7 @@ Nearest-neighbour spatial + linear time interpolation on a 3D array.
 """
 function interp_time_only(data::AbstractArray{T, 3}, fit, fi1, fi2, extrap) where {T}
     n1, n2, nt = size(data)
-    @boundscheck (fit < one(T) - T(_FIT_OOR_TOL) || fit > T(nt)) && _throw_fit_oor()
+    @boundscheck (fit < one(T) || fit > T(nt)) && _throw_fit_oor()
 
     (isnan(fi1) | isnan(fi2) | isnan(fit)) && return T(NaN)
 
@@ -1140,7 +1133,7 @@ Nearest-neighbour spatial + linear time interpolation on a 4D array.
 function interp_time_only(
         data::AbstractArray{T, 4}, fit, fi1, fi2, fi3, extrap) where {T}
     n1, n2, n3, nt = size(data)
-    @boundscheck (fit < one(T) - T(_FIT_OOR_TOL) || fit > T(nt)) && _throw_fit_oor()
+    @boundscheck (fit < one(T) || fit > T(nt)) && _throw_fit_oor()
 
     (isnan(fi1) | isnan(fi2) | isnan(fi3) | isnan(fit)) && return T(NaN)
 
