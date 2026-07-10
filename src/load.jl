@@ -772,13 +772,13 @@ function lazyload!(itp::DataSetInterpolator, t::DateTime, target::AbstractArray)
     # benign: a stale read at worst falls through to the locked slow path, which
     # re-checks. When the loaded window already covers `t`, no reload is possible,
     # so return without ever touching the lock. (Mirrors the slow-path guard
-    # below: within [times[begin] - half, times[end]) → no reload.)
+    # below exactly: within [times[begin], times[end]) → no reload — the
+    # 3-slot lookback window already brackets the whole anchor bucket.)
     let tc = itp.cache
         if tc.initialized
             times = tc.times
             if length(times) > 1
-                half = (times[begin + 1] - times[begin]) ÷ 2
-                (times[begin] - half <= t < times[end]) && return itp
+                (times[begin] <= t < times[end]) && return itp
             end
         end
     end

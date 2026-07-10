@@ -664,14 +664,16 @@ end
         t0 = DateTime(2024, 1, 1, 6)
         EarthSciData.lazyload!(itp, t0, buf)
         n0 = fs.nloads[]
-        @test n0 == 2
+        @test n0 == 3   # 3-slot lookback window [ti-1, ti, ti+1]
         # Repeats at the unchanged time, plus covered times inside the loaded
-        # window, are all served by the lock-free fast path: NO reload.
+        # window (incl. the backward lookback slot at t0 - 20 min ≥ times[begin]),
+        # are all served by the lock-free fast path: NO reload.
         for tt in (t0, t0, t0 + Minute(10), t0 + Minute(45), t0 - Minute(20))
             EarthSciData.lazyload!(itp, tt, buf)
         end
         @test fs.nloads[] == n0
-        @test itp.cache.times == [DateTime(2024, 1, 1, 6), DateTime(2024, 1, 1, 7)]
+        @test itp.cache.times ==
+              [DateTime(2024, 1, 1, 5), DateTime(2024, 1, 1, 6), DateTime(2024, 1, 1, 7)]
     end
 
     @testset "affect NamedTuple is identical (===) for a repeated t_abs" begin
