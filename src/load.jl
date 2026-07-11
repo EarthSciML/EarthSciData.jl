@@ -565,13 +565,25 @@ function interp_cache_times!(itp::DataSetInterpolator, t::DateTime)
     dfi = DataFrequencyInfo(itp.fs)
     ti = centerpoint_index(dfi, t)
     n = length(dfi.centerpoints)
-    # Lookback window anchored on `ti`: `[ti-1, ti, ti+1, ...]`, clamped to
-    # the dataset ends. Including the slot *before* the anchor means every
-    # query in `ti`'s bucket — both halves — is bracketed by resident data,
-    # so a query landing just below `centerpoints[ti]` is linearly
-    # interpolated from real data rather than extrapolated.
-    ti_start = max(1, min(ti - 1, n - cache_size + 1))
-    ti_end = min(n, ti_start + cache_size - 1)
+    # Forward-eager / backward-lazy streaming window `[ti-1, ti, ti+1, …]`:
+    # one lookback slot before the anchor `ti`, the anchor, then up to
+    # `cache_size-2` slots of lookahead, clamped to the dataset ends. Keeping
+    # the slot *before* the anchor resident means every query in `ti`'s bucket
+    # — both halves — is bracketed by loaded data, so a backward dip just below
+    # `centerpoints[ti]` interpolates from real data rather than extrapolating,
+    # and does not thrash the window.
+    ti_end = min(n, ti + max(1, cache_size - 2))
+    # Forward-eager re-anchoring: once the forward edge reaches the last
+    # centerpoint (`ti_end == n`, nothing left to look ahead to) and `t` has
+    # passed its own centerpoint (so the lookback slot is not needed to bracket
+    # `t`), drop the lookback and anchor the window's start on `ti`. Otherwise
+    # the window stays pinned to the final `cache_size` centerpoints and never
+    # advances as `t` moves through the last interval — e.g. a monthly Apr–Jun
+    # dataset would keep `times = [Apr, May, Jun]` at May-31 instead of
+    # advancing to `[May, Jun]` (the `lazyload!` reload trigger only fires once
+    # `t` passes `times[end]`).
+    ti_start = (ti_end == n && t >= dfi.centerpoints[ti]) ? ti : max(1, ti - 1)
+    ti_start = max(ti_start, ti_end - cache_size + 1)  # never exceed cache_size slots
     dfi.centerpoints[ti_start:ti_end]
 end
 
