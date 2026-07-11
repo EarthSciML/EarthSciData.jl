@@ -407,14 +407,15 @@ function interp_callable(sys, varname::Symbol; parent_scope::Bool = false)
         get_name(sym) = ModelingToolkit.getname(
             sym isa Symbolics.Num ? Symbolics.unwrap(sym) : sym)
         via(sym) = PS(getproperty(sys, get_name(sym)))
-        info = merge(info, (
-            data_sym = via(info.data_sym),
-            tstart_sym = via(info.tstart_sym),
-            tstep_sym = via(info.tstep_sym),
-            spatial_consts = Any[via(c) for c in info.spatial_consts],
-            extrap_const = via(info.extrap_const),
-            unit_const = via(info.unit_const),
-        ))
+        info = merge(info,
+            (
+                data_sym = via(info.data_sym),
+                tstart_sym = via(info.tstart_sym),
+                tstep_sym = via(info.tstep_sym),
+                spatial_consts = Any[via(c) for c in info.spatial_consts],
+                extrap_const = via(info.extrap_const),
+                unit_const = via(info.unit_const)
+            ))
     end
     return InterpCallable(info)
 end
@@ -562,7 +563,7 @@ function build_interp_event(interp_infos, starttime::DateTime)
         keys = (
             EarthSciMLBase.var2symbol(info.data_sym),
             EarthSciMLBase.var2symbol(info.tstart_sym),
-            EarthSciMLBase.var2symbol(info.tstep_sym),
+            EarthSciMLBase.var2symbol(info.tstep_sym)
         )
         push!(per_interp_keys, keys)
         append!(mod_keys, keys)
@@ -895,7 +896,7 @@ function _apply_live_mask!(interp_infos, parent_sys; extra_needed = ())
         push!(referenced, string(EarthSciMLBase.var2symbol(v)))
     end
     is_needed = [any(s -> matches(bare_data_syms[k], s), referenced) ||
-                 any(s -> matches(bare_var_syms[k], s), referenced)
+                     any(s -> matches(bare_var_syms[k], s), referenced)
                  for k in eachindex(interp_infos)]
     if any(is_needed)
         kept = String[]
@@ -936,11 +937,31 @@ variables via `EarthSciMLBase.operator_vars`, and call
 post-`mtkcompile` parent system so callers can use it for
 `ODEProblem(parent_sys, ...)`.
 """
+# Collect the interpolated met vars needed by BOTH the coupled system's operators
+# (`operator_vars`, over `csys.ops`) AND its init-callbacks (each one's
+# `get_needed_vars`, e.g. `PBLMixingCallback` needs `A1₊PBLH`). Callback needs are
+# consumed out-of-band (in callback observed functions) and so are invisible to the
+# equation-reference scan in `_apply_live_mask!`; collecting them here keeps the
+# prune from dropping callback-only met fields. Mirrors `EarthSciMLBase.operator_vars`,
+# extended to `csys.init_callbacks`.
+function _operator_and_callback_vars(csys, parent_sys)
+    isnothing(csys.domaininfo) && return ()
+    ov = isempty(csys.ops) ? Any[] :
+         collect(EarthSciMLBase.operator_vars(csys, parent_sys, csys.domaininfo))
+    cv = Any[]
+    for c in csys.init_callbacks
+        sig = Tuple{typeof(c), typeof(csys), typeof(parent_sys), typeof(csys.domaininfo)}
+        if hasmethod(EarthSciMLBase.get_needed_vars, sig)
+            append!(cv, EarthSciMLBase.get_needed_vars(c, csys, parent_sys, csys.domaininfo))
+        end
+    end
+    return unique(vcat(ov, cv))
+end
+
 function prune_unused_interps!(
         loader_sys, csys::EarthSciMLBase.CoupledSystem; kwargs...)
     parent_sys = convert(ModelingToolkit.System, csys; kwargs...)
-    extra = isnothing(csys.domaininfo) || isempty(csys.ops) ? () :
-            EarthSciMLBase.operator_vars(csys, parent_sys, csys.domaininfo)
+    extra = _operator_and_callback_vars(csys, parent_sys)
     prune_unused_interps!(loader_sys, parent_sys; extra_needed = extra)
     return parent_sys
 end
@@ -951,25 +972,54 @@ $(SIGNATURES)
 Build a `SysDiscreteEvent`-shaped factory closing over `interp_infos`.
 EarthSciMLBase's `convert(::Type{System}, ::CoupledSystem)` walks every
 subsystem's `SysDiscreteEvent` metadata and calls each factory with the
-temp coupled+`mtkcompile`d parent system; this factory side-effects the
-captured `interp_info.live` Refs, eagerly allocates and NetCDF-loads the
-full-grid buffer for every surviving interp (so the data is present in
-`info.preloaded_buf[]` before any `ODEProblem` is built), and returns
-`nothing`, so the discrete event list passed to the parent is empty.
-EarthSciMLBase's walker filters `nothing` returns, so registering this
-factory adds no new discrete events to the parent system — the existing
-loader-attached `build_interp_event` callback fires as before, just with
-a settled live mask and pre-populated buffers by the time it runs.
+temp coupled+`mtkcompile`d parent system.  The returned closure accepts
+two calling conventions:
 
-`operator_vars` is *not* consulted here because the factory only sees the
-post-compile `System` (no `CoupledSystem` access).  Workflows using
-`EarthSciMLBase.Operator`s should bypass auto-pruning by calling
-[`prune_unused_interps!`](@ref) on the `CoupledSystem` directly (which
-does include `operator_vars`).
+  - Legacy 1-arg `f(parent_sys)`: performs *no* pruning.  With only the
+    compiled parent `System` there is no way to know which met fields
+    the coupled system's operators and init-callbacks consume
+    out-of-band, so pruning here would starve them (e.g. drop a
+    callback-only `A1₊PBLH`); every interpolator stays live and its
+    data loads lazily on first use.
+  - 2-arg `f(parent_sys, extra_needed)`: an EarthSciMLBase whose
+    `convert` forwards the operator- and callback-advertised variables
+    calls this form; the factory applies the live mask
+    (`_apply_live_mask!`), pruning interpolators referenced neither by
+    the compiled system's equations nor by `extra_needed`.
+
+Both forms return `nothing`, and EarthSciMLBase's walker filters
+`nothing` returns, so registering this factory adds no new discrete
+events to the parent system — the existing loader-attached
+`build_interp_event` callback fires as before, just with a settled live
+mask in the 2-arg case.  [`prune_unused_interps!`](@ref) on the
+`CoupledSystem` remains the explicit operator- and callback-aware prune
+path for callers who want it.
 """
 function make_prune_factory(interp_infos)
-    return function (parent_sys)
-        _apply_live_mask!(interp_infos, parent_sys)
+    # Backward-compatible with two `convert(System, ::CoupledSystem)` walker
+    # conventions:
+    #
+    #   • legacy `f(parent_sys)` (1 arg): the walker gives us only the compiled
+    #     parent System, so we cannot know which met vars the coupled system's
+    #     operators/callbacks need. Pruning on equation-references alone is UNSAFE —
+    #     met fields consumed only out-of-band by callbacks (e.g. GEOSFP `A1₊PBLH`,
+    #     read solely by `EnvironmentalTransport.PBLMixingCallback`'s observed fn)
+    #     appear in no compiled equation and would be pruned to `live[] = false`,
+    #     leaving a zero-sentinel buffer → `pblh ≈ 0 → imix = 1` → `pbl_full_mix!`
+    #     early-returns → zero PBL vertical mixing → surface tracers trapped in
+    #     level 1 → O3 titration collapse. So we SKIP pruning here; every interp
+    #     stays live and loads lazily via `_update_one_interp!` / `_preload_interp!`.
+    #
+    #   • `f(parent_sys, extra_needed)` (2 args): an EarthSciMLBase that passes the
+    #     operator + init-callback needed vars (see `operator_vars` and each
+    #     init-callback's `get_needed_vars`). With those we CAN prune safely, keeping
+    #     the callback-consumed met fields live.
+    #
+    # Either way `prune_unused_interps!(loader, csys)` remains the explicit,
+    # operator- and callback-aware prune path for callers who want it.
+    return function (parent_sys, extra_needed = nothing)
+        extra_needed === nothing && return nothing  # legacy 1-arg caller: cannot prune safely
+        _apply_live_mask!(interp_infos, parent_sys; extra_needed = extra_needed)
         return nothing
     end
 end
