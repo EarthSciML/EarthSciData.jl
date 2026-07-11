@@ -22,7 +22,8 @@ const _INLINE_DELP = [15.199, 15.286, 15.285, 15.284, 15.285, 15.285, 15.283,
 # to [1, 30]. Registered symbolic; unit fallback returns level 1.
 function inline_target_lev(H::Real)
     isfinite(H) || return 1.0
-    best = 1; bd = Inf
+    best = 1;
+    bd = Inf
     @inbounds for l in 1:length(_INLINE_MIDALT)
         d = abs(_INLINE_MIDALT[l] - H)
         d < bd && (bd = d; best = l)
@@ -96,7 +97,7 @@ const _INLINE_MW = Dict{String, Float64}(
     "XYLMN" => 106.165, "NAPH" => 128.171, "PRPA" => 44.096, "KET" => 72.000,
     "CH4" => 16.043, "ACROLEIN" => 56.064, "BUTADIENE13" => 54.092,
     "CL2" => 70.906, "HCL" => 36.461, "GLY" => 58.036, "GLYD" => 60.052,
-    "MGLY" => 72.063,
+    "MGLY" => 72.063
 )
 
 # ----------------------------------------------------------------------------
@@ -127,7 +128,7 @@ function _read_stack_groups(ds)
     return StackTable(
         n, lon, g("LATITUDE"),
         round.(Int, g("COL")), round.(Int, g("ROW")),
-        g("STKHT"), g("STKDM"), g("STKTK"), g("STKVE"),
+        g("STKHT"), g("STKDM"), g("STKTK"), g("STKVE")
     )
 end
 
@@ -180,7 +181,9 @@ struct NEI2016InlineEmisFileSet{D} <: FileSet
 end
 
 DataFrequencyInfo(fs::NEI2016InlineEmisFileSet) = fs.freq_info
-Base.close(fs::NEI2016InlineEmisFileSet) = lock(nclock) do; close(fs.ds); end
+Base.close(fs::NEI2016InlineEmisFileSet) = lock(nclock) do ;
+    close(fs.ds);
+end
 
 """
 $(SIGNATURES)
@@ -219,7 +222,7 @@ function loadmetadata(fs::NEI2016InlineEmisFileSet, varname)::MetaData
         1,        # xdim (COL)
         2,        # ydim (ROW)
         -1,       # zdim (none — vertical placement is in the System wrapper)
-        (false, false, false),
+        (false, false, false)
     )
 end
 
@@ -234,6 +237,7 @@ function get_geometry(fs::NEI2016InlineEmisFileSet, m::MetaData)
     y = range(start = fs.y0, step = fs.dy, length = fs.nrows + 1)
     polys = Vector{Vector{NTuple{2, Float64}}}(undef, fs.ncols * fs.nrows)
     for j in 1:(fs.nrows), i in 1:(fs.ncols)
+
         polys[(j - 1) * fs.ncols + i] = [(x[i], y[j]), (x[i + 1], y[j]),
             (x[i + 1], y[j + 1]), (x[i], y[j + 1]), (x[i], y[j])]
     end
@@ -280,7 +284,8 @@ function loadslice!(data::AbstractArray, fs::NEI2016InlineEmisFileSet, t::DateTi
         u = strip(get(var.attrib, "units", ""))
         tokg = if u == "moles/s" || u == "mole/s" || u == "mol/s"
             mw = get(_INLINE_MW, String(varname), NaN)
-            isnan(mw) && (@warn "No molecular weight for inline gas species $(varname); emitting 0." maxlog=1)
+            isnan(mw) &&
+                (@warn "No molecular weight for inline gas species $(varname); emitting 0." maxlog=1)
             isnan(mw) ? 0.0 : mw * 1.0e-3           # mole/s * g/mol * 1e-3 = kg/s
         elseif u == "g/s"
             1.0e-3                                    # g/s -> kg/s
@@ -294,7 +299,8 @@ function loadslice!(data::AbstractArray, fs::NEI2016InlineEmisFileSet, t::DateTi
         @assert length(emis)==st.n "inline EMIS length $(length(emis)) != NSTACKS $(st.n)"
         if tokg != 0.0
             @inbounds for s in 1:st.n
-                c = st.col[s]; r = st.row[s]
+                c = st.col[s];
+                r = st.row[s]
                 (1 <= c <= fs.ncols && 1 <= r <= fs.nrows) || continue
                 data[c, r] += emis[s] * tokg         # kg/s accumulated into the cell
             end
@@ -349,7 +355,8 @@ end
 # members (stack_groups + the required day files); this whole-archive extract is
 # a simple fallback.
 # ----------------------------------------------------------------------------
-function NEI2016InlineEmisFileSet(sector::AbstractString, starttime::DateTime, endtime::DateTime;
+function NEI2016InlineEmisFileSet(
+        sector::AbstractString, starttime::DateTime, endtime::DateTime;
         platform::Symbol = :equates2017, mirror = "https://gaftp.epa.gov/Air/",
         stage_dir = nothing)
     extract_dir = something(stage_dir,
@@ -377,10 +384,16 @@ function NEI2016InlineEmisFileSet(sector::AbstractString, starttime::DateTime, e
         stacks = _read_stack_groups(stkds)
         # 12US1 grid + LCC projection from the stack_groups global attributes.
         a = stkds.attrib
-        p_alp = a["P_ALP"]; p_bet = a["P_BET"]; xcent = a["XCENT"]; ycent = a["YCENT"]
+        p_alp = a["P_ALP"];
+        p_bet = a["P_BET"];
+        xcent = a["XCENT"];
+        ycent = a["YCENT"]
         native_sr = "+proj=lcc +lat_1=$(p_alp) +lat_2=$(p_bet) +lat_0=$(ycent) " *
                     "+lon_0=$(xcent) +x_0=0 +y_0=0 +a=6370997.0 +b=6370997.0 +to_meter=1"
-        x0 = a["XORIG"]; y0 = a["YORIG"]; dx = a["XCELL"]; dy = a["YCELL"]
+        x0 = a["XORIG"];
+        y0 = a["YORIG"];
+        dx = a["XCELL"];
+        dy = a["YCELL"]
         # NCOLS/NROWS in the sparse stack_groups are (1, NSTACKS); the full target
         # grid size comes from GDNAM ("12US1_459X299") -> 459 x 299.
         ncols, nrows = _parse_gdnam_size(get(a, "GDNAM", "12US1_459X299"))
@@ -421,7 +434,8 @@ function _compute_hinj_grids(ds, st::StackTable, ncols, nrows, cellarea)
     wg1 = zeros(Float64, ncols, nrows)   # equal-weight fallback
     hw1 = zeros(Float64, ncols, nrows)
     @inbounds for s in 1:st.n
-        c = st.col[s]; r = st.row[s]
+        c = st.col[s];
+        r = st.row[s]
         (1 <= c <= ncols && 1 <= r <= nrows) || continue
         wg[c, r] += w[s] / cellarea
         hw[c, r] += w[s] * hp[s] / cellarea
@@ -457,8 +471,10 @@ function _inline_centerpoints(ds, model_year::Integer)
     base_yr = Int(tf[1, 1, 1]) ÷ 1000   # proxy base year (e.g. 2017)
     out = DateTime[]
     for k in 1:nt
-        yyyyddd = Int(tf[1, 1, k]); hhmmss = Int(tf[2, 1, k])
-        yr = yyyyddd ÷ 1000; doy = yyyyddd % 1000
+        yyyyddd = Int(tf[1, 1, k]);
+        hhmmss = Int(tf[2, 1, k])
+        yr = yyyyddd ÷ 1000;
+        doy = yyyyddd % 1000
         hh = hhmmss ÷ 10000
         dt = DateTime(yr, 1, 1) + Day(doy - 1) + Hour(hh)
         # Preserve any year offset relative to the file set's base proxy year so
@@ -511,9 +527,10 @@ end
 # ============================================================================
 const _EQUATES_BUCKET = "https://cmas-equates.s3.amazonaws.com"
 const _EQUATES_EMIS = "CMAQ_12US1/INPUT/2017/emis"
-const _EQUATES_STACKGROUPS_TAR =
-    "model_ready_emis_2017_stackgroups_epicsoil_EQUATES_v1.0.tar"
-_equates_month_tar(mm) = "model_ready_emis_ptsectors_plus_rwc_2017_$(lpad(mm,2,'0'))_EQUATES_v1.0.tar"
+const _EQUATES_STACKGROUPS_TAR = "model_ready_emis_2017_stackgroups_epicsoil_EQUATES_v1.0.tar"
+function _equates_month_tar(mm)
+    "model_ready_emis_ptsectors_plus_rwc_2017_$(lpad(mm,2,'0'))_EQUATES_v1.0.tar"
+end
 
 # Parse a `tar -tvf`-style contents listing into (member_name => (data_offset, size)).
 # GNU tar stores a name > 100 bytes as a preceding `././@LongLink` header+data
@@ -548,10 +565,14 @@ function _atomic_write_member(out, bytes, expected_size)
         "staging $(basename(out)): got $(length(bytes)) bytes, expected $(expected_size) " *
         "(server ignored Range, short read, or stale .contents.txt offsets)")
     looks_nc = length(bytes) >= 4 && (bytes[1:4] == UInt8[0x89, 0x48, 0x44, 0x46] ||  # \x89HDF (nc4)
-                                      bytes[1:3] == UInt8[0x43, 0x44, 0x46])          # CDF (classic)
-    looks_nc || error("staging $(basename(out)): payload is not NetCDF — tar offset table misaligned")
+                bytes[1:3] == UInt8[0x43, 0x44, 0x46])          # CDF (classic)
+    looks_nc ||
+        error("staging $(basename(out)): payload is not NetCDF — tar offset table misaligned")
     tmp = out * ".tmp-$(getpid())-$(rand(UInt32))"
-    open(tmp, "w") do io; write(io, bytes); end
+    open(tmp, "w") do io
+        ;
+        write(io, bytes);
+    end
     mv(tmp, out; force = true)
     return out
 end
@@ -571,7 +592,8 @@ function _equates_extract_member(tar_url, contents_url, name_substr, out)
     for (name, off) in offsets
         occursin(name_substr, name) && (hit = (name, off); break)
     end
-    hit === nothing && error("tar member matching '$name_substr' not found in $contents_url")
+    hit === nothing &&
+        error("tar member matching '$name_substr' not found in $contents_url")
     (data_start, size) = hit[2]
     mkpath(dirname(out))
     @info "Range-extracting $(hit[1]) ($(round(size/1e6, digits=1)) MB) from EQUATES tar"
@@ -618,7 +640,8 @@ function _equates_ensure_extracted(sector, starttime::DateTime, endtime::DateTim
             for (name, o) in offsets
                 occursin(name_substr, name) && (hit = (name, o); break)
             end
-            hit === nothing && error("EQUATES inline day $ymd for sector $sector not in $contents_url")
+            hit === nothing &&
+                error("EQUATES inline day $ymd for sector $sector not in $contents_url")
             (data_start, size) = hit[2]
             @info "Range-extracting inln_mole_$(sector)_$(ymd) ($(round(size/1e6, digits=1)) MB)"
             bytes = _http_get_bytes(tar;
@@ -650,7 +673,10 @@ function _inline_ensure_extracted(mirror, sector, starttime, endtime, extract_di
             fn = basename(f.name)
             (endswith(fn, ".ncf") && !startswith(fn, ".")) || continue
             out = joinpath(extract_dir, fn)
-            isfile(out) || open(out, "w") do io; write(io, read(f)); end
+            isfile(out) || open(out, "w") do io
+                ;
+                write(io, read(f));
+            end
         end
     finally
         close(r)
@@ -680,10 +706,11 @@ the largest single missing share of the CONUS SO2 inventory) is entirely absent
 from the surface loader. This System adds it back.
 
 Differences from `NEI2016MonthlyEmis`:
-  * Emissions are TRUE hourly rates (CEM-driven for EGU), so NEITHER the
+
+  - Emissions are TRUE hourly rates (CEM-driven for EGU), so NEITHER the
     #209 days-in-month correction NOR the synthetic diurnal / day-of-week
     scaling are applied (they would double-count).
-  * VERTICAL placement is elevated, not surface: each grid cell's emission is
+  - VERTICAL placement is elevated, not surface: each grid cell's emission is
     injected into the model layer at the cell's emission-weighted Briggs plume
     altitude `H_inj` (from real stack geometry). v1 maps altitude→layer with a
     baked mean vertical grid (`inline_target_lev`); the areal flux is normalized
@@ -756,8 +783,10 @@ function NEI2016InlineEmis(
             stream = stream, regrid_f = shared_regridder)
         feq, fdisc, fconst, finfo = create_interp_equation(
             fitp, "", t, t_ref, [x, y]; spatial_interp = spatial_interp)
-        push!(eqs, feq); append!(all_discretes, fdisc)
-        append!(all_constants, fconst); push!(interp_infos, finfo)
+        push!(eqs, feq);
+        append!(all_discretes, fdisc)
+        append!(all_constants, fconst);
+        push!(interp_infos, finfo)
         push!(lhs_vars, feq.lhs)
         store === :hinjw ? (hinjw_var = feq.lhs) : (wemis_var = feq.lhs)
     end
@@ -792,8 +821,10 @@ function NEI2016InlineEmis(
         eq, discretes, constants, info = create_interp_equation(
             itp, "", t, t_ref, [x, y];
             wrapper_f = wrapper_f, spatial_interp = spatial_interp)
-        push!(eqs, eq); append!(all_discretes, discretes)
-        append!(all_constants, constants); push!(interp_infos, info)
+        push!(eqs, eq);
+        append!(all_discretes, discretes)
+        append!(all_constants, constants);
+        push!(interp_infos, info)
         push!(lhs_vars, eq.lhs)
     end
 
