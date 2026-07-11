@@ -13,6 +13,7 @@ const _UNIT_MAP = Dict(
     "K m-2 kg-1 s-1" => (1, u"K/m^2/kg/s"),
     "hPa" => (100, u"Pa"),
     "kg m-2 s-1" => (1, u"kg/m^2/s"),
+    "kg m-1 s-1" => (1, u"kg/m/s"), # inline plume-altitude x flux (HINJW)
     "W m-2" => (1, u"W/m^2"),
     "m" => (1, u"m"),
     "Pa" => (1, u"Pa"),
