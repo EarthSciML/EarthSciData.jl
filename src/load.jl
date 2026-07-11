@@ -81,9 +81,13 @@ A lightweight specification of a model grid, providing an alternative to
 $(FIELDS)
 """
 struct GridSpec
-    "Coordinate ranges for each spatial dimension, ordered (x, y, [z])."
+    """
+    Coordinate ranges for each spatial dimension, ordered (x, y, [z]).
+    """
     coords::Vector
-    "The spatial reference system, e.g. \"+proj=longlat +datum=WGS84 +no_defs\"."
+    """
+    The spatial reference system, e.g. \"+proj=longlat +datum=WGS84 +no_defs\".
+    """
     spatial_ref::String
 end
 
@@ -173,25 +177,45 @@ function _progress_enabled()
 end
 
 """
-Download a file with a progress bar, deleting the partial file on error.
+Download a file with a progress bar, deleting the partial file on error and
+retrying transient failures.
+
+The per-attempt `timeout` (seconds) defaults to 1800 and can be overridden with
+the `EARTHSCIDATA_DOWNLOAD_TIMEOUT` environment variable; `retries` is the
+number of additional attempts after the first failure (default 2, overridable
+with `EARTHSCIDATA_DOWNLOAD_RETRIES`). Throttled data hosts can serve a file
+slower than a fixed short timeout allows — e.g. a 38 MB NEI file at
+~125 kB/s needs ~310 s, which reliably (not randomly) exceeded the previous
+300 s limit on CI — so slow-but-progressing downloads get generous time,
+while dead hosts still fail fast on connection errors and only cost the
+retry attempts.
 """
-function _download_with_progress(download_url::AbstractString, path::AbstractString; timeout::Real = 300)
-    try
-        prog = Progress(100;
-            desc = "Downloading $(basename(download_url)):",
-            dt = 0.1,
-            enabled = _progress_enabled())
-        Downloads.download(download_url, path,
-            timeout = timeout,
-            progress = (
-                total::Integer, now::Integer) -> begin
-                prog.n = total
-                ProgressMeter.update!(prog, now)
-            end
-        )
-    catch e
-        rm(path, force = true)
-        rethrow(e)
+function _download_with_progress(download_url::AbstractString, path::AbstractString;
+        timeout::Real = something(
+            tryparse(Float64, get(ENV, "EARTHSCIDATA_DOWNLOAD_TIMEOUT", "")), 1800.0),
+        retries::Integer = something(
+            tryparse(Int, get(ENV, "EARTHSCIDATA_DOWNLOAD_RETRIES", "")), 2))
+    for attempt in 0:retries
+        try
+            prog = Progress(100;
+                desc = "Downloading $(basename(download_url)):",
+                dt = 0.1,
+                enabled = _progress_enabled())
+            Downloads.download(download_url, path,
+                timeout = timeout,
+                progress = (
+                    total::Integer, now::Integer) -> begin
+                    prog.n = total
+                    ProgressMeter.update!(prog, now)
+                end
+            )
+            return path
+        catch e
+            rm(path, force = true)
+            (attempt == retries || e isa InterruptException) && rethrow(e)
+            @warn "Download failed; retrying" url=download_url attempt=(attempt+1) retries_left=(retries-attempt) exception=(e,)
+            sleep(5.0 * (attempt + 1))
+        end
     end
     return path
 end
@@ -222,25 +246,45 @@ Information about a data array.
 $(FIELDS)
 """
 struct MetaData
-    "The locations associated with each data point in the array."
+    """
+    The locations associated with each data point in the array.
+    """
     coords::Vector{Vector{Float64}}
-    "Physical units of the data, e.g. m s⁻¹."
+    """
+    Physical units of the data, e.g. m s⁻¹.
+    """
     unit_str::String
-    "Description of the data."
+    """
+    Description of the data.
+    """
     description::String
-    "Dimensions of the data, e.g. (lat, lon, layer)."
+    """
+    Dimensions of the data, e.g. (lat, lon, layer).
+    """
     dimnames::Vector{String}
-    "Dimension sizes of the data, e.g. (180, 360, 30)."
+    """
+    Dimension sizes of the data, e.g. (180, 360, 30).
+    """
     varsize::Vector{Int}
-    "The spatial reference system of the data, e.g. \"+proj=longlat +datum=WGS84 +no_defs\" for lat-lon data."
+    """
+    The spatial reference system of the data, e.g. \"+proj=longlat +datum=WGS84 +no_defs\" for lat-lon data.
+    """
     native_sr::String
-    "The index number of the x-dimension (e.g. longitude)"
+    """
+    The index number of the x-dimension (e.g. longitude)
+    """
     xdim::Int
-    "The index number of the y-dimension (e.g. latitude)"
+    """
+    The index number of the y-dimension (e.g. latitude)
+    """
     ydim::Int
-    "The index number of the z-dimension (e.g. vertical level)"
+    """
+    The index number of the z-dimension (e.g. vertical level)
+    """
     zdim::Int
-    "Grid staggering for each dimension. (true=edge-aligned, false=center-aligned)"
+    """
+    Grid staggering for each dimension. (true=edge-aligned, false=center-aligned)
+    """
     staggering::NTuple{3, Bool}
 end
 
@@ -274,15 +318,23 @@ Information about the temporal frequency of archived data.
 $(FIELDS)
 """
 struct DataFrequencyInfo
-    "Beginning of time of the time series."
+    """
+    Beginning of time of the time series.
+    """
     start::DateTime
-    "Interval between each record."
+    """
+    Interval between each record.
+    """
     frequency::Union{Dates.Period, Dates.CompoundPeriod}
-    "Time representing the temporal center of each record."
+    """
+    Time representing the temporal center of each record.
+    """
     centerpoints::Vector{DateTime}
-    "Precomputed bucket boundaries for `centerpoint_index`: the i-th element
+    """
+    Precomputed bucket boundaries for `centerpoint_index`: the i-th element
     is the midpoint between `centerpoints[i-1]` and `centerpoints[i]`, with
-    `middles[1] = centerpoints[1]` so the first bucket begins there."
+    `middles[1] = centerpoints[1]` so the first bucket begins there.
+    """
     middles::Vector{DateTime}
     function DataFrequencyInfo(start::DateTime,
             frequency::Union{Dates.Period, Dates.CompoundPeriod},
@@ -342,15 +394,25 @@ on a non-CPU device, that the regridder writes into before a single
 $(FIELDS)
 """
 mutable struct TemporalCache{To, N, N2}
-    "Buffer that data is read into from file before the regridder runs."
+    """
+    Buffer that data is read into from file before the regridder runs.
+    """
     load_cache::Array{To, N2}
-    "Host-side full-grid scratch for cross-device runs; `nothing` when the parameter buffer is itself a CPU `Array`."
+    """
+    Host-side full-grid scratch for cross-device runs; `nothing` when the parameter buffer is itself a CPU `Array`.
+    """
     host_scratch::Union{Nothing, Array{To, N}}
-    "Timestamps corresponding to each time index in the data buffer."
+    """
+    Timestamps corresponding to each time index in the data buffer.
+    """
     times::Vector{DateTime}
-    "The current time that the interpolator has been loaded for."
+    """
+    The current time that the interpolator has been loaded for.
+    """
     currenttime::DateTime
-    "Whether the cache has been initialized with real data."
+    """
+    Whether the cache has been initialized with real data.
+    """
     initialized::Bool
 end
 
@@ -371,10 +433,12 @@ the interpolator. `spatial_ref` is the spatial reference system that the simulat
 """
 mutable struct DataSetInterpolator{To, N, N2, FT, DomT, ET, FS, RG}
     fs::FS
-    "Callable that maps a data-grid array to a model-grid array.  Defaults to a
+    """
+    Callable that maps a data-grid array to a model-grid array.  Defaults to a
     BSpline-interpolating closure built from the variable's `MetaData`; pass
     the `regrid_f` kwarg to override (e.g. with a `ConservativeRegridderCallable`
-    or a nearest-neighbour callable)."
+    or a nearest-neighbour callable).
+    """
     regridder::RG
     varname::String
     cache::TemporalCache{To, N, N2}
@@ -392,7 +456,9 @@ mutable struct DataSetInterpolator{To, N, N2, FT, DomT, ET, FS, RG}
     grid_starts::NTuple{N2, To}
     grid_steps::NTuple{N2, To}
     grid_size::NTuple{N2, Int}
-    "Number of time slices the interpolator caches at once (size of the trailing time dim of the data buffer)."
+    """
+    Number of time slices the interpolator caches at once (size of the trailing time dim of the data buffer).
+    """
     cache_size::Int
 
     function DataSetInterpolator{To}(fs::FileSet, varname::AbstractString,
@@ -639,11 +705,12 @@ invariant guarantees at most one overlap region with a single constant
 documented surface area for this invariant; helpers below operate on it.
 
 Fields
-- `first_new`     — first 1-based index in `new_times` covered by overlap
-                    (`0` when no overlap)
-- `overlap_count` — number of consecutive new-window slots covered by
-                    overlap
-- `delta`         — `old_idx - new_idx` for any slot in the overlap
+
+  - `first_new`     — first 1-based index in `new_times` covered by overlap
+    (`0` when no overlap)
+  - `overlap_count` — number of consecutive new-window slots covered by
+    overlap
+  - `delta`         — `old_idx - new_idx` for any slot in the overlap
 """
 struct _CacheAdvancePlan
     first_new::Int
