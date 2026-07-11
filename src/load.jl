@@ -417,7 +417,14 @@ mutable struct DataSetInterpolator{To, N, N2, FT, DomT, ET, FS, RG}
 
         # Check how many time indices we will need.
         dfi = DataFrequencyInfo(fs)
-        cache_size = 2
+        # Streaming default: a 3-slot lookback window `[ti-1, ti, ti+1]`
+        # anchored on `centerpoint_index(t)`. Keeping the slot *before* the
+        # anchor resident means any query within half a data interval of the
+        # anchor — either side — is bracketed by loaded data, so backward
+        # excursions inside the anchor's bucket (e.g. `SolverStrangThreads`'
+        # per-cell reinit! to the outer-step start) interpolate exactly with
+        # zero reloads instead of thrashing the window or extrapolating.
+        cache_size = min(3, max(length(dfi.centerpoints), 1))
         if !stream
             cache_size = sum(
                 (starttime - dfi.frequency) .<=
@@ -558,14 +565,25 @@ function interp_cache_times!(itp::DataSetInterpolator, t::DateTime)
     dfi = DataFrequencyInfo(itp.fs)
     ti = centerpoint_index(dfi, t)
     n = length(dfi.centerpoints)
-    # Currently assuming we're going forwards in time.
-    if t < dfi.centerpoints[ti]  # Load data starting with previous time step.
-        ti_end = min(n, ti + cache_size - 2)
-        ti_start = max(1, ti_end - cache_size + 1)
-    else
-        ti_end = min(n, ti + cache_size - 1)
-        ti_start = max(1, ti_end - cache_size + 1)
-    end
+    # Forward-eager / backward-lazy streaming window `[ti-1, ti, ti+1, …]`:
+    # one lookback slot before the anchor `ti`, the anchor, then up to
+    # `cache_size-2` slots of lookahead, clamped to the dataset ends. Keeping
+    # the slot *before* the anchor resident means every query in `ti`'s bucket
+    # — both halves — is bracketed by loaded data, so a backward dip just below
+    # `centerpoints[ti]` interpolates from real data rather than extrapolating,
+    # and does not thrash the window.
+    ti_end = min(n, ti + max(1, cache_size - 2))
+    # Forward-eager re-anchoring: once the forward edge reaches the last
+    # centerpoint (`ti_end == n`, nothing left to look ahead to) and `t` has
+    # passed its own centerpoint (so the lookback slot is not needed to bracket
+    # `t`), drop the lookback and anchor the window's start on `ti`. Otherwise
+    # the window stays pinned to the final `cache_size` centerpoints and never
+    # advances as `t` moves through the last interval — e.g. a monthly Apr–Jun
+    # dataset would keep `times = [Apr, May, Jun]` at May-31 instead of
+    # advancing to `[May, Jun]` (the `lazyload!` reload trigger only fires once
+    # `t` passes `times[end]`).
+    ti_start = (ti_end == n && t >= dfi.centerpoints[ti]) ? ti : max(1, ti - 1)
+    ti_start = max(ti_start, ti_end - cache_size + 1)  # never exceed cache_size slots
     dfi.centerpoints[ti_start:ti_end]
 end
 
@@ -753,6 +771,21 @@ function lazyload!(itp::DataSetInterpolator, t::DateTime, target::AbstractArray)
             update!(itp, t, target)
             return
         end
+        # The resident 3-slot lookback window (`[ti-1, ti, ti+1]` anchored on
+        # `centerpoint_index`, see `interp_cache_times!`) covers every query in
+        # the anchor's bucket, so both reload triggers are exact
+        # window-coverage checks. In particular, a backward query that dips
+        # below the anchor centerpoint but stays at or above `times[begin]`
+        # (the lookback slot) is served by resident data with correct linear
+        # interpolation and NO reload. Without that lookback slot the window
+        # *thrashes*: `SolverStrangThreads.single_ode_step!` reinit!s every
+        # cell to the outer-step START time, which lands just before a data
+        # centerpoint the inner solve then re-crosses, so the affect retreats
+        # the window (t < times[begin]) and the next sub-step re-advances it —
+        # once per cell, i.e. O(cells) redundant NetCDF reads at every
+        # centerpoint crossing. The forward edge (t >= times[end]) advances
+        # normally: one new slice per boundary crossing, with the overlapping
+        # slots shifted in place.
         if t < tc.times[begin] || t >= tc.times[end]
             update!(itp, t, target)
         end
