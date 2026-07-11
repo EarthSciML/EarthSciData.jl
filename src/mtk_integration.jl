@@ -407,14 +407,15 @@ function interp_callable(sys, varname::Symbol; parent_scope::Bool = false)
         get_name(sym) = ModelingToolkit.getname(
             sym isa Symbolics.Num ? Symbolics.unwrap(sym) : sym)
         via(sym) = PS(getproperty(sys, get_name(sym)))
-        info = merge(info, (
-            data_sym = via(info.data_sym),
-            tstart_sym = via(info.tstart_sym),
-            tstep_sym = via(info.tstep_sym),
-            spatial_consts = Any[via(c) for c in info.spatial_consts],
-            extrap_const = via(info.extrap_const),
-            unit_const = via(info.unit_const),
-        ))
+        info = merge(info,
+            (
+                data_sym = via(info.data_sym),
+                tstart_sym = via(info.tstart_sym),
+                tstep_sym = via(info.tstep_sym),
+                spatial_consts = Any[via(c) for c in info.spatial_consts],
+                extrap_const = via(info.extrap_const),
+                unit_const = via(info.unit_const)
+            ))
     end
     return InterpCallable(info)
 end
@@ -562,7 +563,7 @@ function build_interp_event(interp_infos, starttime::DateTime)
         keys = (
             EarthSciMLBase.var2symbol(info.data_sym),
             EarthSciMLBase.var2symbol(info.tstart_sym),
-            EarthSciMLBase.var2symbol(info.tstep_sym),
+            EarthSciMLBase.var2symbol(info.tstep_sym)
         )
         push!(per_interp_keys, keys)
         append!(mod_keys, keys)
@@ -895,7 +896,7 @@ function _apply_live_mask!(interp_infos, parent_sys; extra_needed = ())
         push!(referenced, string(EarthSciMLBase.var2symbol(v)))
     end
     is_needed = [any(s -> matches(bare_data_syms[k], s), referenced) ||
-                 any(s -> matches(bare_var_syms[k], s), referenced)
+                     any(s -> matches(bare_var_syms[k], s), referenced)
                  for k in eachindex(interp_infos)]
     if any(is_needed)
         kept = String[]

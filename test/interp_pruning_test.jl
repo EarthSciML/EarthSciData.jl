@@ -44,6 +44,7 @@ using Test
     fpath = joinpath(era5_dir, "era5_pl_2022_01.nc")
     time_vals = DateTime[]
     for d in 1:Dates.daysinmonth(2022, 1), h in hours_per_day
+
         push!(time_vals, DateTime(2022, 1, d, h))
     end
     ntime = length(time_vals)
@@ -98,7 +99,7 @@ using Test
 
     # Parent state references only the temperature interpolator (`pl₊t`).
     # All other ERA5 variables (u, v, w, q, ...) are unreferenced.
-    @variables C(t)=0.0 [unit = u"K*s"]
+    @variables C(t) = 0.0 [unit = u"K*s"]
     eq = D(C) ~ era5.pl₊t
     sys_unsimp = compose(System([eq], t, [C], []; name = :state), era5)
     sys = mtkcompile(sys_unsimp)
@@ -139,12 +140,11 @@ using Test
     # `needed_vars(integ.f.sys)` so subsequent fires (and the init fire
     # itself) skip `lazyload!` on dead interpolators.
     for v in ["u", "v", "w", "q", "r", "z", "d", "vo", "o3", "cc",
-              "ciwc", "clwc", "crwc", "cswc", "pv"]
+        "ciwc", "clwc", "crwc", "cswc", "pv"]
         @test v in not_initialized
     end
     @test length(initialized) == 1
 end
-
 
 using EarthSciData: make_prune_factory
 using ModelingToolkit: t_nounits, D_nounits
@@ -216,6 +216,7 @@ end
     fpath = joinpath(era5_dir, "era5_pl_2022_01.nc")
     time_vals = DateTime[]
     for d in 1:Dates.daysinmonth(2022, 1), h in hours_per_day
+
         push!(time_vals, DateTime(2022, 1, d, h))
     end
     ntime = length(time_vals)
@@ -262,7 +263,7 @@ end
     @test all(i.live[] for i in infos)
 
     # Parent state equation references only the temperature interpolator.
-    @variables Creg(tu)=0.0 [unit = u"K*s"]
+    @variables Creg(tu) = 0.0 [unit = u"K*s"]
     eq = Du(Creg) ~ era5.pl₊t
     parent = mtkcompile(compose(
         System([eq], tu, [Creg], []; name = :reg_state), era5))
