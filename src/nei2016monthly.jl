@@ -131,11 +131,11 @@ delp_dry_surface_itp(lon::DynamicQuantities.Quantity, lat::DynamicQuantities.Qua
 # the wrapper-equation builder in `NEI2016MonthlyEmis` to keep the
 # species-dispatch in one table instead of an `if/elseif` chain.
 const _NEI_SCALING_FN = Dict{String, Function}(
-    "CO"   => nei_scale_CO,
+    "CO" => nei_scale_CO,
     "FORM" => diurnal_itp,
     "ISOP" => diurnal_itp_ISOP,
-    "NO"   => nei_scale_NOx,
-    "NO2"  => nei_scale_NOx,
+    "NO" => nei_scale_NOx,
+    "NO2" => nei_scale_NOx
 )
 
 """
@@ -367,10 +367,9 @@ function varnames(fs::NEI2016MonthlyEmisFileSet)
     end
 end
 
-Base.close(fs::NEI2016MonthlyEmisFileSet) =
-    lock(nclock) do ;
-        close(fs.ds);
-    end
+Base.close(fs::NEI2016MonthlyEmisFileSet) = lock(nclock) do ;
+    close(fs.ds);
+end
 
 # Verify that `varname`'s grid metadata matches `ref_meta` on every dimension
 # the shared regridder depends on.  Throws if any of {native_sr, xdim, ydim,

@@ -193,11 +193,13 @@ import Proj
 
         # 6 AM UTC
         six_am_utc = t_ref_numeric + 6 * 3600.0  # 7th factor
-        @test EarthSciData.diurnal_itp(six_am_utc, lon_utc) == EarthSciData.DIURNAL_FACTORS[7]
+        @test EarthSciData.diurnal_itp(six_am_utc, lon_utc) ==
+              EarthSciData.DIURNAL_FACTORS[7]
 
         # 6 PM UTC
         six_pm_utc = t_ref_numeric + 18 * 3600.0  # 19th factor
-        @test EarthSciData.diurnal_itp(six_pm_utc, lon_utc) == EarthSciData.DIURNAL_FACTORS[19]
+        @test EarthSciData.diurnal_itp(six_pm_utc, lon_utc) ==
+              EarthSciData.DIURNAL_FACTORS[19]
 
         # Test 2: Chicago (UTC-6, longitude ~ -87.6°)
         lon_chicago = deg2rad(-87.6)  # Chicago longitude
@@ -385,7 +387,9 @@ import Proj
         for (i, lon_val) in enumerate(lon_grid)
             for (j, lat_val) in enumerate(lat_grid)
                 eq = D(NO) ~ emis.NO / uc
-                sys = compose(System([eq], t, [NO], [uc]; name = Symbol("NO_sys_$(i)_$(j)")), emis)
+                sys = compose(
+                    System(
+                        [eq], t, [NO], [uc]; name = Symbol("NO_sys_$(i)_$(j)")), emis)
                 sys = mtkcompile(sys)
                 # After composition, parameters are namespaced; extract them from the compiled system
                 ps = parameters(sys)
@@ -460,7 +464,6 @@ import Proj
         @test ACET_map[1, 1, end] != 0.0  # Ensure we get nonzero emissions
     end
 end
-
 
 @testset "CO day-of-week factors conserve the weekly total" begin
     # Regression for the renormalization: the raw NEI99 CO factors summed to
