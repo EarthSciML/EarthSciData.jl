@@ -34,23 +34,24 @@ struct WRFFileSet <: EarthSciData.FileSet
         end
     end
 
-function WRFFileSet(::Val{:local}, filepath::AbstractString, domain)
-    isfile(filepath) ||
-        throw(ArgumentError("Local WRF file not found: $filepath"))
+    function WRFFileSet(::Val{:local}, filepath::AbstractString, domain)
+        isfile(filepath) ||
+            throw(ArgumentError("Local WRF file not found: $filepath"))
 
-    lock(nclock) do
-        ds = NCDataset(filepath)
-        times = vec(ds["XTIME"][:])
-        file_start = times[1]
-        Δt_ms = Dates.value(times[2] - times[1])
-        frequency = Second(round(Int, Δt_ms / 1000))
+        lock(nclock) do
+            ds = NCDataset(filepath)
+            times = vec(ds["XTIME"][:])
+            file_start = times[1]
+            Δt_ms = Dates.value(times[2] - times[1])
+            frequency = Second(round(Int, Δt_ms / 1000))
 
-        return new(
-            filepath,
-            domain,
-            ds,
-            DataFrequencyInfo(file_start, frequency, times),
-        )
+            return new(
+                filepath,
+                domain,
+                ds,
+                DataFrequencyInfo(file_start, frequency, times),
+            )
+        end
     end
 end
 
