@@ -49,13 +49,31 @@ function regrid_horizontal!(dst_field, regridder::ConservativeRegridding.Regridd
     reshape(dst_field, sz...)
 end
 
+"""
+Build the source-grid interpolator for regridding. Uniform axes take the fast
+scaled-BSpline path; any non-uniform axis (e.g. the GEOS-FP half-polar latitude
+grid, spacings {0.1875, 0.25} deg) switches to `Gridded` interpolation on the
+true knots. Forcing a uniform range onto that axis displaced every met field
+poleward by up to ~4 km and blended 7-14% with the neighbouring native row.
+"""
+function _build_regrid_interp(src, coords, extrapolate_type, degree = Linear())
+    if all(c -> isuniform(c), coords)
+        data_grid = Tuple(knots2range.(coords))
+        padded_src, padded_grid = _pad_singletons(src, data_grid)
+        itp0 = interpolate!(padded_src, BSpline(degree))
+        return extrapolate(scale(itp0, padded_grid), extrapolate_type)
+    else
+        knots = Tuple(collect(Float64, c) for c in coords)
+        padded_src, padded_knots = _pad_singletons(src, knots)
+        return extrapolate(
+            interpolate(padded_knots, padded_src, Gridded(degree)), extrapolate_type)
+    end
+end
+
 function interpolate_from!(dst::AbstractArray{T, N},
         src::AbstractArray{T, N}, mta::MetaData, model_grid, domain;
         extrapolate_type = Flat()) where {T, N}
-    data_grid = Tuple(knots2range.(mta.coords))
-    padded_src, padded_grid = _pad_singletons(src, data_grid)
-    itp = interpolate!(padded_src, BSpline(Linear()))
-    itp = extrapolate(scale(itp, padded_grid), extrapolate_type)
+    itp = _build_regrid_interp(src, mta.coords, extrapolate_type)
     ct = coord_trans(mta, domain)
     if N == 3
         for (i, x) in enumerate(model_grid[1])
