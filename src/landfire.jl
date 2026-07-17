@@ -188,9 +188,7 @@ instead of `BSpline(Linear())`.
 function _nearest_interpolate_from!(dst::AbstractArray{T, 2},
         src::AbstractArray{T, 2}, mta::MetaData, model_grid, domain;
         extrapolate_type = Flat()) where {T}
-    data_grid = Tuple(knots2range.(mta.coords))
-    itp = interpolate!(src, BSpline(Constant()))
-    itp = extrapolate(scale(itp, data_grid), extrapolate_type)
+    itp = _build_regrid_interp(src, mta.coords, extrapolate_type, Constant())
     ct = coord_trans(mta, domain)
     for (i, x) in enumerate(model_grid[1])
         for (j, y) in enumerate(model_grid[2])

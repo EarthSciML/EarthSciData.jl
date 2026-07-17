@@ -490,6 +490,18 @@ function Base.show(io::IO, itp::DataSetInterpolator)
 end
 
 """
+Return `true` if `knots` are evenly spaced to within relative tolerance `reltol`.
+Non-uniform axes (e.g. the GEOS-FP latitude grid, whose polar rows are half-size)
+must NOT be forced onto a uniform range — use gridded interpolation instead.
+"""
+function isuniform(knots, reltol = 0.05)
+    length(knots) <= 2 && return true
+    dx = diff(knots)
+    dx_mean = sum(dx) / length(dx)
+    all(abs.(1 .- dx ./ dx_mean) .<= reltol)
+end
+
+"""
 Convert a vector of evenly spaced grid points to a range.
 The `reltol` parameter specifies the relative tolerance for the grid spacing,
 which is necessary to account for different numbers of days in each month
@@ -499,9 +511,12 @@ function knots2range(knots, reltol = 0.05)
     if length(knots) == 1
         return knots[begin]:one(eltype(knots)):knots[begin]
     end
-    dx = diff(knots)
-    dx_mean = sum(dx) / length(dx)
-    #@assert all(abs.(1 .- dx ./ dx_mean) .<= reltol) "Knots ($knots) must be evenly spaced within reltol=$reltol."
+    # This guard was previously commented out, which let the GEOS-FP half-polar
+    # latitude axis (spacings {0.1875, 0.25} deg) be silently uniformized to
+    # 0.24983 deg — displacing every met field northward by +1.9 km (25N) to
+    # +3.8 km (49N) and blending 7-14% with the neighbouring native row.
+    # Callers must check `isuniform` first and take a Gridded path otherwise.
+    @assert isuniform(knots, reltol) "Knots ($knots) must be evenly spaced within reltol=$reltol; use gridded interpolation for non-uniform axes."
     dx = (knots[end] - knots[begin]) / (length(knots) - 1)
     # Need to do weird range creation to avoid rounding errors.
     return knots[begin]:dx:(knots[begin] + dx * (length(knots) - 1))
