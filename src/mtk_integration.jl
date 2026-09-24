@@ -646,8 +646,29 @@ function build_interp_event(interp_infos, starttime::DateTime)
     ts_buf = Vector{Float64}(undef, n_interp)
     tstep_buf = Vector{Float64}(undef, n_interp)
 
+    # Cache the last-built parameter NamedTuple, keyed by the absolute time it was
+    # built for. Under SolverStrangThreads every grid cell's `reinit!` fires this
+    # affect at the SAME `t_abs` within one outer step, so the built result is
+    # identical. Without caching, all solver threads serialize on `update_lock`
+    # AND allocate a fresh NamedTuple once per cell — the dominant high-thread
+    # scaling wall (more threads then run no faster than fewer). Repeat fires now return the
+    # cache with no lock and no allocation.
+    last_tabs = Ref(NaN)
+    cached_nt = Ref{Any}(nothing)
+
     function update_data!(_modified, _observed, ctx, integ)
+        t_abs = integ.t + t_ref
+        # Lock-free fast path: same t_abs as the last build → identical result.
+        if t_abs == last_tabs[]
+            c = cached_nt[]
+            c === nothing || return c
+        end
         lock(update_lock) do
+            # Double-check under the lock: another thread may have just built it.
+            if t_abs == last_tabs[]
+                c = cached_nt[]
+                c === nothing || return c
+            end
             if !prune_done[]
                 sys = isdefined(integ.f, :sys) ? integ.f.sys : nothing
                 if sys !== nothing
@@ -678,13 +699,15 @@ function build_interp_event(interp_infos, starttime::DateTime)
             # signal `data_wrappers[i] === nothing` replaces a
             # `modified[dkey]` probe whose heterogeneous-union return would
             # otherwise box.
-            t_abs = integ.t + t_ref
             for i in 1:n_interp
                 _update_one_interp!(interp_infos[i], ctx[i], t_abs,
                     data_wrappers, ts_buf, tstep_buf, i)
             end
-            _build_updates_nt(live_keys_val_ref[], live_idx_val_ref[],
+            nt = _build_updates_nt(live_keys_val_ref[], live_idx_val_ref[],
                 data_wrappers, ts_buf, tstep_buf)
+            last_tabs[] = t_abs
+            cached_nt[] = nt
+            nt
         end
     end
 

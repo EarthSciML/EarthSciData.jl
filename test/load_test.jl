@@ -264,9 +264,12 @@ end
         @test uvals ≈ answers
 
         interp!(itp, buf, times[end], xs[end], xs[end])
-        @test length(itp.cache.times) == 2
-        @test itp.cache.times ==
-              [DateTime("2022-05-02T22:30:00"), DateTime("2022-05-03T01:30:00")]
+        @test length(itp.cache.times) == 3
+        @test itp.cache.times == [
+            DateTime("2022-05-02T19:30:00"),
+            DateTime("2022-05-02T22:30:00"),
+            DateTime("2022-05-03T01:30:00")
+        ]
 
         uvals = zeros(Float32, length(times), length(xs))
         answers = zeros(Float32, length(times), length(xs))
@@ -537,5 +540,175 @@ end
             itp, buf, DateTime(2022, 5, 1, 1), deg2rad(0.25f0), deg2rad(0.5f0), 1.0f0)
         @test !isnan(val)
         @test isfinite(val)
+    end
+end
+
+# ---------------------------------------------------------------------------
+# Guard test for the `lazyload!` 3-slot lookback window (cache-window
+# thrashing fix). Offline: uses a synthetic FileSet whose `loadslice!`
+# counts how many slices are read from "disk" and fills each slice with a
+# time-dependent value, so in-window backward queries can be checked
+# against the exact linear interpolant (a constant field could not
+# distinguish linear interpolation from flat extrapolation).
+# ---------------------------------------------------------------------------
+
+struct HysteresisCountFS <: EarthSciData.FileSet
+    start::DateTime
+    finish::DateTime
+    nloads::Base.RefValue{Int}
+end
+HysteresisCountFS(start, finish) = HysteresisCountFS(start, finish, Ref(0))
+
+function EarthSciData.DataFrequencyInfo(
+        fs::HysteresisCountFS,
+)::EarthSciData.DataFrequencyInfo
+    frequency = Hour(1)
+    centerpoints = collect(fs.start:frequency:fs.finish)
+    EarthSciData.DataFrequencyInfo(fs.start, frequency, centerpoints)
+end
+_hcfs_tv(fs::HysteresisCountFS, t) = (t - fs.start) / (fs.finish - fs.start)
+function EarthSciData.loadslice!(
+        cache::AbstractArray, fs::HysteresisCountFS, t::DateTime, varname)
+    fs.nloads[] += 1
+    fill!(cache, _hcfs_tv(fs, t))
+end
+function EarthSciData.loadmetadata(fs::HysteresisCountFS, varname)
+    EarthSciData.MetaData(
+        [[0.0, 1.0], [0.0, 1.0]],
+        "m", "test", ["x", "y"], [2, 2],
+        "+proj=longlat +datum=WGS84 +no_defs", 1, 2, -1, (false, false, false)
+    )
+end
+
+@testset "lazyload! 3-slot lookback window: no cache-window thrashing" begin
+    domain = DomainInfo(
+        DateTime(2024, 1, 1), DateTime(2024, 1, 2);
+        lonrange = deg2rad(0.0):deg2rad(1.0):deg2rad(1.0),
+        latrange = deg2rad(0.0):deg2rad(1.0):deg2rad(1.0),
+        levrange = 1:1
+    )
+    fs = HysteresisCountFS(DateTime(2024, 1, 1), DateTime(2024, 1, 2))
+    itp = EarthSciData.DataSetInterpolator{Float64}(
+        fs, "X", DateTime(2024, 1, 1), DateTime(2024, 1, 2), domain)
+    buf = EarthSciData.make_data_buffer(itp)
+
+    # Initial load at a centerpoint well inside the dataset: fills the whole
+    # streaming window (3 slots, [ti-1, ti, ti+1]) -> exactly 3 slice reads.
+    t0 = DateTime(2024, 1, 1, 6)
+    EarthSciData.lazyload!(itp, t0, buf)
+    @test itp.cache.times ==
+          [DateTime(2024, 1, 1, 5), DateTime(2024, 1, 1, 6), DateTime(2024, 1, 1, 7)]
+    n0 = fs.nloads[]
+    @test n0 == 3
+
+    # A backward dip below the anchor centerpoint (24 min = 0.4x the data
+    # interval) is the thrashing scenario: per-cell reinit! to the outer-step
+    # start time. The resident lookback slot must serve it with NO reload...
+    t_dip = t0 - Minute(24)
+    EarthSciData.lazyload!(itp, t_dip, buf)
+    @test fs.nloads[] == n0
+    @test itp.cache.times ==
+          [DateTime(2024, 1, 1, 5), DateTime(2024, 1, 1, 6), DateTime(2024, 1, 1, 7)]
+    # ...and — unlike a 2-slot window, which could only flat-extrapolate
+    # here — the lookback slot brackets the dipped time, so the result is the
+    # exact linear interpolation between the 05:00 and 06:00 slices.
+    v5 = _hcfs_tv(fs, DateTime(2024, 1, 1, 5))
+    v6 = _hcfs_tv(fs, DateTime(2024, 1, 1, 6))
+    v_dip = EarthSciData.interp_unsafe(
+        itp, buf, t_dip, itp.grid_starts[1], itp.grid_starts[2])
+    @test v_dip ≈ v5 + 0.6 * (v6 - v5)
+
+    # A solver dipping back and forth across the anchor centerpoint must
+    # cause ZERO reloads while it stays within the window's coverage.
+    for tt in (t0 + Minute(24), t_dip, t0 + Minute(45), t0 - Minute(29))
+        EarthSciData.lazyload!(itp, tt, buf)
+    end
+    @test fs.nloads[] == n0
+
+    # A backward query below the lookback slot (70 min) genuinely leaves the
+    # window: it must slide back, reading exactly ONE new slice (the two
+    # overlapping slots are shifted in place, not re-read).
+    t_big = t0 - Minute(70)
+    EarthSciData.lazyload!(itp, t_big, buf)
+    @test fs.nloads[] == n0 + 1
+    @test itp.cache.times ==
+          [DateTime(2024, 1, 1, 4), DateTime(2024, 1, 1, 5), DateTime(2024, 1, 1, 6)]
+
+    # Advancing forward across the window's end also costs exactly ONE slice.
+    n1 = fs.nloads[]
+    EarthSciData.lazyload!(itp, DateTime(2024, 1, 1, 6, 20), buf)
+    @test fs.nloads[] == n1 + 1
+    @test itp.cache.times ==
+          [DateTime(2024, 1, 1, 5), DateTime(2024, 1, 1, 6), DateTime(2024, 1, 1, 7)]
+end
+
+# ---------------------------------------------------------------------------
+# Guard tests for the lock-free `lazyload!` fast path and the interp-event
+# affect NamedTuple cache (keyed by t_abs). Offline: reuses the counting
+# `HysteresisCountFS` fixture defined above.
+# ---------------------------------------------------------------------------
+
+@testset "lock-free lazyload! + interp-event affect NamedTuple cache" begin
+    domain = DomainInfo(
+        DateTime(2024, 1, 1), DateTime(2024, 1, 2);
+        lonrange = deg2rad(0.0):deg2rad(1.0):deg2rad(1.0),
+        latrange = deg2rad(0.0):deg2rad(1.0):deg2rad(1.0),
+        levrange = 1:1
+    )
+
+    @testset "repeated lazyload! at unchanged time performs no reload" begin
+        fs = HysteresisCountFS(DateTime(2024, 1, 1), DateTime(2024, 1, 2))
+        itp = EarthSciData.DataSetInterpolator{Float64}(
+            fs, "X", DateTime(2024, 1, 1), DateTime(2024, 1, 2), domain)
+        buf = EarthSciData.make_data_buffer(itp)
+        t0 = DateTime(2024, 1, 1, 6)
+        EarthSciData.lazyload!(itp, t0, buf)
+        n0 = fs.nloads[]
+        @test n0 == 3   # 3-slot lookback window [ti-1, ti, ti+1]
+        # Repeats at the unchanged time, plus covered times inside the loaded
+        # window (incl. the backward lookback slot at t0 - 20 min ≥ times[begin]),
+        # are all served by the lock-free fast path: NO reload.
+        for tt in (t0, t0, t0 + Minute(10), t0 + Minute(45), t0 - Minute(20))
+            EarthSciData.lazyload!(itp, tt, buf)
+        end
+        @test fs.nloads[] == n0
+        @test itp.cache.times ==
+              [DateTime(2024, 1, 1, 5), DateTime(2024, 1, 1, 6), DateTime(2024, 1, 1, 7)]
+    end
+
+    @testset "affect NamedTuple is identical (===) for a repeated t_abs" begin
+        fs = HysteresisCountFS(DateTime(2024, 1, 1), DateTime(2024, 1, 2))
+        starttime = DateTime(2024, 1, 1)
+        itp = EarthSciData.DataSetInterpolator{Float64}(
+            fs, "X", starttime, DateTime(2024, 1, 2), domain)
+        # Minimal interp_info (the NamedTuple shape built by
+        # `create_interp_equation`), restricted to the fields the event path
+        # touches.
+        @parameters lfx_data lfx_tstart lfx_tstep
+        info = (data_sym = lfx_data, tstart_sym = lfx_tstart,
+            tstep_sym = lfx_tstep, itp = itp, var_sym = :LFX,
+            data_eltype = Float64, live = Ref(true),
+            preloaded_buf = Ref{Any}(nothing))
+        ev = EarthSciData.build_interp_event([info], starttime)
+        aff = ev.affect
+        update_data! = aff.f
+        ctx = aff.ctx
+
+        # Minimal integrator stand-in: the affect only touches `integ.t` and
+        # (defensively, for the auto-prune fallback) `integ.f.sys`.
+        integ = (; t = 6.0 * 3600, f = nothing)
+        nt1 = update_data!(nothing, nothing, ctx, integ)
+        @test nt1 isa NamedTuple
+        nloads1 = fs.nloads[]
+        nt2 = update_data!(nothing, nothing, ctx, integ)
+        @test nt2 === nt1             # identical cached result, same t_abs
+        @test fs.nloads[] == nloads1  # ...and no additional slice reads
+
+        # A genuinely new t_abs (next data interval) rebuilds and reloads.
+        integ2 = (; t = 7.0 * 3600, f = nothing)
+        nt3 = update_data!(nothing, nothing, ctx, integ2)
+        @test nt3 isa NamedTuple
+        @test nt3 !== nt2
+        @test fs.nloads[] > nloads1
     end
 end
