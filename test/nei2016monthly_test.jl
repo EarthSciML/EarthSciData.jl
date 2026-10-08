@@ -465,15 +465,37 @@ import Proj
     end
 end
 
-@testset "CO day-of-week factors conserve the weekly total" begin
-    # Regression for the renormalization: the raw NEI99 CO factors summed to
-    # 6.857 (mean 0.9796), silently under-emitting CO by ~2%. The applied
-    # factors must sum to exactly 7 (weekly mass conservation) while keeping
-    # the raw day-to-day proportions.
-    f = EarthSciData.DayofWeekFactors_CO
-    raw = EarthSciData.DayofWeekFactors_CO_raw
-    @test sum(f) ≈ 7.0 rtol = 1e-12
-    @test all(f ./ raw .≈ 7 / sum(raw))
+@testset "day-of-week factors conserve the weekly total" begin
+    # HEMCO's GEIA_DOW_CO line repeats the NOx weekday value on Tue-Fri and sums
+    # to 6.852; with 1.1076 on all weekdays it sums to exactly 7, like GEIA_DOW_NOX.
+    @test EarthSciData.DayofWeekFactors_NOx ==
+          [1.0706, 1.0706, 1.0706, 1.0706, 1.0706, 0.863, 0.784]
+    @test EarthSciData.DayofWeekFactors_CO ==
+          [1.1076, 1.1076, 1.1076, 1.1076, 1.1076, 0.779, 0.683]
+    @test sum(EarthSciData.DayofWeekFactors_NOx) ≈ 7 rtol = 1e-12
+    @test sum(EarthSciData.DayofWeekFactors_CO) ≈ 7 rtol = 1e-12
     t_mon = Dates.datetime2unix(Dates.DateTime(2016, 3, 7, 12))  # a Monday
-    @test EarthSciData.dayofweek_itp_CO(t_mon, 0.0) == f[1]
+    @test EarthSciData.dayofweek_itp_CO(t_mon, 0.0) == EarthSciData.DayofWeekFactors_CO[1]
+end
+
+@testset "local-time clock conventions" begin
+    # Dallas (96.8°W), 12:00 UTC: NOx clock round(lon/15) = -6 h, CO clock floor(lon/15) = -7 h.
+    t = Dates.datetime2unix(DateTime(2016, 7, 15, 12))
+    dallas = deg2rad(-96.8)
+    @test EarthSciData.diurnal_itp_NOx(t, dallas) == EarthSciData.DIURNAL_FACTORS_NOx[6 + 1]
+    @test EarthSciData.diurnal_itp_ISOP(t, dallas) == EarthSciData.DIURNAL_FACTORS_ISOP[6 + 1]
+    @test EarthSciData.diurnal_itp(t, dallas) == EarthSciData.DIURNAL_FACTORS[5 + 1]
+
+    # Half-hour meridians on the 0.625° grid; EDGAR file offsets are -6, -6, -8 (round half to even).
+    for (lon_deg, offset) in ((-97.5, -6), (-82.5, -6), (-112.5, -8))
+        @test EarthSciData.diurnal_itp_NOx(t, deg2rad(lon_deg)) ==
+              EarthSciData.DIURNAL_FACTORS_NOx[12 + offset + 1]
+    end
+
+    # 2016-07-17 06:30 UTC is Sunday; at 97.5°W it is Sunday on the NOx clock, Saturday on the CO clock.
+    ts = Dates.datetime2unix(DateTime(2016, 7, 17, 6, 30))
+    @test EarthSciData.dayofweek_itp_NOx(ts, deg2rad(-97.5)) ==
+          EarthSciData.DayofWeekFactors_NOx[7]
+    @test EarthSciData.dayofweek_itp_CO(ts, deg2rad(-97.5)) ==
+          EarthSciData.DayofWeekFactors_CO[6]
 end

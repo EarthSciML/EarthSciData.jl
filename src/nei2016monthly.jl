@@ -1,7 +1,11 @@
 export NEI2016MonthlyEmis
 
-# Diurnal scale factors for 24 hours (0-23) for UTC-0
-const DIURNAL_FACTORS = [0.45, 0.45, 0.6, 0.6, 0.6, 0.6, 1.45, 1.45, 1.45, 1.45, 1.4, 1.4,
+# Hourly scale factors, index 1 = local hour 0.
+# DIURNAL_FACTORS: HEMCO GEIA_TOD_FOSSIL (CO, formaldehyde), applied by GEOS-Chem at
+#   local time UTC + floor(lon/15) h.
+# DIURNAL_FACTORS_NOx: profile of HEMCO's EDGAR_TODNOX file, whose built-in shift is
+#   round(lon/15) h.
+const DIURNAL_FACTORS =[0.45, 0.45, 0.6, 0.6, 0.6, 0.6, 1.45, 1.45, 1.45, 1.45, 1.4, 1.4,
     1.4, 1.4, 1.45, 1.45, 1.45, 1.45, 0.65, 0.65, 0.65, 0.65, 0.45, 0.45]
 const DIURNAL_FACTORS_NOx = [
     0.39598674, 0.31852847, 0.30128068, 0.29590213, 0.33177775, 0.43871498,
@@ -12,13 +16,12 @@ const DIURNAL_FACTORS_ISOP = [
     0, 0, 0, 0, 0, 0, 0.2376, 0.7224, 1.2048, 1.656, 2.0496, 2.3616, 2.5728,
     2.6616, 2.6184, 2.4408, 2.1288, 1.6896, 1.1448, 0.5136, 0, 0, 0, 0]
 
+# Weekday factors, Monday-first (Dates.dayofweek), from HEMCO GEIA_DOW_NOX and GEIA_DOW_CO.
+# HEMCO's CO line (Sunday-first: 0.683/1.1076/1.0706/1.0706/1.0706/1.0706/0.779) repeats
+# the NOx weekday value 1.0706 on Tue-Fri and sums to 6.852; with 1.1076 on all five
+# weekdays it sums to exactly 7, as the NOx line does, so 1.1076 is used on all weekdays.
 const DayofWeekFactors_NOx = [1.0706, 1.0706, 1.0706, 1.0706, 1.0706, 0.863, 0.784]
-# Renormalized to weekly mean 1.0 so the day-of-week redistribution conserves the
-# monthly CO total (the NOx array above and the diurnal profiles are already
-# mean-1.0). The raw NEI99 CO factors summed to 6.857 (mean 0.9796), which
-# under-emitted CO by ~2%.
-const DayofWeekFactors_CO_raw = [1.076, 1.1076, 1.0706, 1.0706, 1.0706, 0.779, 0.683]
-const DayofWeekFactors_CO = DayofWeekFactors_CO_raw .* (7 / sum(DayofWeekFactors_CO_raw))
+const DayofWeekFactors_CO = [1.1076, 1.1076, 1.1076, 1.1076, 1.1076, 0.779, 0.683]
 
 # Load and create interpolator for delp_dry_surface
 const DELP_DRY_SURFACE_ITP = let
@@ -51,18 +54,20 @@ function delp_dry_surface_itp(lon, lat)
 end
 
 # Local time conversion: shift UTC unix time `t` (seconds) by the longitude-derived
-# timezone offset (`floor(lon_deg / 15)` hours) and return the resulting `DateTime`.
-# Used by every diurnal/day-of-week scaling lookup below.
-@inline function _local_datetime(t, lon)
+# timezone offset (`tz(lon_deg / 15)` hours) and return the resulting `DateTime`.
+# Used by every diurnal/day-of-week scaling lookup below. `tz = floor` is HEMCO's
+# local-time rule; `tz = round` is the solar time zone built into the EDGAR NOx
+# hourly file that GEOS-Chem uses (round half to even at the half-hour meridians).
+@inline function _local_datetime(t, lon, tz::F = floor) where {F}
     lon_deg = rad2deg(lon)
-    dt = floor(lon_deg / 15) # timezone offset in hours
+    dt = tz(lon_deg / 15) # timezone offset in hours
     return Dates.unix2datetime(t + dt * 3600)
 end
 
 # 1-based hour-of-day index (1..24) at the local time corresponding to UTC `t` / `lon`.
-@inline _local_hour_index(t, lon) = Dates.hour(_local_datetime(t, lon)) + 1
+@inline _local_hour_index(t, lon, tz = floor) = Dates.hour(_local_datetime(t, lon, tz)) + 1
 # 1-based day-of-week index (1..7) at the local time corresponding to UTC `t` / `lon`.
-@inline _local_dow_index(t, lon) = Dates.dayofweek(_local_datetime(t, lon))
+@inline _local_dow_index(t, lon, tz = floor) = Dates.dayofweek(_local_datetime(t, lon, tz))
 
 """
 $(SIGNATURES)
@@ -70,20 +75,21 @@ $(SIGNATURES)
 Diurnal scale factor for a given UTC unix time and longitude (radians).
 Named variants — one per emission-species profile — are each thin table-lookup
 wrappers so that `@register_symbolic` can attach to a distinct top-level
-function per profile.
+function per profile. CO and formaldehyde use local time UTC + floor(lon/15) h;
+NOx and isoprene use UTC + round(lon/15) h (see `_local_datetime`).
 """
 diurnal_itp(t, lon) = DIURNAL_FACTORS[_local_hour_index(t, lon)]
-diurnal_itp_NOx(t, lon) = DIURNAL_FACTORS_NOx[_local_hour_index(t, lon)]
-diurnal_itp_ISOP(t, lon) = DIURNAL_FACTORS_ISOP[_local_hour_index(t, lon)]
+diurnal_itp_NOx(t, lon) = DIURNAL_FACTORS_NOx[_local_hour_index(t, lon, round)]
+diurnal_itp_ISOP(t, lon) = DIURNAL_FACTORS_ISOP[_local_hour_index(t, lon, round)]
 
 """
 $(SIGNATURES)
 
 Day-of-week scale factor for a given UTC unix time and longitude (radians).
-See `diurnal_itp` for the rationale behind the per-profile wrappers.
+See `diurnal_itp` for the rationale behind the per-profile wrappers and clocks.
 """
 dayofweek_itp_CO(t, lon) = DayofWeekFactors_CO[_local_dow_index(t, lon)]
-dayofweek_itp_NOx(t, lon) = DayofWeekFactors_NOx[_local_dow_index(t, lon)]
+dayofweek_itp_NOx(t, lon) = DayofWeekFactors_NOx[_local_dow_index(t, lon, round)]
 
 # Combined day-of-week × diurnal factors.  Species that need *both* scalings
 # (CO, NOx) compose two registered symbolic calls per RHS evaluation in the
