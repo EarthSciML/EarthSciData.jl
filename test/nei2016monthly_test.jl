@@ -483,7 +483,8 @@ end
     t = Dates.datetime2unix(DateTime(2016, 7, 15, 12))
     dallas = deg2rad(-96.8)
     @test EarthSciData.diurnal_itp_NOx(t, dallas) == EarthSciData.DIURNAL_FACTORS_NOx[6 + 1]
-    @test EarthSciData.diurnal_itp_ISOP(t, dallas) == EarthSciData.DIURNAL_FACTORS_ISOP[6 + 1]
+    @test EarthSciData.diurnal_itp_ISOP(t, dallas) ==
+          EarthSciData.DIURNAL_FACTORS_ISOP[6 + 1]
     @test EarthSciData.diurnal_itp(t, dallas) == EarthSciData.DIURNAL_FACTORS[5 + 1]
 
     # Half-hour meridians on the 0.625° grid; EDGAR file offsets are -6, -6, -8 (round half to even).
@@ -498,4 +499,241 @@ end
           EarthSciData.DayofWeekFactors_NOx[7]
     @test EarthSciData.dayofweek_itp_CO(ts, deg2rad(-97.5)) ==
           EarthSciData.DayofWeekFactors_CO[6]
+end
+
+@testset "NEI2016 elevated sectors" begin
+    using SymbolicIndexingInterface: setp
+
+    # Emission tendencies (1/s) of `terms` (system index => species) at the given
+    # (lon, lat, lev) points (degrees), read from the compiled right-hand side at
+    # `tq` seconds after the start of the domain. Returns one row per point.
+    function rates(systems, terms, points; tq = 0.0)
+        @constants uc = 1.0 [unit = u"s"]
+        vars = [only(@variables $(Symbol(:X, i))(t) = 0.0 [unit = u"1/s"])
+                for i in eachindex(terms)]
+        eqs = [D(v) ~ getproperty(systems[g], s) / uc for (v, (g, s)) in zip(vars, terms)]
+        sys = mtkcompile(compose(System(eqs, t, vars, [uc]; name = :rates), systems...))
+        ps = parameters(sys)
+        coord(suffix) = filter(p -> endswith(string(Symbol(p)), suffix), ps)
+        cs = [coord(c) for c in ("₊lon", "₊lat", "₊lev")]
+        setters = [[setp(sys, p) for p in c] for c in cs]
+        lo, la, k = first(points)
+        init_vals = [p => v for (c, v) in zip(cs, (deg2rad(lo), deg2rad(la), Float64(k)))
+                     for p in c]
+        prob = ODEProblem(sys, init_vals, (0.0, 3600.0))
+        integ = init(prob, Tsit5())
+        order = [findfirst(isequal(v), unknowns(sys)) for v in vars]
+        du = similar(integ.u)
+        out = zeros(length(points), length(terms))
+        for (r, (lo, la, k)) in enumerate(points)
+            for (set, val) in zip(setters, (deg2rad(lo), deg2rad(la), Float64(k)))
+                foreach(s -> s(integ, val), set)
+            end
+            integ.f(du, integ.u, integ.p, tq)
+            out[r, :] = du[order]
+        end
+        return out, sys
+    end
+    profile(p) = findfirst(==(p), EarthSciData.NEI2016_PROFILE_NAMES)
+
+    @testset "layer fractions" begin
+        names = EarthSciData.NEI2016_PROFILE_NAMES
+        @test names[1] == "surface"
+        for i in eachindex(names)
+            @test sum(EarthSciData.NEI2016_LAYER_FRACTIONS[i]) ≈ 1
+            @test sum(EarthSciData.nei_layer_fraction(i, k) for k in 1:15) ≈ 1
+            for ktop in (1, 3, 11, 30)
+                # Folded at the domain top: the column total is kept, nothing above.
+                @test sum(EarthSciData.nei_layer_fraction(i, ktop, k)
+                for k in 1:(ktop + 2)) ≈ 1
+                @test EarthSciData.nei_layer_fraction(i, ktop, ktop + 1) == 0
+                @test sum(EarthSciData.nei_domain_fractions(i, ktop)) ≈ 1
+            end
+        end
+        f(p, k) = EarthSciData.nei_layer_fraction(profile(p), k)
+        @test f("surface", 1) == 1
+        @test f("surface", 2) == 0
+        # Layer fractions of GEOS-Chem's NEI2016 3-D files (2016fh_16j_<sector>_0pt1degree_3D_month_05).
+        @test f("ptegu", 1) ≈ 0.0279 atol = 1e-4
+        @test sum(f("ptegu", k) for k in 4:11) ≈ 0.651 atol = 1e-3
+        @test f("ptnonipm", 1) ≈ 0.7537 atol = 1e-4
+        @test f("pt_oilgas", 1) ≈ 0.9188 atol = 1e-4
+        @test f("cmv", 1) ≈ 0.5375 atol = 1e-4
+        @test f("cmv", 3) > 0
+        @test f("cmv", 4) == 0
+        @test f("ptegu", 12) == 0
+        fr = EarthSciData.NEI2016_LAYER_FRACTIONS[profile("ptegu")]
+        @test EarthSciData.nei_domain_fractions(profile("ptegu"), 3) ≈
+              [fr[1], fr[2], sum(fr[3:end])]
+        @test EarthSciData.nei_domain_fractions(profile("ptegu"), 30) == fr
+        @test EarthSciData.nei_layer_fraction(profile("ptegu"), 30, NaN) == 0
+        # Layer k covers k <= lev < k + 1 and values below 1 count as layer 1, as the
+        # surface-only loader's former `lev < 2` test did (e.g. a domain-default lev of 1.5).
+        @test EarthSciData.nei_layer_fraction(1, 30, 1.5) == 1
+        @test EarthSciData.nei_layer_fraction(1, 30, 0.5) == 1
+        @test EarthSciData.nei_layer_fraction(1, 30, 2.0) == 0
+        @test EarthSciData.nei_layer_fraction(profile("ptegu"), 30, 3.7) == fr[3]
+        @test EarthSciData.nei_layer_gate(1.5, 1) == 1
+        @test EarthSciData.nei_layer_gate(2.0, 1) == 0
+        @test EarthSciData.nei_layer_gate(NaN, 11) == 0
+        @test EarthSciData.NEI2016_SECTOR_PROFILES["emln_ptegu"] == "ptegu"
+        @test EarthSciData.NEI2016_SECTOR_PROFILES["emln_cmv_c3_12"] == "cmv"
+        @test !haskey(EarthSciData.NEI2016_SECTOR_PROFILES, "emln_othpt")
+        @test NEI2016_ELEVATED_SECTORS == ["emln_ptegu", "emln_ptnonipm", "emln_pt_oilgas",
+            "emln_othpt", "emln_cmv_c3_12", "emln_cmv_c1c2_12"]
+    end
+
+    @testset "delp_dry_itp" begin
+        lon, lat = deg2rad(-94.375), deg2rad(44.5)
+        d1 = EarthSciData.delp_dry_surface_itp(lon, lat)
+        @test EarthSciData.delp_dry_itp(lon, lat, 1) == d1
+        # The lowest GEOS-FP layers are all about 15 hPa thick.
+        for k in 2:11
+            @test 0.9 < EarthSciData.delp_dry_itp(lon, lat, k) / d1 < 1.1
+        end
+        # Consistent with the hybrid grid: thickness = ΔAp + ΔBp * ps (Ap is in Pa, delp in hPa).
+        ΔAp(k) = (EarthSciData.Ap(k) - EarthSciData.Ap(k + 1)) / 100
+        ΔBp(k) = EarthSciData.Bp(k) - EarthSciData.Bp(k + 1)
+        ps = (d1 - ΔAp(1)) / ΔBp(1)
+        @test EarthSciData.delp_dry_itp(lon, lat, 5) ≈ ΔAp(5) + ΔBp(5) * ps
+    end
+
+    @testset "multi-sector file set" begin
+        sector = "mrggrid_withbeis_withrwc"
+        ts, te = DateTime(2016, 5, 1), DateTime(2016, 5, 2)
+        fs1 = EarthSciData.NEI2016MonthlyEmisFileSet(sector, ts, te)
+        # Listing the same sector twice must give exactly twice the emissions.
+        fs2 = EarthSciData.NEI2016MonthlyEmisMultiFileSet([sector, sector], ts, te)
+        @test EarthSciData.verify_fileset_interface(typeof(fs2))
+        @test EarthSciData.varnames(fs2) == EarthSciData.varnames(fs1)
+        m = EarthSciData.loadmetadata(fs2, "NOX")
+        a = zeros(m.varsize...)
+        b = zeros(m.varsize...)
+        EarthSciData.loadslice!(a, fs1, ts, "NOX")
+        EarthSciData.loadslice!(b, fs2, ts, "NOX")
+        @test maximum(a) > 0
+        @test b == 2a
+        @test_throws ErrorException EarthSciData.NEI2016MonthlyEmisMultiFileSet(
+            String[], ts, te)
+        domain = DomainInfo(ts, te; lonrange = deg2rad(-90):deg2rad(1):deg2rad(-89),
+            latrange = deg2rad(40):deg2rad(1):deg2rad(41), levrange = 1:2)
+        @test_throws ErrorException NEI2016MonthlyEmis([sector], domain;
+            vertical_profiles = Dict(sector => "stack"))
+        @test_throws ArgumentError NEI2016MonthlyEmis(sector, domain; spatial_interp = :cubic)
+    end
+
+    @testset "surface regression and vertical allocation" begin
+        domain = DomainInfo(DateTime(2016, 5, 15), DateTime(2016, 5, 16);
+            lonrange = deg2rad(-88.125):deg2rad(0.625):deg2rad(-86.875),
+            latrange = deg2rad(42):deg2rad(0.5):deg2rad(43), levrange = 1:3)
+        sector = "mrggrid_withbeis_withrwc"
+        surface = NEI2016MonthlyEmis(sector, domain; name = :surface)
+        # The same file treated as a power-plant sector: the column total is spread over
+        # the layers, folded into the top layer of this 3-layer domain.
+        elevated = NEI2016MonthlyEmis([sector], domain;
+            vertical_profiles = Dict(sector => "ptegu"), name = :elevated)
+
+        # The single-sector call keeps its parameter names: one interpolator per
+        # species, named after it.
+        @test any(p -> string(Symbol(p)) == "NO_data", parameters(surface))
+        @test length(ModelingToolkit.getmetadata(surface, EarthSciData.InterpInfos, nothing)) ==
+              69
+        @test length(equations(elevated)) == 69
+        @test any(p -> string(Symbol(p)) == "NO_ptegu_data", parameters(elevated))
+
+        species = [:NO, :NO2, :CO, :FORM, :ISOP, :ACET]
+        points = [(-88.125, 42.0), (-87.5, 42.5), (-86.875, 43.0)]
+        r, _ = rates([surface, elevated], [[1 => s for s in species]; 2 => :NO],
+            [(lo, la, k) for k in 1:4 for (lo, la) in points])
+        row(i, k) = (k - 1) * length(points) + i
+
+        # The single-sector call must reproduce the layer-1 emissions (1/s) of the
+        # surface-only loader at 2016-05-15 00:00 UTC (values from commit af45420, before
+        # multi-sector support and vertical allocation were added), and nothing above.
+        expected = Dict(
+            ("NO", -88.125, 42.0) => 3.696630216752866e-12,
+            ("NO2", -88.125, 42.0) => 4.3730420959836544e-13,
+            ("CO", -88.125, 42.0) => 9.478783058412906e-12,
+            ("FORM", -88.125, 42.0) => 4.037229705850393e-14,
+            ("ISOP", -88.125, 42.0) => 5.184836779214539e-13,
+            ("ACET", -88.125, 42.0) => 1.3005873181398365e-13,
+            ("NO", -87.5, 42.5) => 1.3329110156415248e-13,
+            ("NO2", -87.5, 42.5) => 1.42753478357713e-14,
+            ("CO", -87.5, 42.5) => 3.628395844549008e-13,
+            ("FORM", -87.5, 42.5) => 1.7564883575452577e-15,
+            ("ISOP", -87.5, 42.5) => 9.160316615712789e-15,
+            ("ACET", -87.5, 42.5) => 7.801309939082226e-15,
+            ("NO", -86.875, 43.0) => 2.714099586734287e-15,
+            ("NO2", -86.875, 43.0) => 2.774412889837166e-16,
+            ("CO", -86.875, 43.0) => 1.2543254094733087e-14,
+            ("FORM", -86.875, 43.0) => 2.803387435072575e-17,
+            ("ISOP", -86.875, 43.0) => 1.1051762504955001e-17,
+            ("ACET", -86.875, 43.0) => 3.841633770766277e-18
+        )
+        for (i, (lo, la)) in enumerate(points)
+            for (j, s) in enumerate(species)
+                @test r[row(i, 1), j] ≈ expected[(string(s), lo, la)] rtol = 1e-12
+                @test all(r[row(i, k), j] == 0 for k in 2:4)
+            end
+        end
+
+        # Elevated: layer k gets the profile fraction (the top layer also everything
+        # above it), divided by the layer's thickness; nothing above the domain top.
+        lo, la = points[1]
+        d(k) = EarthSciData.delp_dry_itp(deg2rad(lo), deg2rad(la), k)
+        fr = EarthSciData.NEI2016_LAYER_FRACTIONS[profile("ptegu")]
+        r1 = r[row(1, 1), 1]
+        @test r1 > 0
+        for (k, fk) in enumerate([fr[1], fr[2], sum(fr[3:end])])
+            @test r[row(1, k), 7] ≈ r1 * fk * d(1) / d(k) rtol = 1e-10
+        end
+        @test r[row(1, 4), 7] == 0
+        # Column total over the domain's layers equals the surface-only column.
+        @test sum(r[row(1, k), 7] * d(k) for k in 1:3) ≈ r1 * d(1) rtol = 1e-10
+    end
+
+    @testset "surface plus ships" begin
+        # Surface file plus ocean-going ships (Gulf of Mexico off Louisiana), in a domain
+        # one layer deeper than the ship profile.
+        domain = DomainInfo(DateTime(2016, 5, 15), DateTime(2016, 5, 16);
+            lonrange = deg2rad(-90.625):deg2rad(0.625):deg2rad(-89.375),
+            latrange = deg2rad(28):deg2rad(0.5):deg2rad(29), levrange = 1:4)
+        sectors = ["mrggrid_withbeis_withrwc", "emln_cmv_c3_12"]
+        combined = NEI2016MonthlyEmis(sectors, domain; name = :combined)
+        surface = NEI2016MonthlyEmis(sectors[1], domain; name = :surface_only)
+
+        @test length(equations(combined)) == 69 # union of the variables of both files
+        infos = ModelingToolkit.getmetadata(combined, EarthSciData.InterpInfos, nothing)
+        names = [string(i.var_sym) for i in infos]
+        @test "NO" in names && "NO_cmv" in names
+        @test !("NO_ptegu" in names)
+
+        lo, la = -90.0, 28.5
+        points = [(lo, la, k) for k in 1:5]
+        r, _ = rates([combined, surface], [1 => :NO, 2 => :NO, 1 => :SO2], points;
+            tq = 43323.0)
+        cmv = profile("cmv")
+        f(k) = EarthSciData.nei_layer_fraction(cmv, k)
+        d(k) = EarthSciData.delp_dry_itp(deg2rad(lo), deg2rad(la), k)
+        # Only ships emit above layer 1, and their column flux is the same from every layer.
+        col(k) = r[k, 1] * d(k) / f(k)
+        @test r[2, 1] > 0
+        @test col(3) ≈ col(2) rtol = 1e-10
+        @test r[1, 1] ≈ r[1, 2] + col(2) * f(1) / d(1) rtol = 1e-10
+        @test all(r[2:5, 2] .== 0)
+        @test r[4, 1] == 0 # above the ship profile
+        @test r[5, 1] == 0 # above the domain
+        @test r[2, 3] > 0
+
+        # At grid cells nearest-neighbour lookup gives the same values. In a system that
+        # uses only NO, the update event keeps both NO interpolators and drops the others.
+        nearest = NEI2016MonthlyEmis(sectors, domain; name = :nearest,
+            spatial_interp = :nearest)
+        rn, _ = rates([nearest], [1 => :NO], points; tq = 43323.0)
+        @test rn[:, 1] ≈ r[:, 1] rtol = 1e-10
+        ninfos = ModelingToolkit.getmetadata(nearest, EarthSciData.InterpInfos, nothing)
+        live(n) = only(i.live[] for i in ninfos if string(i.var_sym) == n)
+        @test live("NO") && live("NO_cmv")
+        @test !live("CO") && !live("CO_cmv") && !live("SO2_cmv")
+    end
 end

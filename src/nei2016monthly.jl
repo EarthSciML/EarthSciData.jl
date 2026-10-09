@@ -1,11 +1,11 @@
-export NEI2016MonthlyEmis
+export NEI2016MonthlyEmis, NEI2016ElevatedEmis, NEI2016_ELEVATED_SECTORS
 
 # Hourly scale factors, index 1 = local hour 0.
 # DIURNAL_FACTORS: HEMCO GEIA_TOD_FOSSIL (CO, formaldehyde), applied by GEOS-Chem at
 #   local time UTC + floor(lon/15) h.
 # DIURNAL_FACTORS_NOx: profile of HEMCO's EDGAR_TODNOX file, whose built-in shift is
 #   round(lon/15) h.
-const DIURNAL_FACTORS =[0.45, 0.45, 0.6, 0.6, 0.6, 0.6, 1.45, 1.45, 1.45, 1.45, 1.4, 1.4,
+const DIURNAL_FACTORS = [0.45, 0.45, 0.6, 0.6, 0.6, 0.6, 1.45, 1.45, 1.45, 1.45, 1.4, 1.4,
     1.4, 1.4, 1.45, 1.45, 1.45, 1.45, 0.65, 0.65, 0.65, 0.65, 0.45, 0.45]
 const DIURNAL_FACTORS_NOx = [
     0.39598674, 0.31852847, 0.30128068, 0.29590213, 0.33177775, 0.43871498,
@@ -51,6 +51,102 @@ function delp_dry_surface_itp(lon, lat)
 
     # The interpolator now handles out-of-bounds automatically with Flat() extrapolation
     return DELP_DRY_SURFACE_ITP(lon_deg, lat_deg)
+end
+
+# Vertical allocation of the NEI "inline" (elevated point) sectors.
+#
+# The EPA monthly netCDF files are column totals with a single layer. GEOS-Chem reads
+# these sectors from 3-D files that its NEI2016 preprocessing (griddedepa2gc.py, B. Henderson)
+# built from the same EPA files by multiplying each sector's column total by one
+# representative layer profile (after Simpson et al. 2003, EMEP report 1/2003, Table 4.1)
+# on the 72-layer GEOS-FP grid, truncated at layer 11 and renormalized. The same fractions
+# are applied here, so the emissions land in the same model layers as in GEOS-Chem.
+# Sectors GEOS-Chem reads as 2-D (surface sources, othpt) get profile "surface", which
+# must stay first in `NEI2016_PROFILE_NAMES`.
+const NEI2016_PROFILE_NAMES = ["surface", "ptegu", "ptnonipm", "pt_oilgas", "cmv"]
+const NEI2016_LAYER_FRACTIONS = let
+    raw = Dict(
+        "surface" => [1.0],
+        "ptegu" => [0.027331187, 0.12260809, 0.192017292, 0.212736741, 0.167549199,
+            0.110491495, 0.063653198, 0.036979211, 0.022844579, 0.013909341, 0.008781226],
+        "ptnonipm" => [0.751204553, 0.144224191, 0.052822078, 0.023840537, 0.011000364,
+            0.005661267, 0.003165207, 0.00197344, 0.001300664, 0.000861865, 0.000621856],
+        "pt_oilgas" => [0.918700528, 0.059678397, 0.013323237, 0.003978944, 0.001724366,
+            0.001038275, 0.000633395, 0.000387233, 0.000243355, 0.000122994, 6.48583e-05],
+        "cmv" => [0.537538889, 0.338982929, 0.123478182]
+    )
+    [raw[p] ./ sum(raw[p]) for p in NEI2016_PROFILE_NAMES]
+end
+# Fraction of each profile at and above every layer, for folding at the domain top.
+const NEI2016_LAYER_TAILS = [reverse(cumsum(reverse(f))) for f in NEI2016_LAYER_FRACTIONS]
+
+"""
+Default mapping from EPA sector name (as in the file name `2016fh_16j_<sector>_12US1_month_MM.ncf`)
+to vertical profile. Sectors not listed here are emitted into the surface layer.
+"""
+const NEI2016_SECTOR_PROFILES = Dict(
+    "emln_ptegu" => "ptegu",
+    "emln_ptnonipm" => "ptnonipm",
+    "emln_ptnonipm_allinln" => "ptnonipm",
+    "emln_pt_oilgas" => "pt_oilgas",
+    "emln_pt_oilgas_allinln" => "pt_oilgas",
+    "emln_cmv_c3_12" => "cmv",
+    "emln_cmv_c1c2_12" => "cmv"
+)
+
+# Model layer of the vertical coordinate `lev`: layer k covers k <= lev < k + 1, and values
+# below 1 count as layer 1, as in the surface-only loader's former `lev < 2` test. Zero for
+# a non-finite `lev`.
+@inline _nei_layer(lev) = isfinite(lev) ? max(1, floor(Int, lev)) : 0
+
+"""
+$(SIGNATURES)
+
+Fraction of a sector's column emissions that is released into model layer `lev`
+(1-based; layer k covers k <= lev < k + 1) for vertical profile number `profile_id` (index
+into `NEI2016_PROFILE_NAMES`), in a domain whose top layer is `ktop`: the fractions above
+the domain top are added to the top layer, so the column total is kept. Zero above the top
+of the profile and above the domain top.
+"""
+function nei_layer_fraction(profile_id, ktop, lev)
+    k = _nei_layer(lev)
+    fracs = NEI2016_LAYER_FRACTIONS[profile_id]
+    (1 <= k <= min(ktop, length(fracs))) || return 0.0
+    return k == ktop ? NEI2016_LAYER_TAILS[profile_id][k] : fracs[k]
+end
+nei_layer_fraction(profile_id, lev) = nei_layer_fraction(profile_id, typemax(Int), lev)
+
+"""
+$(SIGNATURES)
+
+Layer fractions of profile `profile_id` for a domain whose top layer is `ktop`, folded at
+the domain top as in [`nei_layer_fraction`](@ref).
+"""
+function nei_domain_fractions(profile_id, ktop)
+    n = min(ktop, length(NEI2016_LAYER_FRACTIONS[profile_id]))
+    return [nei_layer_fraction(profile_id, ktop, k) for k in 1:n]
+end
+
+# Per-layer differences of the GEOS-FP hybrid-grid coefficients, precomputed so the
+# layer thickness costs two table reads. Ap is in Pa; stored in hPa to match the
+# surface thickness map.
+const NEI_DAP = [(Ap(k) - Ap(k + 1)) / 100 for k in 1:72]
+const NEI_DBP = [Bp(k) - Bp(k + 1) for k in 1:72]
+
+"""
+$(SIGNATURES)
+
+Dry pressure thickness (hPa, unitless here) of model layer `lev` at the given location
+(radians). Layer 1 comes from the stored mean surface map; higher layers are scaled with
+the hybrid-grid coefficients `Ap`/`Bp`, using a mean surface pressure backed out of the
+layer-1 thickness.
+"""
+function delp_dry_itp(lon, lat, lev)
+    d1 = delp_dry_surface_itp(lon, lat)
+    k = _nei_layer(lev)
+    k <= 1 && return d1
+    ps = (d1 - NEI_DAP[1]) / NEI_DBP[1]
+    return NEI_DAP[k] + NEI_DBP[k] * ps
 end
 
 # Local time conversion: shift UTC unix time `t` (seconds) by the longitude-derived
@@ -131,18 +227,83 @@ nei_scale_CO(t::DynamicQuantities.Quantity, lon) = 1.0
 nei_scale_NOx(t::DynamicQuantities.Quantity, lon) = 1.0
 delp_dry_surface_itp(lon::DynamicQuantities.Quantity, lat::DynamicQuantities.Quantity) = 1.0
 
-# Per-species temporal scaling factor: maps a NEI variable name to the
-# symbolic function that supplies its diurnal (× day-of-week, where relevant)
-# multiplier.  Species not listed receive an implicit factor of 1.0.  Used by
-# the wrapper-equation builder in `NEI2016MonthlyEmis` to keep the
-# species-dispatch in one table instead of an `if/elseif` chain.
-const _NEI_SCALING_FN = Dict{String, Function}(
-    "CO" => nei_scale_CO,
-    "FORM" => diurnal_itp,
-    "ISOP" => diurnal_itp_ISOP,
-    "NO" => nei_scale_NOx,
-    "NO2" => nei_scale_NOx
+# Per-layer factors of the NEI emissions. Generated code evaluates every branch of an
+# `ifelse`, so the layer tests happen inside registered functions, which skip their work
+# where a layer gets no emissions. The layer test (`nei_layer_gate`), the profile fractions
+# (`nei_layer_fraction`), the layer thickness and the time factors are separate calls, so
+# species with the same arguments share one evaluation of each per grid cell.
+
+"""
+$(SIGNATURES)
+
+1.0 if model layer `lev` is at or below layer `kemit`, the highest layer a species emits
+into, and 0.0 otherwise.
+"""
+nei_layer_gate(lev, kemit) = 1 <= _nei_layer(lev) <= kemit ? 1.0 : 0.0
+nei_layer_gate(lev::DynamicQuantities.AbstractQuantity, kemit) = 1.0
+
+"""
+$(SIGNATURES)
+
+Inverse dry pressure thickness (1/hPa, unitless here) of model layer `lev` (see
+`delp_dry_itp`), or zero where `gate` (see `nei_layer_gate`) is zero.
+"""
+nei_inv_delp(lon, lat, lev, gate) = iszero(gate) ? 0.0 : 1 / delp_dry_itp(lon, lat, lev)
+nei_inv_delp(lon::DynamicQuantities.Quantity, lat, lev, gate) = 1.0
+
+# Diurnal (× day-of-week) factor of a species at UTC unix time `t` and longitude `lon`, or
+# zero where `gate` (see `nei_layer_gate`) is zero.
+for (f, clock) in ((:nei_clock_CO, :nei_scale_CO), (:nei_clock_NOx, :nei_scale_NOx),
+    (:nei_clock_FORM, :diurnal_itp), (:nei_clock_ISOP, :diurnal_itp_ISOP))
+    @eval $f(t, lon, gate) = iszero(gate) ? 0.0 : $clock(t, lon)
+    @eval $f(t::DynamicQuantities.Quantity, lon, gate) = 1.0
+end
+
+nei_layer_fraction(profile_id, ktop, lev::DynamicQuantities.AbstractQuantity) = 1.0
+
+for (f, n) in ((nei_layer_gate, 2), (nei_inv_delp, 4), (nei_layer_fraction, 3),
+    (nei_clock_CO, 3), (nei_clock_NOx, 3), (nei_clock_FORM, 3), (nei_clock_ISOP, 3))
+    args = [Symbol(:a, i) for i in 1:n]
+    @eval @register_symbolic $(nameof(f))($(args...))
+    @eval Symbolics.SymbolicUtils.promote_shape(::typeof($f),
+        $(fill(:(::Symbolics.SymbolicUtils.ShapeT), n)...)) = _scalar_shape
+end
+
+# Per-species time factor: maps a NEI variable name to the function that supplies its
+# diurnal (× day-of-week) factor. Species not listed get no time scaling. Used by the
+# equation builder in `NEI2016MonthlyEmis` to keep the species-dispatch in one table
+# instead of an `if/elseif` chain.
+const _NEI_CLOCK_FN = Dict{String, Function}(
+    "CO" => nei_clock_CO,
+    "FORM" => nei_clock_FORM,
+    "ISOP" => nei_clock_ISOP,
+    "NO" => nei_clock_NOx,
+    "NO2" => nei_clock_NOx
 )
+
+# Column flux of one vertical-profile group, interpolated from its data buffer, times the
+# group's fraction `frac` in the current layer (see `nei_layer_fraction`). Where the
+# fraction is zero the data are not read. Arguments as for `interp_unsafe`, followed by
+# the fraction.
+for (f, interp_f) in ((:nei_group_emis, :interp_unsafe),
+    (:nei_group_emis_nearest, :interp_time_only))
+    @eval begin
+        function $f(data::AbstractArray{T, 3}, fit, fi1, fi2, extrap, frac) where {T}
+            iszero(frac) && return zero(T)
+            return T(frac) * $interp_f(data, fit, fi1, fi2, extrap)
+        end
+        $f(data::DataBufferType, fit, args...) = $f(data.data, fit, args...)
+        # Unit validation, as for `interp_unsafe`: the data are unitless.
+        $f(data::Union{DynamicQuantities.AbstractQuantity, Real}, fit, args...) = one(Float64)
+
+        @register_symbolic $f(data::DataBufferType, fit, fi1, fi2, extrap, frac) false
+        Symbolics.SymbolicUtils.promote_symtype(::typeof($f),
+            ::Type{<:DataBufferType}, $(fill(:(::Type), 5)...)) = Real
+        Symbolics.SymbolicUtils.promote_shape(::typeof($f),
+            $(fill(:(::Symbolics.SymbolicUtils.ShapeT), 6)...)) = _scalar_shape
+        @register_derivative $f(args...) I Symbolics.SConst(zero(Float64))
+    end
+end
 
 """
 $(SIGNATURES)
@@ -377,11 +538,79 @@ Base.close(fs::NEI2016MonthlyEmisFileSet) = lock(nclock) do ;
     close(fs.ds);
 end
 
+# Grid attributes of an NEI file; sectors are summed and regridded together only if
+# these agree.
+const _NEI_GRID_ATTRIBS = ("GDNAM", "XORIG", "YORIG", "XCELL", "YCELL", "NCOLS", "NROWS",
+    "P_ALP", "P_BET", "XCENT", "YCENT")
+_nei_grid(fs::NEI2016MonthlyEmisFileSet) = lock(nclock) do
+    [fs.ds.attrib[k] for k in _NEI_GRID_ATTRIBS]
+end
+
+function _check_same_grid(filesets)
+    g1 = _nei_grid(first(filesets))
+    for fs in filesets
+        _nei_grid(fs) == g1 ||
+            error("NEI2016 sector $(fs.sector) is not on the same grid as " *
+                  "$(first(filesets).sector).")
+    end
+end
+
+"""
+$(SIGNATURES)
+
+Several NEI2016 sectors on the same grid, summed at load time. A variable that is
+missing from one sector's file is treated as zero for that sector.
+"""
+struct NEI2016MonthlyEmisMultiFileSet{F <: NEI2016MonthlyEmisFileSet} <: FileSet
+    filesets::Vector{F}
+end
+
+function NEI2016MonthlyEmisMultiFileSet(sectors::AbstractVector{<:AbstractString},
+        starttime::DateTime, endtime::DateTime)
+    isempty(sectors) && error("At least one NEI2016 sector must be given.")
+    fss = [NEI2016MonthlyEmisFileSet(String(s), starttime, endtime) for s in sectors]
+    _check_same_grid(fss)
+    NEI2016MonthlyEmisMultiFileSet(fss)
+end
+
+function _first_with(fs::NEI2016MonthlyEmisMultiFileSet, varname)
+    i = findfirst(sub -> varname in varnames(sub), fs.filesets)
+    isnothing(i) && error("Variable $varname not found in any of the NEI2016 sectors.")
+    fs.filesets[i]
+end
+
+mirror(fs::NEI2016MonthlyEmisMultiFileSet) = mirror(first(fs.filesets))
+relpath(fs::NEI2016MonthlyEmisMultiFileSet, t::DateTime) = relpath(first(fs.filesets), t)
+function DataFrequencyInfo(fs::NEI2016MonthlyEmisMultiFileSet)
+    DataFrequencyInfo(first(fs.filesets))
+end
+function loadmetadata(fs::NEI2016MonthlyEmisMultiFileSet, varname)::MetaData
+    loadmetadata(_first_with(fs, varname), varname)
+end
+function get_geometry(fs::NEI2016MonthlyEmisMultiFileSet, m::MetaData)
+    get_geometry(first(fs.filesets), m)
+end
+varnames(fs::NEI2016MonthlyEmisMultiFileSet) = unique(vcat(varnames.(fs.filesets)...))
+
+function loadslice!(data::AbstractArray, fs::NEI2016MonthlyEmisMultiFileSet,
+        t::DateTime, varname)
+    fill!(data, zero(eltype(data)))
+    buf = similar(data)
+    for sub in fs.filesets
+        varname in varnames(sub) || continue
+        loadslice!(buf, sub, t, varname)
+        data .+= buf
+    end
+    nothing
+end
+
+Base.close(fs::NEI2016MonthlyEmisMultiFileSet) = foreach(close, fs.filesets)
+
 # Verify that `varname`'s grid metadata matches `ref_meta` on every dimension
 # the shared regridder depends on.  Throws if any of {native_sr, xdim, ydim,
 # zdim, staggering, varsize, coords} disagree.  Cheap because each
 # `loadmetadata` call is just NetCDF attribute reads under `nclock`.
-function _validate_shared_grid(fs::NEI2016MonthlyEmisFileSet, varname, ref_var, ref_meta)
+function _validate_shared_grid(fs::FileSet, varname, ref_var, ref_meta)
     m = loadmetadata(fs, varname)
     mismatches = String[]
     m.native_sr == ref_meta.native_sr || push!(mismatches, "native_sr")
@@ -410,13 +639,28 @@ A data loader for CMAQ-formatted monthly US National Emissions Inventory data fo
 available from: https://gaftp.epa.gov/Air/emismod/2016/v1/gridded/monthly_netCDF/.
 The emissions here are monthly averages, so there is no information about diurnal variation etc.
 
+`sectors` is one sector name or a vector of sector names as they appear in the file names
+`2016fh_16j_<sector>_12US1_month_MM.ncf`, e.g. `"mrggrid_withbeis_withrwc"` (all surface
+sectors merged) or `"emln_ptegu"` (electricity generating units). Emissions from all listed
+sectors are summed. The merged surface file does not contain the "inline" elevated point
+sectors (`emln_ptegu`, `emln_ptnonipm`, `emln_pt_oilgas`, `emln_othpt`, `emln_cmv_c3_12`,
+`emln_cmv_c1c2_12`, and the fire sectors); add them by listing them here, or see
+[`NEI2016ElevatedEmis`](@ref).
+
+Elevated sectors are spread over model layers with the same per-sector layer profiles that
+GEOS-Chem uses for its NEI2016 3-D input files (see `NEI2016_SECTOR_PROFILES` and
+`NEI2016_LAYER_FRACTIONS`). Sectors not listed in `vertical_profiles` are emitted into the
+surface layer. Pass a different `vertical_profiles` dictionary (sector name => profile name,
+one of $(NEI2016_PROFILE_NAMES)) to override the defaults. If the domain has fewer layers
+than a profile, the fractions above the domain top are added to the top layer.
+
 The emissions are returned as mixing ratios in units of kg/kg/s by converting from the
 native flux density (kg/m²/s) using:
 
-    mixing_ratio = flux / (g0_100 * delp_dry_surface)
+    mixing_ratio = flux / (g0_100 * delp_dry)
 
-where g0_100 ≈ 10.197 kg/m² and delp_dry_surface is the dry pressure thickness (physically unit in hPa, but here is unitless)
-that varies spatially across the domain.
+where g0_100 ≈ 10.197 kg/m² and delp_dry is the dry pressure thickness of the model layer
+(physically in hPa, but unitless here) that varies spatially across the domain.
 
 `scale` is a scaling factor to apply to the emissions data. The default value is 1.0.
 
@@ -431,26 +675,46 @@ from the native NEI Lambert Conformal Conic grid to the simulation domain grid, 
 total emissions mass.
 """
 function NEI2016MonthlyEmis(
-        sector::AbstractString,
+        sectors::AbstractVector{<:AbstractString},
         domaininfo::DomainInfo;
         scale = 1.0,
         name = :NEI2016MonthlyEmis,
         stream = true,
-        spatial_interp::Symbol = :linear
+        spatial_interp::Symbol = :linear,
+        vertical_profiles::AbstractDict = NEI2016_SECTOR_PROFILES
 )
+    spatial_interp in (:linear, :nearest) ||
+        throw(ArgumentError("spatial_interp must be :linear or :nearest, got $spatial_interp"))
+    for s in sectors
+        p = get(vertical_profiles, s, "surface")
+        p in NEI2016_PROFILE_NAMES ||
+            error("Unknown vertical profile \"$p\" for sector $s; use one of $(NEI2016_PROFILE_NAMES).")
+    end
     starttime, endtime = get_tspan_datetime(domaininfo)
-    fs = NEI2016MonthlyEmisFileSet(sector, starttime, endtime)
+    # Group the sectors by vertical profile; each group is summed at load time and gets
+    # one interpolator per variable.
+    groups = Tuple{Int, NEI2016MonthlyEmisMultiFileSet}[]
+    for (pid, pname) in enumerate(NEI2016_PROFILE_NAMES)
+        secs = [String(s) for s in sectors if get(vertical_profiles, s, "surface") == pname]
+        isempty(secs) && continue
+        push!(groups, (pid, NEI2016MonthlyEmisMultiFileSet(secs, starttime, endtime)))
+    end
+    isempty(groups) && error("At least one NEI2016 sector must be given.")
+    _check_same_grid([sub for (_, fs) in groups for sub in fs.filesets])
+    group_vars = [Set(varnames(fs)) for (_, fs) in groups]
     # The regridder is built from the first variable's grid metadata and
-    # reused across every variable; if any later variable's grid disagrees,
+    # reused across every variable and sector; if any later variable's grid disagrees,
     # the regridder would silently mis-map its emissions.  Validate up-front
     # rather than letting the mismatch produce wrong numbers at solve time.
-    ref_var = first(varnames(fs))
-    ref_meta = loadmetadata(fs, ref_var)
-    for varname in varnames(fs)
-        varname == ref_var && continue
-        _validate_shared_grid(fs, varname, ref_var, ref_meta)
+    ref_fs = groups[1][2]
+    ref_var = first(varnames(ref_fs))
+    ref_meta = loadmetadata(ref_fs, ref_var)
+    for (g, (_, fs)) in enumerate(groups)
+        for varname in group_vars[g]
+            _validate_shared_grid(fs, varname, ref_var, ref_meta)
+        end
     end
-    shared_regridder = regridder(fs, ref_meta, domaininfo)
+    shared_regridder = regridder(ref_fs, ref_meta, domaininfo)
     pvdict = Dict([Symbol(v) => v for v in EarthSciMLBase.pvars(domaininfo)]...)
     @assert :x in keys(pvdict)||:lon in keys(pvdict) "x or lon must be specified in the domaininfo"
     @assert :y in keys(pvdict)||:lat in keys(pvdict) "y or lat must be specified in the domaininfo"
@@ -471,43 +735,54 @@ function NEI2016MonthlyEmis(
     interp_infos = []
     lhs_vars = Num[]
 
-    for varname in varnames(fs)
-        dt = EarthSciMLBase.eltype(domaininfo)
-        itp = DataSetInterpolator{dt}(fs, varname, starttime, endtime, domaininfo;
-            stream = stream, regrid_f = shared_regridder)
+    dt = EarthSciMLBase.eltype(domaininfo)
+    # Top model layer of the domain; profiles reaching above it are folded into it.
+    levidx = findfirst(v -> Symbol(v) === Symbol(lev), EarthSciMLBase.pvars(domaininfo))
+    ktop = round(Int, maximum(EarthSciMLBase.grid(domaininfo, (false, false, false))[levidx]))
+    group_f = spatial_interp === :nearest ? nei_group_emis_nearest : nei_group_emis
+    allvars = unique(vcat([varnames(fs) for (_, fs) in groups]...))
+    for varname in allvars
+        # One interpolator per vertical-profile group, each multiplied by the group's
+        # fraction in layer `lev`. The interpolator of the surface group is named after
+        # the variable, the others `<variable>_<profile>`.
+        terms = []
+        itp = nothing
+        kemit = 0
+        for (g, (pid, fs)) in enumerate(groups)
+            varname in group_vars[g] || continue
+            itp = DataSetInterpolator{dt}(fs, varname, starttime, endtime, domaininfo;
+                stream = stream, regrid_f = shared_regridder)
+            n = pid == 1 ? Symbol(varname) :
+                Symbol(varname, "_", NEI2016_PROFILE_NAMES[pid])
+            discretes, constants, info = create_interp_info(itp, n, [x, y];
+                spatial_interp = spatial_interp)
+            frac = nei_layer_fraction(pid, ktop, lev)
+            push!(terms,
+                group_f(interp_index_exprs(info, t_ref + t, [x, y])..., frac) *
+                info.unit_const)
+            kemit = max(kemit, min(ktop, length(NEI2016_LAYER_FRACTIONS[pid])))
+            append!(all_discretes, discretes)
+            append!(all_constants, constants)
+            push!(interp_infos, info)
+        end
 
-        # Don't pre-declare units - let ModelingToolkit infer from the actual equation
-        # The conversion formula divides flux (kg/m²/s) by (g0_100 * delp), giving kg/kg/s
-        # But we need zero_emis to match the units of the converted result
-        converted_units = units(itp) / u"kg/m^2"  # = 1/s (same as kg/kg/s for emissions)
-        ze_name = Symbol(:zero_, varname)
-        zero_emis = only(@constants $(ze_name)=0 [unit = converted_units])
-        zero_emis = ModelingToolkit.unwrap(zero_emis) # Unsure why this is necessary.
-        push!(params, zero_emis)
+        # Diurnal (× day-of-week) factor and mixing ratio conversion:
+        # mixing_ratio = flux / (g0_100 * delp_dry(x, y, lev)), zero above layer `kemit`.
+        gate = nei_layer_gate(lev, kemit)
+        clock_f = get(_NEI_CLOCK_FN, varname, nothing)
+        clock = clock_f === nothing ? 1 : clock_f(t + t_ref, x, gate)
+        rhs = sum(terms) / Δz * scale * clock * nei_inv_delp(x, y, lev, gate) / g0_100
 
-        # Apply diurnal scaling and mixing ratio conversion to certain chemical species.
-        # The conversion is: mixing_ratio = flux / (g0_100 * delp_dry_surface(x, y)).
-        # Species-specific diurnal/DoW factor (or `1` for species with no
-        # temporal scaling) comes from `_NEI_SCALING_FN`; the rest of the
-        # wrapper is identical across species.  Symbolic `1 * eq` simplifies
-        # to `eq` during compilation, so the no-scaling case incurs no
-        # runtime overhead.
-        scaling_fn = get(_NEI_SCALING_FN, varname, nothing)
-        diurnal = scaling_fn === nothing ? 1 : scaling_fn(t + t_ref, x)
-        wrapper_f = (eq) -> ifelse(lev < 2,
-            eq / Δz * scale * diurnal / (g0_100 * delp_dry_surface_itp(x, y)),
-            zero_emis)
-
-        eq, discretes,
-        constants,
-        info = create_interp_equation(itp, "", t, t_ref, [x, y];
-            wrapper_f = wrapper_f,
-            spatial_interp = spatial_interp)
-        push!(eqs, eq)
-        append!(all_discretes, discretes)
-        append!(all_constants, constants)
-        push!(interp_infos, info)
-        push!(lhs_vars, eq.lhs)
+        n = Symbol(varname)
+        lhs = only(
+            @variables $n(t) [
+            unit = ModelingToolkit.get_unit(rhs),
+            description = description(itp),
+            misc = Dict(:staggering => itp.metadata.staggering)
+        ]
+        )
+        push!(eqs, lhs ~ rhs)
+        push!(lhs_vars, lhs)
     end
     all_params = [x, y, lev, Δz, all_constants..., all_discretes..., params...]
     sys = System(
@@ -524,4 +799,31 @@ function NEI2016MonthlyEmis(
             SysDiscreteEvent => make_prune_factory(interp_infos))
     )
     return sys
+end
+
+function NEI2016MonthlyEmis(sector::AbstractString, domaininfo::DomainInfo; kwargs...)
+    NEI2016MonthlyEmis([sector], domaininfo; kwargs...)
+end
+
+"""
+The six "inline" elevated point sectors of the 2016 NEI platform that GEOS-Chem reads in
+addition to the surface sectors: power plants, other industrial points, oil and gas points
+(the inline part only; the low-level part is in the merged surface file), Canada and Mexico
+points, and class 1/2 and class 3 commercial marine vessels.
+"""
+const NEI2016_ELEVATED_SECTORS = ["emln_ptegu", "emln_ptnonipm", "emln_pt_oilgas",
+    "emln_othpt", "emln_cmv_c3_12", "emln_cmv_c1c2_12"]
+
+"""
+$(SIGNATURES)
+
+The NEI 2016 elevated point sectors ([`NEI2016_ELEVATED_SECTORS`](@ref)) as one emission
+system, vertically allocated as in GEOS-Chem. Equivalent to
+`NEI2016MonthlyEmis(NEI2016_ELEVATED_SECTORS, domaininfo; kwargs...)`; to combine them with
+the merged surface file in a single system, pass both to [`NEI2016MonthlyEmis`](@ref) instead:
+
+    NEI2016MonthlyEmis(["mrggrid_withbeis_withrwc"; NEI2016_ELEVATED_SECTORS], domaininfo)
+"""
+function NEI2016ElevatedEmis(domaininfo::DomainInfo; name = :NEI2016ElevatedEmis, kwargs...)
+    NEI2016MonthlyEmis(NEI2016_ELEVATED_SECTORS, domaininfo; name = name, kwargs...)
 end

@@ -151,13 +151,50 @@ Returns `(equation, discretes, constants, interp_info)` where:
   - `constants`: vector of constant symbolic variables [spatial grid params..., extrap, unit_scale]
   - `interp_info`: named tuple with all symbolic pieces needed to build interpolation expressions
 """
-function create_interp_equation(itp::DataSetInterpolator{To}, filename, t, t_ref, coords;
-        wrapper_f = v -> v, spatial_interp::Symbol = :linear) where {To}
-    spatial_interp in (:linear, :nearest) ||
-        throw(ArgumentError("spatial_interp must be :linear or :nearest, got $spatial_interp"))
-
+function create_interp_equation(itp::DataSetInterpolator, filename, t, t_ref, coords;
+        wrapper_f = v -> v, spatial_interp::Symbol = :linear)
     n = length(filename) > 0 ? Symbol("$(filename)₊$(itp.varname)") :
         Symbol("$(itp.varname)")
+
+    discretes, constants, interp_info = create_interp_info(itp, n, coords;
+        spatial_interp = spatial_interp)
+
+    # Single source of truth for the interp formula.
+    rhs = wrapper_f(build_interp_expr(interp_info, t_ref + t, coords))
+
+    # Create left hand side of equation.
+    desc = description(itp)
+    uu_rhs = ModelingToolkit.get_unit(rhs)
+    lhs = only(
+        @variables $n(t) [
+        unit = uu_rhs,
+        description = desc,
+        misc = Dict(:staggering => itp.metadata.staggering)
+    ]
+    )
+
+    eq = lhs ~ rhs
+
+    return eq, discretes, constants, interp_info
+end
+
+"""
+$(SIGNATURES)
+
+Create the symbolic parameters for interpolating `itp` (data buffer, time grid and
+spatial grid) without an equation, for loaders that combine several interpolators in
+one equation. `n` names the parameters (`<n>_data`, `<n>_tstart`, ...) and the
+interpolator in the update event, so it must be unique within the system.
+`spatial_interp` is as in [`create_interp_equation`](@ref).
+
+Returns `(discretes, constants, interp_info)` as described in
+[`create_interp_equation`](@ref); evaluate the interpolator with
+[`build_interp_expr`](@ref).
+"""
+function create_interp_info(itp::DataSetInterpolator{To}, n::Symbol, coords;
+        spatial_interp::Symbol = :linear) where {To}
+    spatial_interp in (:linear, :nearest) ||
+        throw(ArgumentError("spatial_interp must be :linear or :nearest, got $spatial_interp"))
 
     # Compute the correct data array dimensions from the cached spatial
     # grid size (populated once at DSI construction) plus the time-cache
@@ -290,26 +327,10 @@ function create_interp_equation(itp::DataSetInterpolator{To}, filename, t, t_ref
         const_defaults = const_defaults, spatial_interp = spatial_interp,
         live = Ref(true), preloaded_buf = Ref{Any}(nothing))
 
-    # Single source of truth for the interp formula.
-    rhs = wrapper_f(build_interp_expr(interp_info, t_ref + t, coords))
-
-    # Create left hand side of equation.
-    desc = description(itp)
-    uu_rhs = ModelingToolkit.get_unit(rhs)
-    lhs = only(
-        @variables $n(t) [
-        unit = uu_rhs,
-        description = desc,
-        misc = Dict(:staggering => itp.metadata.staggering)
-    ]
-    )
-
-    eq = lhs ~ rhs
-
     discretes = [p_data, p_tstart, p_tstep]
     constants = [spatial_consts..., p_extrap, unit_scale]
 
-    return eq, discretes, constants, interp_info
+    return discretes, constants, interp_info
 end
 
 """
@@ -321,13 +342,19 @@ the interpolation at modified coordinates (e.g., `lev + 1` for finite difference
 Uses the same `spatial_interp` mode that was configured on `interp_info`.
 """
 function build_interp_expr(info, t_expr, coord_exprs)
+    interp_f = get(info, :spatial_interp, :linear) === :nearest ? interp_time_only :
+               interp_unsafe
+    interp_f(interp_index_exprs(info, t_expr, coord_exprs)...) * info.unit_const
+end
+
+# Arguments of `interp_unsafe`/`interp_time_only` for `info` at the given time and
+# coordinate expressions: data buffer, fractional time and spatial indices, extrapolation.
+function interp_index_exprs(info, t_expr, coord_exprs)
     fit = 1 + (t_expr - info.tstart_sym) / info.tstep_sym
     n_spatial = length(coord_exprs)
     fis = [1 + (coord_exprs[i] - info.spatial_consts[2i - 1]) / info.spatial_consts[2i]
            for i in 1:n_spatial]
-    interp_f = get(info, :spatial_interp, :linear) === :nearest ? interp_time_only :
-               interp_unsafe
-    interp_f(info.data_sym, fit, fis..., info.extrap_const) * info.unit_const
+    return (info.data_sym, fit, fis..., info.extrap_const)
 end
 
 """
