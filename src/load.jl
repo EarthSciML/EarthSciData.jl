@@ -642,7 +642,8 @@ end
 Load the time points that should be cached in this interpolator.
 """
 function interp_cache_times!(itp::DataSetInterpolator, t::DateTime)
-    cache_size = length(itp.cache.times)
+    # The configured size, not `length(itp.cache.times)`: windows at the dataset ends are shorter.
+    cache_size = itp.cache_size
     dfi = DataFrequencyInfo(itp.fs)
     ti = centerpoint_index(dfi, t)
     n = length(dfi.centerpoints)

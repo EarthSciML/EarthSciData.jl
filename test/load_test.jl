@@ -642,6 +642,36 @@ end
           [DateTime(2024, 1, 1, 5), DateTime(2024, 1, 1, 6), DateTime(2024, 1, 1, 7)]
 end
 
+@testset "3-slot window keeps its size after a dataset end" begin
+    domain = DomainInfo(
+        DateTime(2024, 1, 1), DateTime(2024, 1, 2);
+        lonrange = deg2rad(0.0):deg2rad(1.0):deg2rad(1.0),
+        latrange = deg2rad(0.0):deg2rad(1.0):deg2rad(1.0),
+        levrange = 1:1
+    )
+    fs = HysteresisCountFS(DateTime(2024, 1, 1), DateTime(2024, 1, 2))
+    itp = EarthSciData.DataSetInterpolator{Float64}(
+        fs, "X", DateTime(2024, 1, 1), DateTime(2024, 1, 2), domain)
+    buf = EarthSciData.make_data_buffer(itp)
+    # The first bucket has no lookback slot, so its window holds two records.
+    EarthSciData.lazyload!(itp, DateTime(2024, 1, 1, 0, 10), buf)
+    @test itp.cache.times == [DateTime(2024, 1, 1, 0), DateTime(2024, 1, 1, 1)]
+    # Later windows must regain the lookback slot...
+    EarthSciData.lazyload!(itp, DateTime(2024, 1, 1, 6), buf)
+    @test itp.cache.times ==
+          [DateTime(2024, 1, 1, 5), DateTime(2024, 1, 1, 6), DateTime(2024, 1, 1, 7)]
+    # ...so a dip into the first half of the anchor bucket is covered without a reload.
+    n = fs.nloads[]
+    t_dip = DateTime(2024, 1, 1, 5, 40)
+    EarthSciData.lazyload!(itp, t_dip, buf)
+    @test fs.nloads[] == n
+    @test itp.cache.times[begin] <= t_dip < itp.cache.times[end]
+    v5 = _hcfs_tv(fs, DateTime(2024, 1, 1, 5))
+    v6 = _hcfs_tv(fs, DateTime(2024, 1, 1, 6))
+    @test EarthSciData.interp_unsafe(itp, buf, t_dip, itp.grid_starts[1],
+        itp.grid_starts[2]) ≈ v5 + (40 / 60) * (v6 - v5)
+end
+
 # ---------------------------------------------------------------------------
 # Guard tests for the lock-free `lazyload!` fast path and the interp-event
 # affect NamedTuple cache (keyed by t_abs). Offline: reuses the counting
