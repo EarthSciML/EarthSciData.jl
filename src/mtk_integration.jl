@@ -978,15 +978,6 @@ function prune_unused_interps!(loader_sys, parent_sys; extra_needed = ())
     return loader_sys
 end
 
-"""
-$(SIGNATURES)
-
-Convenience wrapper: convert `csys` to a `System`, gather operator-needed
-variables via `EarthSciMLBase.operator_vars`, and call
-[`prune_unused_interps!`] on `loader_sys` with both.  Returns the
-post-`mtkcompile` parent system so callers can use it for
-`ODEProblem(parent_sys, ...)`.
-"""
 # Collect the interpolated met vars needed by BOTH the coupled system's operators
 # (`operator_vars`, over `csys.ops`) AND its init-callbacks (each one's
 # `get_needed_vars`, e.g. `PBLMixingCallback` needs `A1₊PBLH`). Callback needs are
@@ -1008,6 +999,16 @@ function _operator_and_callback_vars(csys, parent_sys)
     return unique(vcat(ov, cv))
 end
 
+"""
+$(SIGNATURES)
+
+Convenience wrapper: convert `csys` to a `System`, gather the variables its
+operators (`EarthSciMLBase.operator_vars`) and init-callbacks
+(`EarthSciMLBase.get_needed_vars`) read outside the equations, and call
+[`prune_unused_interps!`] on `loader_sys` with both.  Returns the
+post-`mtkcompile` parent system so callers can use it for
+`ODEProblem(parent_sys, ...)`.
+"""
 function prune_unused_interps!(
         loader_sys, csys::EarthSciMLBase.CoupledSystem; kwargs...)
     parent_sys = convert(ModelingToolkit.System, csys; kwargs...)
