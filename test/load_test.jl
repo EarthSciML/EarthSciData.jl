@@ -742,3 +742,72 @@ end
         @test fs.nloads[] > nloads1
     end
 end
+
+# ---------------------------------------------------------------------------
+# Unevenly spaced records (monthly data): the 3-slot window spans two
+# intervals of different lengths, so one (t_start, t_step) pair cannot map
+# both exactly. The parameters must map the interval containing the query.
+# ---------------------------------------------------------------------------
+
+struct MonthlyCountFS <: EarthSciData.FileSet
+    start::DateTime
+    finish::DateTime
+end
+
+function EarthSciData.DataFrequencyInfo(fs::MonthlyCountFS)::EarthSciData.DataFrequencyInfo
+    starts = collect(fs.start:Month(1):(fs.finish - Month(1)))
+    centerpoints = [t + (t + Month(1) - t) / 2 for t in starts]
+    EarthSciData.DataFrequencyInfo(fs.start, Month(1), centerpoints)
+end
+_mcfs_tv(t) = Dates.value(t - DateTime(2024, 1, 1)) / 86_400_000
+function EarthSciData.loadslice!(cache::AbstractArray, fs::MonthlyCountFS, t::DateTime, varname)
+    dfi = EarthSciData.DataFrequencyInfo(fs)
+    fill!(cache, _mcfs_tv(dfi.centerpoints[EarthSciData.centerpoint_index(dfi, t)]))
+end
+function EarthSciData.loadmetadata(fs::MonthlyCountFS, varname)
+    EarthSciData.MetaData(
+        [[0.0, 1.0], [0.0, 1.0]],
+        "m", "test", ["x", "y"], [2, 2],
+        "+proj=longlat +datum=WGS84 +no_defs", 1, 2, -1, (false, false, false)
+    )
+end
+
+@testset "unevenly spaced records interpolate exactly in time" begin
+    # Domain inside the first and last monthly centerpoints, as the data event requires.
+    starttime, endtime = DateTime(2024, 1, 20), DateTime(2024, 6, 10)
+    domain = DomainInfo(starttime, endtime;
+        lonrange = deg2rad(0.0):deg2rad(1.0):deg2rad(1.0),
+        latrange = deg2rad(0.0):deg2rad(1.0):deg2rad(1.0),
+        levrange = 1:1)
+    fs = MonthlyCountFS(DateTime(2024, 1, 1), DateTime(2024, 7, 1))
+    itp = EarthSciData.DataSetInterpolator{Float64}(fs, "X", starttime, endtime, domain)
+    buf = EarthSciData.make_data_buffer(itp)
+    cps = EarthSciData.DataFrequencyInfo(fs).centerpoints
+    # The field equals days since 2024-01-01 at each centerpoint, so the exact
+    # linear interpolant in time is days since 2024-01-01 itself.
+    exact(t) = _mcfs_tv(t)
+    # February (29 days) sits between two 31-day months.
+    for t in (cps[2], cps[2] + Day(5), cps[3] - Hour(1), cps[3], cps[3] + Day(10),
+        cps[2] + Day(20), DateTime(2024, 3, 1), DateTime(2024, 4, 20, 7))
+        EarthSciData.lazyload!(itp, t, buf)
+        @test length(itp.cache.times) == 3
+        v = EarthSciData.interp_unsafe(itp, buf, t, itp.grid_starts[1], itp.grid_starts[2])
+        @test v ≈ exact(t) rtol = 1e-12
+    end
+
+    # The interp-event path records the same exact (t_start, t_step).
+    @parameters mfx_data mfx_tstart mfx_tstep
+    itp2 = EarthSciData.DataSetInterpolator{Float64}(fs, "X", starttime, endtime, domain)
+    info = (data_sym = mfx_data, tstart_sym = mfx_tstart, tstep_sym = mfx_tstep,
+        itp = itp2, var_sym = :MFX, data_eltype = Float64, live = Ref(true),
+        preloaded_buf = Ref{Any}(nothing))
+    aff = EarthSciData.build_interp_event([info], starttime).affect
+    for t in (cps[2] + Day(3), cps[3] + Day(1), cps[3] - Hour(2))
+        tsec = datetime2unix(t) - datetime2unix(starttime)
+        nt = aff.f(nothing, nothing, aff.ctx, (; t = tsec, f = nothing))
+        times = itp2.cache.times
+        j = searchsortedlast(times, t)
+        fit = 1 + (datetime2unix(t) - nt.mfx_tstart) / nt.mfx_tstep
+        @test fit ≈ j + (t - times[j]) / (times[j + 1] - times[j]) rtol = 1e-12
+    end
+end

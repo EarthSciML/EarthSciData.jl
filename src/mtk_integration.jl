@@ -543,7 +543,7 @@ end
 @inline function _lazyload_and_record!(dsi, t_abs, buf,
         ts_buf::Vector{Float64}, tstep_buf::Vector{Float64}, i::Int)
     lazyload!(dsi, t_abs, buf)
-    ts, tstep = get_time_grid_params(dsi)
+    ts, tstep = get_time_grid_params(dsi, Dates.unix2datetime(t_abs))
     @inbounds ts_buf[i] = ts
     @inbounds tstep_buf[i] = tstep
     return nothing

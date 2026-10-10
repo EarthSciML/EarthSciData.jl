@@ -949,7 +949,7 @@ function interp_unsafe(
         locs::Vararg{T2, N2}
 ) where {T1, T2, N, N2}
     t_unix = datetime2unix(t)
-    t_start, t_step = get_time_grid_params(itp)
+    t_start, t_step = get_time_grid_params(itp, t)
     # Compute fractional 1-based indices from cached grid scalars.  All
     # operands are `T1 = To`, so Float32 DSIs stay in Float32 (no Float64
     # promotion on GPU).
@@ -1002,6 +1002,24 @@ function get_time_grid_params(itp::DataSetInterpolator)
         t_step = one(t_start)
     end
     return (t_start, t_step)
+end
+
+"""
+Return `(t_start, t_step)` such that `1 + (t - t_start) / t_step` is the exact fractional
+cache index of `t`. Unevenly spaced cache times (e.g. monthly records) cannot be mapped by
+a single step, so the parameters map the cached interval containing `t` exactly; the data
+event refreshes them at every centerpoint, so the solver stays within that interval.
+"""
+function get_time_grid_params(itp::DataSetInterpolator, t::DateTime)
+    times = itp.cache.times
+    n = length(times)
+    if n > 2 && !all(i -> times[i + 1] - times[i] == times[2] - times[1], 2:(n - 1))
+        j = clamp(searchsortedlast(times, t), 1, n - 1)
+        t_j = datetime2unix(times[j])
+        t_step = datetime2unix(times[j + 1]) - t_j
+        return (t_j - (j - 1) * t_step, t_step)
+    end
+    return get_time_grid_params(itp)
 end
 
 """
