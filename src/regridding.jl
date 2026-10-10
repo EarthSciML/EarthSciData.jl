@@ -38,7 +38,26 @@ function horizontal_regridder(fs::FileSet, metadata::MetaData, domain::DomainInf
         model_grid[i] = ct.(poly)
     end
     data_grid = get_geometry(fs, metadata)
-    ConservativeRegridding.Regridder(model_grid, data_grid)
+    planar_regridder(model_grid, data_grid)
+end
+
+# ConservativeRegridding 0.1 `Regridder(dst, src)` with explicit `Planar()` areas, avoiding GeoInterface's deprecated `crstrait` fallback.
+function planar_regridder(dst_vertices, src_vertices; nodecapacity = 10)
+    to_polys(v) = GO.fix.(GI.Polygon.(GI.LinearRing.(v)))
+    dst_polys, src_polys = to_polys(dst_vertices), to_polys(src_vertices)
+    intersections = SparseArrays.spzeros(Float64, length(dst_polys), length(src_polys))
+    src_tree = STRtree(src_polys; nodecapacity = nodecapacity)
+    dst_tree = STRtree(dst_polys; nodecapacity = nodecapacity)
+    GO.SpatialTreeInterface.dual_depth_first_search(
+        Extents.intersects, src_tree, dst_tree) do i, j
+        polys = GO.intersection(src_polys[i], dst_polys[j]; target = GI.PolygonTrait())
+        a = GO.area(GO.Planar(), polys)
+        a > 0 && (intersections[j, i] += a)
+    end
+    dst_areas = [GO.area(GO.Planar(), p) for p in dst_polys]
+    src_areas = [GO.area(GO.Planar(), p) for p in src_polys]
+    rg = ConservativeRegridding.Regridder(intersections, dst_areas, src_areas)
+    LinearAlgebra.normalize!(rg)
 end
 
 function regrid_horizontal!(dst_field, regridder::ConservativeRegridding.Regridder, src_field, mta::MetaData)
