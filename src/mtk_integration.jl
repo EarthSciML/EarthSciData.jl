@@ -549,6 +549,12 @@ end
     return nothing
 end
 
+# Last affect result and the absolute time it was built for. Both are published
+# in one atomic write, so a lock-free reader never pairs a time with another time's result.
+mutable struct _AffectCache
+    @atomic entry::Tuple{Float64, Any}
+end
+
 # Build a preset-time `SymbolicDiscreteCallback` that reloads the
 # interpolation data buffers at each dataset time stop. The event uses the
 # bare (un-namespaced) parameter symbols from `interp_infos`; MTK's
@@ -681,22 +687,17 @@ function build_interp_event(interp_infos, starttime::DateTime)
     # AND allocate a fresh NamedTuple once per cell — the dominant high-thread
     # scaling wall (more threads then run no faster than fewer). Repeat fires now return the
     # cache with no lock and no allocation.
-    last_tabs = Ref(NaN)
-    cached_nt = Ref{Any}(nothing)
+    affect_cache = _AffectCache((NaN, nothing))
 
     function update_data!(_modified, _observed, ctx, integ)
         t_abs = integ.t + t_ref
         # Lock-free fast path: same t_abs as the last build → identical result.
-        if t_abs == last_tabs[]
-            c = cached_nt[]
-            c === nothing || return c
-        end
+        t_cached, nt_cached = @atomic affect_cache.entry
+        t_cached == t_abs && return nt_cached
         lock(update_lock) do
             # Double-check under the lock: another thread may have just built it.
-            if t_abs == last_tabs[]
-                c = cached_nt[]
-                c === nothing || return c
-            end
+            t_cached, nt_cached = @atomic affect_cache.entry
+            t_cached == t_abs && return nt_cached
             if !prune_done[]
                 sys = isdefined(integ.f, :sys) ? integ.f.sys : nothing
                 if sys !== nothing
@@ -733,8 +734,7 @@ function build_interp_event(interp_infos, starttime::DateTime)
             end
             nt = _build_updates_nt(live_keys_val_ref[], live_idx_val_ref[],
                 data_wrappers, ts_buf, tstep_buf)
-            last_tabs[] = t_abs
-            cached_nt[] = nt
+            @atomic affect_cache.entry = (t_abs, nt)
             nt
         end
     end
