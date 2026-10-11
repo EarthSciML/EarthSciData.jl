@@ -319,3 +319,193 @@ end
     EarthSciData._apply_live_mask!(infos, mini)
     @test all(i.live[] for i in infos)
 end
+
+using Symbolics
+
+# Synthetic ERA5 pressure-level file for January 2022 with the given variables
+# (`name => (units, long_name, min, max)`), on the same grid as the fixtures above.
+function write_era5_fixture(dir, era5_vars)
+    lon_vals = Float64.(-130.0:2.0:-60.0)
+    lat_vals = Float64.(20.0:2.0:50.0)
+    plev_vals = Float64.([1000, 975, 950, 925])
+    time_vals = [DateTime(2022, 1, d, h) for d in 1:31 for h in 0:6:18]
+    nlon, nlat, nplev, ntime = length(lon_vals), length(lat_vals), length(plev_vals),
+    length(time_vals)
+    NCDataset(joinpath(dir, "era5_pl_2022_01.nc"), "c") do ds
+        defDim(ds, "longitude", nlon)
+        defDim(ds, "latitude", nlat)
+        defDim(ds, "pressure_level", nplev)
+        defDim(ds, "valid_time", ntime)
+        defVar(ds, "longitude", Float64, ("longitude",))[:] = lon_vals
+        defVar(ds, "latitude", Float64, ("latitude",))[:] = lat_vals
+        defVar(ds, "pressure_level", Float64, ("pressure_level",))[:] = plev_vals
+        nctime = defVar(ds, "valid_time", Float64, ("valid_time",),
+            attrib = Dict("units" => "hours since 1900-01-01 00:00:00",
+                "calendar" => "proleptic_gregorian"))
+        nctime[:] = time_vals
+        for (varname, (unit_str, long_name, vmin, vmax)) in era5_vars
+            ncvar = defVar(ds, varname, Float32,
+                ("longitude", "latitude", "pressure_level", "valid_time"),
+                attrib = Dict("units" => unit_str, "long_name" => long_name))
+            data = Array{Float32}(undef, nlon, nlat, nplev, ntime)
+            for ti in 1:ntime, k in 1:nplev, j in 1:nlat, i in 1:nlon
+                frac = (i + j + k + ti) / (nlon + nlat + nplev + ntime)
+                data[i, j, k, ti] = Float32(vmin + (vmax - vmin) * frac)
+            end
+            ncvar[:, :, :, :] = data
+        end
+    end
+    return dir
+end
+
+# `_apply_live_mask!` before the reachability walk: every observed equation is
+# substituted into every root with `fixpoint_sub`.  Kept here, without the
+# mutation, as the oracle the walk must reproduce.
+function fixpoint_is_needed(interp_infos, parent_sys; extra_needed = ())
+    name(v) = string(EarthSciMLBase.var2symbol(v))
+    bare_data_syms = [name(info.data_sym) for info in interp_infos]
+    bare_var_syms = [name(info.var_sym) for info in interp_infos]
+    matches(bare, n) = n == bare || endswith(n, "₊" * bare)
+    obs = ModelingToolkit.observed(parent_sys)
+    obs_subst = Dict{Any, Any}(eq.lhs => eq.rhs for eq in obs)
+    loader_ns = ""
+    for eq in obs
+        lhs_name = name(eq.lhs)
+        k = findfirst(b -> endswith(lhs_name, "₊" * b), bare_var_syms)
+        if k !== nothing
+            loader_ns = chop(lhs_name; tail = length(bare_var_syms[k]))
+            break
+        elseif lhs_name in bare_var_syms
+            break
+        end
+    end
+    referenced = Set{String}()
+    function record!(expr)
+        substed = isempty(obs_subst) ? expr : Symbolics.fixpoint_sub(expr, obs_subst)
+        foreach(v -> push!(referenced, name(v)), Symbolics.get_variables(substed))
+    end
+    foreach(eq -> record!(eq.rhs), ModelingToolkit.equations(parent_sys))
+    for eq in ModelingToolkit.get_initialization_eqs(parent_sys)
+        record!(eq.lhs)
+        record!(eq.rhs)
+    end
+    if !isempty(loader_ns)
+        for eq in obs
+            startswith(name(eq.lhs), loader_ns) || record!(eq.rhs)
+        end
+    end
+    foreach(v -> push!(referenced, name(v)), extra_needed)
+    return [any(s -> matches(bare_data_syms[k], s) || matches(bare_var_syms[k], s),
+                referenced)
+            for k in eachindex(interp_infos)]
+end
+
+# A model coupled to ERA5 through connector equations, and an init-callback that
+# reads one ERA5 field out-of-band (the `PBLMixingCallback` / `A1₊PBLH` role).
+struct PruneWalkCoupler
+    sys::Any
+end
+function EarthSciMLBase.couple2(m::PruneWalkCoupler, e::EarthSciData.ERA5Coupler)
+    m, e = m.sys, e.sys
+    ConnectorSystem([m.Qc ~ e.dq, m.Oc ~ e.pl₊o3, m.Ic ~ e.pl₊ciwc], m, e)
+end
+struct PruneWalkCallback end
+function EarthSciMLBase.init_callback(::PruneWalkCallback, ::EarthSciMLBase.CoupledSystem,
+        sys_mtk, coord_args, ::DomainInfo, ::EarthSciMLBase.MapAlgorithm)
+    error("not used: the test builds an ODEProblem from the converted System")
+end
+function EarthSciMLBase.get_needed_vars(::PruneWalkCallback, csys, mtk_sys, domain)
+    [only(filter(v -> endswith(string(EarthSciMLBase.var2symbol(v)), "₊pl₊crwc"),
+        [eq.lhs for eq in ModelingToolkit.observed(mtk_sys)]))]
+end
+
+@testset "Live mask: reachability walk matches fixpoint_sub; settled mask survives init" begin
+    tu = ModelingToolkit.t
+    Du = ModelingToolkit.D
+    dimless = "kg kg**-1"
+    # One ERA5 field per way of being reached (or not):
+    #   q    — state equation → model observed chain → connector → ERA5's own
+    #          derived observed chain (dq ~ 2dq2, dq2 ~ q + 1): five hops;
+    #   o3   — connector only, used by no state (an observed-only output);
+    #   ciwc — state equation through a connector;
+    #   crwc — only the init-callback's keep-set;
+    #   clwc — only an unused derived observed inside ERA5's namespace (not a root);
+    #   cswc — nothing.
+    era5_vars = Dict(v => (dimless, v, 0.0, 1e-5)
+    for v in ("q", "o3", "ciwc", "crwc", "clwc", "cswc"))
+    era5_dir = write_era5_fixture(mktempdir(), era5_vars)
+    domain = DomainInfo(
+        DateTime(2022, 1, 1), DateTime(2022, 1, 2);
+        latrange = deg2rad(20.0f0):deg2rad(2.0):deg2rad(50.0f0),
+        lonrange = deg2rad(-130.0f0):deg2rad(2.0):deg2rad(-60.0f0),
+        levrange = 1:4
+    )
+
+    function build()
+        era5 = ERA5(domain; mirror = "file://$(era5_dir)",
+            variables = collect(keys(era5_vars)))
+        raw(n) = only(filter(v -> string(EarthSciMLBase.var2symbol(v)) == n,
+            ModelingToolkit.unknowns(era5)))
+        @variables dq(tu) dq2(tu) dl(tu)
+        derived = System([dq ~ 2 * dq2, dq2 ~ raw("pl₊q") + 1, dl ~ 2 * raw("pl₊clwc")],
+            tu; name = :ERA5)
+        era5x = extend(derived, era5)
+        @constants uc_w = 1.0 [unit = u"s"]
+        @variables X1(tu) = 0.0 X2(tu) = 0.0 Ac(tu) Bc(tu) Qc(tu) Oc(tu) Ic(tu)
+        model = System(
+            [Du(X1) ~ Ac / uc_w, Ac ~ 2 * Bc, Bc ~ Qc + 1, Du(X2) ~ Ic / uc_w],
+            tu, [X1, X2, Ac, Bc, Qc, Oc, Ic], [uc_w]; name = :PruneWalk,
+            metadata = Dict(EarthSciMLBase.CoupleType => PruneWalkCoupler))
+        infos = ModelingToolkit.getmetadata(era5x, EarthSciData.InterpInfos, nothing)
+        return era5x, model, infos
+    end
+
+    # (1) Real `couple` → `convert` path: the factory prunes with the callback's
+    # keep-set and settles the mask.  The update event's first fire then sees
+    # `integ.f.sys` but must not re-prune without the keep-set (which would drop
+    # crwc and leave it as a zero sentinel).
+    era5x, model, infos = build()
+    info_for(n) = infos[findfirst(i -> i.var_sym == Symbol("pl₊", n), infos)]
+    csys = couple(model, era5x, domain, PruneWalkCallback())
+    parent = convert(System, csys)
+    kept = ["q", "o3", "ciwc", "crwc"]
+    dropped = ["clwc", "cswc"]
+    @test all(info_for(n).live[] for n in kept)
+    @test !any(info_for(n).live[] for n in dropped)
+    @test all(i.mask_settled[] for i in infos)
+
+    ps = parameters(parent)
+    coords = (("₊lat", deg2rad(35.0)), ("₊lon", deg2rad(-90.0)), ("₊lev", 1.0))
+    coord_vals = [p => v for (suffix, v) in coords
+                  for p in filter(p -> endswith(string(Symbol(p)), suffix), ps)]
+    init(ODEProblem(parent, coord_vals, (0.0, 60.0)), Tsit5())
+    @test all(info_for(n).live[] for n in kept)
+    @test all(info_for(n).itp.cache.initialized for n in kept)
+    @test !any(info_for(n).itp.cache.initialized for n in dropped)
+
+    # (2) The walk and the fixpoint_sub oracle agree on the coupled system, with
+    # and without the keep-set, and on the expected keep/drop split.
+    crwc = only(EarthSciMLBase.get_needed_vars(PruneWalkCallback(), csys, parent, domain))
+    field(info) = chopprefix(string(info.var_sym), "pl₊")
+    for (extra, needed) in ((Any[], ["q", "o3", "ciwc"]), (Any[crwc], kept))
+        walk = EarthSciData._apply_live_mask!(infos, parent; extra_needed = extra)
+        @test walk == fixpoint_is_needed(infos, parent; extra_needed = extra)
+        @test walk == [field(i) in needed for i in infos]
+    end
+
+    # (3) Same on a `compose` + `mtkcompile` parent whose only use of ERA5 is the
+    # chain through ERA5's own derived observed equations, and on one that uses
+    # nothing (safety fallback: nothing needed, nothing pruned).
+    era5x, _, infos = build()
+    @constants uc3 = 1.0 [unit = u"s"]
+    @variables X3(tu) = 0.0
+    chain_only = mtkcompile(compose(
+        System([Du(X3) ~ era5x.dq / uc3], tu, [X3], [uc3]; name = :chain), era5x))
+    walk = EarthSciData._apply_live_mask!(infos, chain_only)
+    @test walk == fixpoint_is_needed(infos, chain_only)
+    @test walk == [field(i) == "q" for i in infos]
+    @variables X4(tu)
+    unused = mtkcompile(System([Du(X4) ~ 0], tu; name = :unused))
+    @test EarthSciData._apply_live_mask!(infos, unused) ==
+          fixpoint_is_needed(infos, unused) == falses(length(infos))
+end

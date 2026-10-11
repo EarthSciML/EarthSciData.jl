@@ -320,12 +320,19 @@ function create_interp_info(itp::DataSetInterpolator{To}, n::Symbol, coords;
     # mtkcompile` path.  Shared by reference across every `ODEProblem` built
     # from the same compiled system, so memory stays at one buffer per live
     # interp regardless of how many problems are built.
+    #
+    # `mask_settled`: set once an explicit pass has decided `live[]` (the
+    # convert-time factory, in either calling form, or `prune_unused_interps!`).
+    # The affect's first-fire auto-prune skips when it is set, because that
+    # fallback has no `extra_needed` and would drop fields only operators or
+    # callbacks read.
     interp_info = (data_sym = p_data, tstart_sym = p_tstart, tstep_sym = p_tstep,
         spatial_consts = spatial_consts, extrap_const = p_extrap,
         unit_const = unit_scale, itp = itp, var_sym = n,
         data_dims = data_dims, data_eltype = To,
         const_defaults = const_defaults, spatial_interp = spatial_interp,
-        live = Ref(true), preloaded_buf = Ref{Any}(nothing))
+        live = Ref(true), preloaded_buf = Ref{Any}(nothing),
+        mask_settled = Ref(false))
 
     discretes = [p_data, p_tstart, p_tstep]
     constants = [spatial_consts..., p_extrap, unit_scale]
@@ -644,15 +651,18 @@ function build_interp_event(interp_infos, starttime::DateTime)
     # settle the `live` Refs, so `compose + mtkcompile` paths (which bypass
     # `convert(::Type{System}, ::CoupledSystem)` and therefore the
     # `SysDiscreteEvent` factory walk) get the same gating as the coupled
-    # path.  Idempotent w.r.t. the factory: if pruning already ran at convert
-    # time, the second pass leaves the `false` flags alone.  This Ref is
-    # closure-captured (shared across every problem built from the compiled
-    # system); that's fine because the live mask is a property of the
-    # compiled system, not the problem.  Some operator-split solvers
-    # (`SolverStrangSerial/Threads`, `SolverIMEX`) build inner integrators
-    # whose `integ.f.sys` is `nothing`; in those cases we skip auto-pruning
-    # and rely on the convert-time factory walk, which has already settled
-    # `live[]` for that path.
+    # path.  The fallback passes no `extra_needed`, so it is skipped whenever
+    # an explicit pass already settled the mask (`info.mask_settled[]`): the
+    # convert-time factory (which knows the operator and callback needs, or
+    # deliberately keeps everything live in its 1-arg form) or a manual
+    # `prune_unused_interps!`.  Re-running it there would drop fields read only
+    # by operators or callbacks (e.g. `A1₊PBLH`, `A3dyn₊U`) and leave them as
+    # zero sentinels.  This Ref is closure-captured (shared across every
+    # problem built from the compiled system); that's fine because the live
+    # mask is a property of the compiled system, not the problem.  Some
+    # operator-split solvers (`SolverStrangSerial/Threads`, `SolverIMEX`)
+    # build inner integrators whose `integ.f.sys` is `nothing`; those never
+    # auto-prune.
     prune_done = Ref(false)
 
     # Cached `Val`-lifted tuples of the *live* keys and interp indices,
@@ -700,7 +710,7 @@ function build_interp_event(interp_infos, starttime::DateTime)
             t_cached == t_abs && return nt_cached
             if !prune_done[]
                 sys = isdefined(integ.f, :sys) ? integ.f.sys : nothing
-                if sys !== nothing
+                if sys !== nothing && !_mask_settled(interp_infos)
                     _apply_live_mask!(interp_infos, sys)
                 end
                 prune_done[] = true
@@ -784,10 +794,13 @@ path (e.g. plain `compose` + `mtkcompile`) or when you need to inject
 `extra_needed`.
 
 The pruning is irreversible for the lifetime of the loader's `interp_info`
-vector — build a fresh loader to reset `live[]` to `true`.
+vector — build a fresh loader to reset `live[]` to `true`.  It also turns
+off the update event's first-fire auto-prune (the `compose` + `mtkcompile`
+fallback), so a later `ODEProblem` keeps what `extra_needed` kept.
 
-The "needed" check substitutes observed equations into state-equation RHSs
-via `Symbolics.fixpoint_sub` and walks the resulting variables.  A variable
+The "needed" check collects the variables that state-equation RHSs reach
+through the observed equations (the variables of `Symbolics.fixpoint_sub`
+of each RHS, found without building the substituted expression).  A variable
 that downstream compilation inlines through observed eqs that this walk
 doesn't reach (e.g. through coordinate-aware codegen paths in some
 operator-split solvers) could be marked dead in error.  If this happens
@@ -861,7 +874,7 @@ end
 # output actually evaluates.
 #
 # The walk collects every variable/parameter reachable (through the observed
-# equations, folded in with `fixpoint_sub`) from a set of *roots*:
+# equations) from a set of *roots*:
 #   - state-equation RHSs — the dynamics the solver integrates;
 #   - initialization equations — constraints solved at problem build (e.g. the
 #     plume-rise `H_p ~ Z_agl` pin, which routes through the PBLH interpolator);
@@ -882,11 +895,18 @@ end
 # unknown-to-unknown dependency graph and never reports parameters or
 # observed-only diagnostics.
 #
+# The reachable set equals the variables of `fixpoint_sub(root, observed)`, but
+# it is found by walking the observed-equation graph and expanding each observed
+# left-hand side once, rather than substituting every observed equation into
+# every root: on a production 4x5 CONUS build (595 observed equations) that
+# substitution took 87 s for NEI and 74 s for GEOS-FP; the walk takes 0.1 s.
+#
 # As a safety fallback, if no interpolator is found to be needed (e.g. a
 # standalone `mtkcompile(loader)` with no parent dynamics) nothing is pruned.
 # NetCDF data is loaded lazily by `_preload_interp!` on the affect's first
 # fire, not here.  Used by `prune_unused_interps!`, `make_prune_factory`, and
-# the affect's first-fire auto-prune path.
+# the affect's first-fire auto-prune path; every call marks the mask settled
+# so that auto-prune does not run again.
 function _apply_live_mask!(interp_infos, parent_sys; extra_needed = ())
     bare_data_syms = [string(EarthSciMLBase.var2symbol(info.data_sym))
                       for info in interp_infos]
@@ -897,10 +917,7 @@ function _apply_live_mask!(interp_infos, parent_sys; extra_needed = ())
     matches(bare, name) = name == bare || endswith(name, "₊" * bare)
 
     obs = ModelingToolkit.observed(parent_sys)
-    obs_subst = Dict{Any, Any}()
-    for eq in obs
-        obs_subst[eq.lhs] = eq.rhs
-    end
+    rhs_of = Dict{Any, Any}(eq.lhs => eq.rhs for eq in obs)
 
     # Derive the loader's namespace prefix (e.g. `GEOSFP₊`) from one of its
     # loader equations: `var_sym` is bare (`A1₊PBLH`) while the compiled LHS is
@@ -920,12 +937,21 @@ function _apply_live_mask!(interp_infos, parent_sys; extra_needed = ())
         end
     end
 
+    # `record!(expr)` adds the leaf variables `expr` reaches through `rhs_of`.
+    # `seen` is shared across calls: an observed variable's leaves are already
+    # in `referenced` after its first expansion.
     referenced = Set{String}()
+    seen = Set{Any}()
     function record!(expr)
-        substed = isempty(obs_subst) ? expr :
-                  Symbolics.fixpoint_sub(expr, obs_subst)
-        for v in Symbolics.get_variables(substed)
-            push!(referenced, string(EarthSciMLBase.var2symbol(v)))
+        stack = Any[expr]
+        while !isempty(stack)
+            for v in Symbolics.get_variables(pop!(stack))
+                if haskey(rhs_of, v)
+                    v in seen || (push!(seen, v); push!(stack, rhs_of[v]))
+                else
+                    push!(referenced, string(EarthSciMLBase.var2symbol(v)))
+                end
+            end
         end
         return nothing
     end
@@ -967,8 +993,14 @@ function _apply_live_mask!(interp_infos, parent_sys; extra_needed = ())
         @debug "Live-mask pruning: kept $(length(kept)) of $(length(interp_infos)) " *
                "interpolators, dropped $(length(dropped))" kept dropped
     end
+    _settle_mask!(interp_infos)
     return is_needed
 end
+
+# Record that an explicit pass decided `live[]`, so the affect's first-fire
+# auto-prune (which has no `extra_needed`) leaves it alone.
+_settle_mask!(interp_infos) = foreach(info -> info.mask_settled[] = true, interp_infos)
+_mask_settled(interp_infos) = any(info -> info.mask_settled[], interp_infos)
 
 function prune_unused_interps!(loader_sys, parent_sys; extra_needed = ())
     interp_infos = ModelingToolkit.getmetadata(
@@ -1041,8 +1073,10 @@ two calling conventions:
 Both forms return `nothing`, and EarthSciMLBase's walker filters
 `nothing` returns, so registering this factory adds no new discrete
 events to the parent system — the existing loader-attached
-`build_interp_event` callback fires as before, just with a settled live
-mask in the 2-arg case.  [`prune_unused_interps!`](@ref) on the
+`build_interp_event` callback fires as before, with the live mask
+settled by the factory (pruned in the 2-arg case, all live in the 1-arg
+case); its first-fire auto-prune does not run again.
+[`prune_unused_interps!`](@ref) on the
 `CoupledSystem` remains the explicit operator- and callback-aware prune
 path for callers who want it.
 """
@@ -1068,9 +1102,15 @@ function make_prune_factory(interp_infos)
     #
     # Either way `prune_unused_interps!(loader, csys)` remains the explicit,
     # operator- and callback-aware prune path for callers who want it.
+    #
+    # Both forms settle the mask, so the affect's first-fire auto-prune (which
+    # has no operator/callback keep-set either) cannot prune afterwards.
     return function (parent_sys, extra_needed = nothing)
-        extra_needed === nothing && return nothing  # legacy 1-arg caller: cannot prune safely
-        _apply_live_mask!(interp_infos, parent_sys; extra_needed = extra_needed)
+        if extra_needed === nothing  # legacy 1-arg caller: cannot prune safely
+            _settle_mask!(interp_infos)
+        else
+            _apply_live_mask!(interp_infos, parent_sys; extra_needed = extra_needed)
+        end
         return nothing
     end
 end
