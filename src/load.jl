@@ -383,6 +383,15 @@ function centerpoint_index(t_info::DataFrequencyInfo, t::DateTime)
 end
 
 """
+A background load of the record at `time` into the interpolator's staging
+buffer (see `_start_prefetch!`).
+"""
+struct _Prefetch
+    time::DateTime
+    task::Task
+end
+
+"""
 Cache for time-varying interpolation state within a `DataSetInterpolator`.
 The full-grid data buffer lives on the parameter object (see
 `build_interp_event`), not here; the affect threads it back into
@@ -414,6 +423,14 @@ mutable struct TemporalCache{To, N, N2}
     Whether the cache has been initialized with real data.
     """
     initialized::Bool
+    """
+    Host-side one-record buffer, sized `(grid..., 1)`, that background prefetches regrid into; `nothing` until the first prefetch.
+    """
+    staging::Union{Nothing, Array{To, N}}
+    """
+    The running or finished background load of the record after the window, or `nothing`.
+    """
+    prefetch::Union{Nothing, _Prefetch}
 end
 
 """
@@ -430,6 +447,9 @@ data records for the times immediately before and after the current time step.
 `varname` is the name of the variable to interpolate. `default_time` is the time to use when initializing
 the interpolator. `spatial_ref` is the spatial reference system that the simulation will be using.
 `stream` specifies whether the data should be streamed in as needed or loaded all at once.
+When streaming, `prefetch` (default: on unless the environment variable
+`EARTHSCIDATA_PREFETCH` is `0`) loads the record after the cached window in a
+background task, so moving the window forward copies it in instead of reading it.
 """
 mutable struct DataSetInterpolator{To, N, N2, FT, DomT, ET, FS, RG}
     fs::FS
@@ -460,11 +480,19 @@ mutable struct DataSetInterpolator{To, N, N2, FT, DomT, ET, FS, RG}
     Number of time slices the interpolator caches at once (size of the trailing time dim of the data buffer).
     """
     cache_size::Int
+    """
+    Whether to load the record after the window in the background (see `_start_prefetch!`).
+    """
+    prefetch::Bool
+    """
+    End of the period the interpolator was built for; records past the first one at or after it are not prefetched.
+    """
+    endtime::DateTime
 
     function DataSetInterpolator{To}(fs::FileSet, varname::AbstractString,
             starttime::DateTime, endtime::DateTime, domain;
             stream = true, extrapolate_type = Flat(),
-            regrid_f = nothing) where {To <: Real}
+            regrid_f = nothing, prefetch::Bool = _prefetch_default()) where {To <: Real}
         metadata = loadmetadata(fs, varname)
 
         # Default regridder: BSpline interpolation onto the (possibly
@@ -518,7 +546,7 @@ mutable struct DataSetInterpolator{To, N, N2, FT, DomT, ET, FS, RG}
 
         tc = TemporalCache{To, N, N2}(
             load_cache, nothing, times,
-            DateTime(1, 1, 1), false
+            DateTime(1, 1, 1), false, nothing, nothing
         )
         itp = new{To, N, N2, FT, typeof(domain), typeof(extrapolate_type),
             typeof(fs), typeof(rg)}(
@@ -533,11 +561,16 @@ mutable struct DataSetInterpolator{To, N, N2, FT, DomT, ET, FS, RG}
             grid_starts,
             grid_steps,
             grid_size,
-            cache_size
+            cache_size,
+            prefetch && stream,
+            endtime
         )
         itp
     end
 end
+
+# Background prefetch is on unless `EARTHSCIDATA_PREFETCH=0`; read when an interpolator is built.
+_prefetch_default() = get(ENV, "EARTHSCIDATA_PREFETCH", "1") != "0"
 
 function replace_in_tuple(t::NTuple{N, T1}, index1::Int, v1::T2,
         index2::Int, v2::T2) where {T1, T2, N}
@@ -805,42 +838,149 @@ function _shift_overlap_in_place!(rt::AbstractArray, plan::_CacheAdvancePlan)
     return
 end
 
+# Copy the overlapping slices from `src`, which holds the current window, to
+# their new-window positions in `dst`. `src` is only read.
+function _copy_overlap!(dst::AbstractArray, src::AbstractArray, plan::_CacheAdvancePlan)
+    N = ndims(dst)
+    for i in (plan.first_new):(plan.first_new + plan.overlap_count - 1)
+        selectdim(dst, N, i) .= selectdim(src, N, i + plan.delta)
+    end
+    return
+end
+
 # Predicate: is new-window slot `idx` covered by the overlap (no reload needed)?
 @inline function _slot_in_overlap(plan::_CacheAdvancePlan, idx::Int)
     plan.overlap_count > 0 &&
         plan.first_new <= idx <= plan.first_new + plan.overlap_count - 1
 end
 
-# Load + regrid every new-window slot that the overlap doesn't cover.
+# Load + regrid every new-window slot that the overlap doesn't cover. A slot
+# whose record was prefetched is copied from the staging buffer instead; the
+# prefetch regridded it into a view of the same type as `selectdim(rt, N, idx)`,
+# so the values are bit-identical to loading it here.
 function _fill_missing_slices!(rt::AbstractArray, itp::DataSetInterpolator,
         new_times::AbstractVector{DateTime}, plan::_CacheAdvancePlan)
+    any(idx -> !_slot_in_overlap(plan, idx), eachindex(new_times)) || return
     N = ndims(rt)
     tc = itp.cache
+    # A running prefetch uses `tc.load_cache`, so it must finish before any load here.
+    pf = _settle_prefetch!(tc)
+    tc.prefetch = nothing
     @inbounds for idx in eachindex(new_times)
         _slot_in_overlap(plan, idx) && continue
         d = selectdim(rt, N, idx)
-        load_data_for_time!(itp, new_times[idx])
-        itp.regridder(d, tc.load_cache; extrapolate_type = itp.extrapolate_type)
+        if pf !== nothing && pf.time == new_times[idx] &&
+           eltype(rt) === eltype(tc.staging) && _prefetch_succeeded(itp, pf)
+            d .= selectdim(tc.staging::Array, N, 1)
+        else
+            load_data_for_time!(itp, new_times[idx])
+            itp.regridder(d, tc.load_cache; extrapolate_type = itp.extrapolate_type)
+        end
     end
     return
 end
 
+# Wait for the background load, if any, without throwing; return it or `nothing`.
+function _settle_prefetch!(tc::TemporalCache)
+    pf = tc.prefetch
+    pf === nothing || _wait_quietly(pf.task)
+    return pf
+end
+
+function _wait_quietly(task::Task)
+    try
+        wait(task)
+    catch
+    end
+    return nothing
+end
+
+# Whether a finished prefetch can be used; a failed one is reported and the
+# caller loads the record synchronously, which rethrows if the failure persists.
+function _prefetch_succeeded(itp::DataSetInterpolator, pf::_Prefetch)
+    istaskfailed(pf.task) || return true
+    err = try
+        fetch(pf.task)
+    catch e
+        e
+    end
+    @warn "Background load of $(itp.varname) at $(pf.time) failed; loading it synchronously." exception=err
+    return false
+end
+
+# Start loading the record after the window in the background, so the next
+# forward move of the window copies it in instead of reading it. Skipped when
+# prefetch is off, when the window already reaches past the interpolator's end
+# time or the last record, and when that record is already being loaded.
+function _start_prefetch!(itp::DataSetInterpolator{To}) where {To}
+    itp.prefetch || return
+    tc = itp.cache
+    last_t = tc.times[end]
+    last_t <= itp.endtime || return
+    cpts = DataFrequencyInfo(itp.fs).centerpoints
+    i = searchsortedlast(cpts, last_t) + 1
+    i <= length(cpts) || return
+    t_next = cpts[i]
+    pf = tc.prefetch
+    if pf !== nothing
+        pf.time == t_next && return
+        _wait_quietly(pf.task)  # it uses `load_cache` and `staging`
+    end
+    if tc.staging === nothing
+        tc.staging = zeros(To, itp.grid_size..., 1)
+    end
+    tc.prefetch = _Prefetch(t_next, Threads.@spawn _load_record!(itp, t_next))
+    return
+end
+
+# Body of a prefetch task: load and regrid the record at `t` into the staging
+# buffer, exactly as `_fill_missing_slices!` does into a window slot.
+function _load_record!(itp::DataSetInterpolator, t::DateTime)
+    staging = itp.cache.staging::Array
+    load_data_for_time!(itp, t)
+    itp.regridder(selectdim(staging, ndims(staging), 1), itp.cache.load_cache;
+        extrapolate_type = itp.extrapolate_type)
+    return nothing
+end
+
 function update!(itp::DataSetInterpolator, t::DateTime, target::AbstractArray)
+    update!(itp, t, target, target)
+end
+
+# Move the window to cover `t` and write it into `dst`, taking the overlap with
+# the current window from `src`, which holds that window. With `src === dst`
+# the window moves in place; otherwise `src` is only read, so readers of it are
+# unaffected.
+function update!(itp::DataSetInterpolator, t::DateTime,
+        src::AbstractArray, dst::AbstractArray)
     tc = itp.cache
     @assert tc.initialized "Interpolator has not been initialized"
     new_times = interp_cache_times!(itp, t)
-    rt = regrid_target_for(tc, target)
+    rt = regrid_target_for(tc, dst)
 
     plan = _plan_cache_advance(tc.times, new_times)
-    _shift_overlap_in_place!(rt, plan)
+    if rt === dst && rt !== src
+        _copy_overlap!(rt, src, plan)
+    else  # `dst` itself, or the host-side copy of the window
+        _shift_overlap_in_place!(rt, plan)
+    end
     _fill_missing_slices!(rt, itp, new_times, plan)
 
-    if rt !== target
-        copyto!(target, rt)
+    if rt !== dst
+        copyto!(dst, rt)
     end
     tc.times = new_times
     tc.currenttime = t
     @assert issorted(tc.times) "Interpolator times are in wrong order"
+    _start_prefetch!(itp)
+end
+
+# Whether the loaded window covers `t`, so no reload is needed (the fast-path
+# test of `lazyload!`; see there for why an unlocked read is safe).
+@inline function _window_covers(tc::TemporalCache, t::DateTime)
+    tc.initialized || return false
+    times = tc.times
+    return length(times) > 1 && times[begin] <= t < times[end]
 end
 
 function lazyload!(itp::DataSetInterpolator, t::DateTime, target::AbstractArray)
@@ -857,14 +997,7 @@ function lazyload!(itp::DataSetInterpolator, t::DateTime, target::AbstractArray)
     # so return without ever touching the lock. (Mirrors the slow-path guard
     # below exactly: within [times[begin], times[end]) → no reload — the
     # 3-slot lookback window already brackets the whole anchor bucket.)
-    let tc = itp.cache
-        if tc.initialized
-            times = tc.times
-            if length(times) > 1
-                (times[begin] <= t < times[end]) && return itp
-            end
-        end
-    end
+    _window_covers(itp.cache, t) && return itp
     lock(itp.lock) do
         tc = itp.cache
         if tc.currenttime == t
@@ -898,6 +1031,47 @@ function lazyload!(itp::DataSetInterpolator, t::DateTime, target::AbstractArray)
 end
 function lazyload!(itp::DataSetInterpolator, t::AbstractFloat, target::AbstractArray)
     lazyload!(itp, Dates.unix2datetime(t), target)
+end
+
+"""
+$(SIGNATURES)
+
+Like [`lazyload!`](@ref), but never writes into `active`, the buffer that
+concurrent readers may be using. When the window has to move, the new window is
+assembled in `spare` (allocated when `nothing`) and returned; the caller
+publishes it in place of `active` and may reuse `active` as the next spare once
+no reader holds it. Returns `active` when it already covers `t`. The first load
+fills `active` itself.
+"""
+function lazyload_swap!(itp::DataSetInterpolator, t::DateTime,
+        active::AbstractArray, spare::Union{Nothing, AbstractArray})
+    _window_covers(itp.cache, t) && return active
+    lock(itp.lock) do
+        tc = itp.cache
+        if !tc.initialized
+            initialize!(itp, t, active)
+            update!(itp, t, active)
+            return active
+        end
+        (tc.currenttime == t || _window_covers(tc, t)) && return active
+        # Zeroed rather than `similar`: a window shorter than the buffer leaves
+        # a slot unwritten, and the time interpolation multiplies it by zero.
+        dst = spare === nothing ? fill!(similar(active), zero(eltype(active))) : spare
+        update!(itp, t, active, dst)
+        return dst
+    end
+end
+
+"""
+Wait, without holding any lock, for the background load that moving `itp`'s
+window to `t` will use, so the move itself only copies data.
+"""
+function _await_prefetch(itp::DataSetInterpolator, t::DateTime)
+    tc = itp.cache
+    (tc.initialized && !_window_covers(tc, t)) || return
+    pf = tc.prefetch  # unlocked read: at worst a finished or unrelated task
+    pf === nothing || _wait_quietly(pf.task)
+    return
 end
 
 """

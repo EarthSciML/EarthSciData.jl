@@ -529,37 +529,92 @@ end
 # `getproperty` / `generated_callfunc` frames. Bouncing through this
 # top-level helper lets Julia re-specialize on the concrete runtime
 # types of `info` and `dsi`, so the body compiles down to static calls.
+#
+# Returns whether the interpolator's buffer was swapped (see `_lazyload_and_record!`).
 @inline function _update_one_interp!(info, dsi, t_abs,
-        data_wrappers::Vector{Any}, ts_buf::Vector{Float64},
+        data_wrappers::Vector{Any}, spare_bufs::Vector{Any}, ts_buf::Vector{Float64},
         tstep_buf::Vector{Float64}, i::Int)
-    info.live[] || return nothing
+    info.live[] || return false
     if data_wrappers[i] === nothing
         info.preloaded_buf[] === nothing && _preload_interp!(info)
         data_wrappers[i] = DataBufferType(info.preloaded_buf[])
     end
     buf = info.preloaded_buf[]
-    _lazyload_and_record!(dsi, t_abs, buf, ts_buf, tstep_buf, i)
-    return nothing
+    return _lazyload_and_record!(info, dsi, t_abs, buf, data_wrappers, spare_bufs,
+        ts_buf, tstep_buf, i)
 end
 
 # Second-level barrier: `info.preloaded_buf` is intentionally `Ref{Any}`
 # so a single `interp_info` can carry `Array`/`CuArray`/etc. depending on
 # the domain backend, which means `buf` is statically `Any` at this point.
-# Re-specializing here turns `lazyload!`/`get_time_grid_params` into static
+# Re-specializing here turns `lazyload_swap!`/`get_time_grid_params` into static
 # dispatch on the concrete buffer / `dsi` types.
-@inline function _lazyload_and_record!(dsi, t_abs, buf,
+#
+# Solver threads keep reading `buf` through the shared parameter object until
+# the returned NamedTuple is written back, so a window move never touches it:
+# `lazyload_swap!` assembles the new window in the spare buffer, which becomes
+# the published buffer, and `buf` becomes the spare. The spare is next written
+# at this interpolator's following window move, one data interval later.
+@inline function _lazyload_and_record!(info, dsi, t_abs, buf,
+        data_wrappers::Vector{Any}, spare_bufs::Vector{Any},
         ts_buf::Vector{Float64}, tstep_buf::Vector{Float64}, i::Int)
-    lazyload!(dsi, t_abs, buf)
-    ts, tstep = get_time_grid_params(dsi, Dates.unix2datetime(t_abs))
+    t = Dates.unix2datetime(t_abs)
+    spare = spare_bufs[i]
+    newbuf = lazyload_swap!(dsi, t, buf, spare isa typeof(buf) ? spare : nothing)
+    swapped = newbuf !== buf
+    if swapped
+        spare_bufs[i] = buf
+        info.preloaded_buf[] = newbuf
+        data_wrappers[i] = DataBufferType(newbuf)
+    end
+    ts, tstep = get_time_grid_params(dsi, t)
     @inbounds ts_buf[i] = ts
     @inbounds tstep_buf[i] = tstep
+    return swapped
+end
+
+# Function barrier for `_await_prefetch` on a heterogeneous `ctx` entry.
+@inline function _await_one_prefetch(info, dsi, t::DateTime)
+    info.live[] && _await_prefetch(dsi, t)
     return nothing
 end
 
-# Last affect result and the absolute time it was built for. Both are published
-# in one atomic write, so a lock-free reader never pairs a time with another time's result.
+# Results of the last two affect builds, most recent first, keyed by the
+# absolute time each was built for. Never mutated once published (`mutable`
+# only so that the atomic field below holds a pointer).
+mutable struct _AffectEntries
+    const t1::Float64
+    const nt1::Any
+    const t2::Float64
+    const nt2::Any
+end
+
+# The affect's result cache and the lock for building a result. Results are
+# published as a whole `_AffectEntries` in one atomic write, so a lock-free
+# reader never pairs a time with another time's result. Two entries, because
+# under `SolverStrangThreads` the step-start (t0) initializations of some
+# blocks interleave with the step-end (tf) fires of others.
 mutable struct _AffectCache
-    @atomic entry::Tuple{Float64, Any}
+    @atomic entries::_AffectEntries
+    const lock::ReentrantLock
+end
+_AffectCache() = _AffectCache(_AffectEntries(NaN, nothing, NaN, nothing), ReentrantLock())
+
+@inline function _cached_result(c::_AffectCache, t_abs::Float64)
+    e = @atomic c.entries
+    e.t1 == t_abs && return e.nt1
+    e.t2 == t_abs && return e.nt2
+    return nothing
+end
+
+# Publish `nt` for `t_abs`, keeping the previous most recent result unless this
+# build swapped a buffer: a result built before the swap references the
+# replaced buffer, which the interpolator's next window move overwrites.
+function _publish_result!(c::_AffectCache, t_abs::Float64, nt, swapped::Bool)
+    e = @atomic c.entries
+    @atomic c.entries = swapped ? _AffectEntries(t_abs, nt, NaN, nothing) :
+                        _AffectEntries(t_abs, nt, e.t1, e.nt1)
+    return nt
 end
 
 # Build a preset-time `SymbolicDiscreteCallback` that reloads the
@@ -632,9 +687,11 @@ function build_interp_event(interp_infos, starttime::DateTime)
     # whether pruning ran at convert time or at problem-init.
     #
     # `SolverStrangThreads` fires the affect from multiple threads
-    # concurrently, so it is guarded by a lock.  The lock only covers callback
-    # invocation (rare, at tstops), not the RHS hot path, so the cost is
-    # negligible.  The same closure is registered as both the `affect` (fires
+    # concurrently, so building a result is guarded by a lock.  Repeat fires
+    # are served from the result cache without it, and the data a window move
+    # needs is loaded in the background (see `_start_prefetch!`), so the lock
+    # only covers swapping buffers and building the NamedTuple.  The same
+    # closure is registered as both the `affect` (fires
     # at each tstop in `all_tstops`) and the `initialize` affect (fires once
     # at problem build, before any RHS evaluation).  A separate init affect
     # would be cleaner, but some operator-split solvers
@@ -644,7 +701,6 @@ function build_interp_event(interp_infos, starttime::DateTime)
     # closure means the first fire on each path performs the sentinel→full
     # buffer swap and refreshes the cache window, regardless of whether MTK's
     # `initialize` callback reached this integrator.
-    update_lock = ReentrantLock()
 
     # Auto-prune fallback flag.  On the first affect invocation against a
     # given integrator we walk `integ.f.sys` and apply `_apply_live_mask!` to
@@ -681,33 +737,42 @@ function build_interp_event(interp_infos, starttime::DateTime)
     # this callback — no per-call `Vector{Any}` allocation, and no `Float64`
     # boxing on the way into the result NamedTuple.
     #
-    # `data_wrappers` caches `DataBufferType(buf)` lazily: once
-    # `info.preloaded_buf[]` is populated the wrapped reference is stable,
-    # so we wrap it exactly once and re-emit the same instance every fire.
+    # `data_wrappers` caches `DataBufferType(buf)` for the published buffer
+    # `info.preloaded_buf[]`, so every fire re-emits the same instance; it is
+    # replaced when a window move swaps the buffer. `spare_bufs` holds each
+    # interpolator's second buffer, allocated at its first window move.
     n_interp = length(interp_infos)
     data_wrappers = Vector{Any}(undef, n_interp)
     fill!(data_wrappers, nothing)
+    spare_bufs = Vector{Any}(undef, n_interp)
+    fill!(spare_bufs, nothing)
     ts_buf = Vector{Float64}(undef, n_interp)
     tstep_buf = Vector{Float64}(undef, n_interp)
 
-    # Cache the last-built parameter NamedTuple, keyed by the absolute time it was
-    # built for. Under SolverStrangThreads every grid cell's `reinit!` fires this
-    # affect at the SAME `t_abs` within one outer step, so the built result is
-    # identical. Without caching, all solver threads serialize on `update_lock`
+    # Cache the last two parameter NamedTuples, keyed by the absolute time each
+    # was built for. Under SolverStrangThreads every grid cell's `reinit!` fires
+    # this affect at the SAME `t_abs` within one outer step, so the built result
+    # is identical. Without caching, all solver threads serialize on the lock
     # AND allocate a fresh NamedTuple once per cell — the dominant high-thread
-    # scaling wall (more threads then run no faster than fewer). Repeat fires now return the
-    # cache with no lock and no allocation.
-    affect_cache = _AffectCache((NaN, nothing))
+    # scaling wall (more threads then run no faster than fewer). Repeat fires
+    # return the cache with no lock and no allocation.
+    affect_cache = _AffectCache()
 
     function update_data!(_modified, _observed, ctx, integ)
         t_abs = integ.t + t_ref
-        # Lock-free fast path: same t_abs as the last build → identical result.
-        t_cached, nt_cached = @atomic affect_cache.entry
-        t_cached == t_abs && return nt_cached
-        lock(update_lock) do
+        # Lock-free fast path: a result already built for this time.
+        nt_cached = _cached_result(affect_cache, t_abs)
+        nt_cached === nothing || return nt_cached
+        # Wait for any background load that this time needs before taking the
+        # lock, so the lock is not held while data are read.
+        t_dt = Dates.unix2datetime(t_abs)
+        for i in 1:n_interp
+            _await_one_prefetch(interp_infos[i], ctx[i], t_dt)
+        end
+        lock(affect_cache.lock) do
             # Double-check under the lock: another thread may have just built it.
-            t_cached, nt_cached = @atomic affect_cache.entry
-            t_cached == t_abs && return nt_cached
+            nt_cached = _cached_result(affect_cache, t_abs)
+            nt_cached === nothing || return nt_cached
             if !prune_done[]
                 sys = isdefined(integ.f, :sys) ? integ.f.sys : nothing
                 if sys !== nothing && !_mask_settled(interp_infos)
@@ -728,7 +793,7 @@ function build_interp_event(interp_infos, starttime::DateTime)
             end
             # Per-interp work goes through `_update_one_interp!` to get a
             # function barrier: that's what makes `info.preloaded_buf[]`,
-            # `lazyload!(dsi, …)`, etc. dispatch statically on the concrete
+            # `lazyload_swap!(dsi, …)`, etc. dispatch statically on the concrete
             # runtime types instead of through the heterogeneous
             # `interp_infos[i]` / `ctx[i]` containers. On first fire the
             # full-grid buffer exists (`_preload_interp!` no-ops if
@@ -738,14 +803,14 @@ function build_interp_event(interp_infos, starttime::DateTime)
             # signal `data_wrappers[i] === nothing` replaces a
             # `modified[dkey]` probe whose heterogeneous-union return would
             # otherwise box.
+            swapped = false
             for i in 1:n_interp
-                _update_one_interp!(interp_infos[i], ctx[i], t_abs,
-                    data_wrappers, ts_buf, tstep_buf, i)
+                swapped |= _update_one_interp!(interp_infos[i], ctx[i], t_abs,
+                    data_wrappers, spare_bufs, ts_buf, tstep_buf, i)
             end
             nt = _build_updates_nt(live_keys_val_ref[], live_idx_val_ref[],
                 data_wrappers, ts_buf, tstep_buf)
-            @atomic affect_cache.entry = (t_abs, nt)
-            nt
+            _publish_result!(affect_cache, t_abs, nt, swapped)
         end
     end
 

@@ -588,8 +588,10 @@ end
         levrange = 1:1
     )
     fs = HysteresisCountFS(DateTime(2024, 1, 1), DateTime(2024, 1, 2))
+    # Synchronous loads only, so the read counts below are exact (prefetch is
+    # covered in prefetch_test.jl).
     itp = EarthSciData.DataSetInterpolator{Float64}(
-        fs, "X", DateTime(2024, 1, 1), DateTime(2024, 1, 2), domain)
+        fs, "X", DateTime(2024, 1, 1), DateTime(2024, 1, 2), domain; prefetch = false)
     buf = EarthSciData.make_data_buffer(itp)
 
     # Initial load at a centerpoint well inside the dataset: fills the whole
@@ -650,8 +652,10 @@ end
         levrange = 1:1
     )
     fs = HysteresisCountFS(DateTime(2024, 1, 1), DateTime(2024, 1, 2))
+    # Synchronous loads only, so the read counts below are exact (prefetch is
+    # covered in prefetch_test.jl).
     itp = EarthSciData.DataSetInterpolator{Float64}(
-        fs, "X", DateTime(2024, 1, 1), DateTime(2024, 1, 2), domain)
+        fs, "X", DateTime(2024, 1, 1), DateTime(2024, 1, 2), domain; prefetch = false)
     buf = EarthSciData.make_data_buffer(itp)
     # The first bucket has no lookback slot, so its window holds two records.
     EarthSciData.lazyload!(itp, DateTime(2024, 1, 1, 0, 10), buf)
@@ -689,7 +693,7 @@ end
     @testset "repeated lazyload! at unchanged time performs no reload" begin
         fs = HysteresisCountFS(DateTime(2024, 1, 1), DateTime(2024, 1, 2))
         itp = EarthSciData.DataSetInterpolator{Float64}(
-            fs, "X", DateTime(2024, 1, 1), DateTime(2024, 1, 2), domain)
+            fs, "X", DateTime(2024, 1, 1), DateTime(2024, 1, 2), domain; prefetch = false)
         buf = EarthSciData.make_data_buffer(itp)
         t0 = DateTime(2024, 1, 1, 6)
         EarthSciData.lazyload!(itp, t0, buf)
@@ -710,7 +714,7 @@ end
         fs = HysteresisCountFS(DateTime(2024, 1, 1), DateTime(2024, 1, 2))
         starttime = DateTime(2024, 1, 1)
         itp = EarthSciData.DataSetInterpolator{Float64}(
-            fs, "X", starttime, DateTime(2024, 1, 2), domain)
+            fs, "X", starttime, DateTime(2024, 1, 2), domain; prefetch = false)
         # Minimal interp_info (the NamedTuple shape built by
         # `create_interp_equation`), restricted to the fields the event path
         # touches.
