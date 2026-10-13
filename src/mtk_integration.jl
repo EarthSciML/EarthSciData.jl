@@ -630,7 +630,10 @@ end
 # problem init — populating the parameter buffer at `tspan[1]` before any
 # parameter query or the first RHS evaluation. This makes direct
 # `getsym(prob, ...)` return real data without having to run `solve`.
-function build_interp_event(interp_infos, starttime::DateTime)
+#
+# `validate = false` skips the tspan-coverage check, for a rebuild over
+# interpolators that were already checked (see `live_interp_event`).
+function build_interp_event(interp_infos, starttime::DateTime; validate::Bool = true)
     t_ref = datetime2unix(starttime)
 
     # Compute all time stops across all interpolators, validating that each
@@ -643,7 +646,7 @@ function build_interp_event(interp_infos, starttime::DateTime)
     # the misalignment here points at the actual problem.
     all_tstops = Float64[]
     for info in interp_infos
-        _validate_tspan_coverage(info)
+        validate && _validate_tspan_coverage(info)
         append!(all_tstops, get_tstops(info.itp, starttime))
     end
     all_tstops = unique(all_tstops) .- t_ref
@@ -828,6 +831,22 @@ function build_interp_event(interp_infos, starttime::DateTime)
     return ModelingToolkit.SymbolicDiscreteCallback(
         all_tstops, affect; initialize = affect,
         initialize_save_discretes = false)
+end
+
+# The update event for the live interpolators of `interp_infos` only, for the
+# convert-time factory to put in place of the event the loader was built with
+# once the live mask is settled.  That event lists every interpolator's
+# `data`/`tstart`/`tstep` parameters as modified, and MTK compiles the affect
+# against all of them and reads and boxes every one on each fire, although the
+# affect never writes a pruned interpolator's parameters.  The rebuild drops
+# them from `modified`, `ctx`, the per-interpolator keys and the time stops, so
+# a pruned interpolator's parameters keep their defaults as before.  Returns
+# `nothing` when every interpolator is live (the original event already covers
+# exactly the live ones) or none is (the original event loads nothing).
+function live_interp_event(interp_infos, starttime::DateTime)
+    live = filter(info -> info.live[], interp_infos)
+    (isempty(live) || length(live) == length(interp_infos)) && return nothing
+    return build_interp_event(live, starttime; validate = false)
 end
 
 """
@@ -1135,17 +1154,24 @@ two calling conventions:
     (`_apply_live_mask!`), pruning interpolators referenced neither by
     the compiled system's equations nor by `extra_needed`.
 
-Both forms return `nothing`, and EarthSciMLBase's walker filters
-`nothing` returns, so registering this factory adds no new discrete
-events to the parent system — the existing loader-attached
-`build_interp_event` callback fires as before, with the live mask
-settled by the factory (pruned in the 2-arg case, all live in the 1-arg
-case); its first-fire auto-prune does not run again.
+Both forms settle the live mask (pruned in the 2-arg case, all live in
+the 1-arg case), so the loader-attached `build_interp_event` callback's
+first-fire auto-prune does not run again.
+
+When the 2-arg form pruned something and `starttime` (the loader's
+`build_interp_event` start time) is given, the factory returns
+`EarthSciMLBase.ReplaceDiscreteEvents([ev])`, where `ev` is
+[`live_interp_event`]'s update event over the live interpolators only;
+the walker puts it in place of the loader's own event.  Otherwise, or
+when the installed EarthSciMLBase has no `ReplaceDiscreteEvents` or
+`EARTHSCIDATA_LIVE_EVENT=0` is set, it returns `nothing`, which the
+walker filters out, and the loader's own event (which skips pruned
+interpolators at run time) stays.
 [`prune_unused_interps!`](@ref) on the
 `CoupledSystem` remains the explicit operator- and callback-aware prune
 path for callers who want it.
 """
-function make_prune_factory(interp_infos)
+function make_prune_factory(interp_infos, starttime::Union{Nothing, DateTime} = nothing)
     # Backward-compatible with two `convert(System, ::CoupledSystem)` walker
     # conventions:
     #
@@ -1173,11 +1199,25 @@ function make_prune_factory(interp_infos)
     return function (parent_sys, extra_needed = nothing)
         if extra_needed === nothing  # legacy 1-arg caller: cannot prune safely
             _settle_mask!(interp_infos)
-        else
-            _apply_live_mask!(interp_infos, parent_sys; extra_needed = extra_needed)
+            return nothing
         end
-        return nothing
+        _apply_live_mask!(interp_infos, parent_sys; extra_needed = extra_needed)
+        (starttime === nothing || !_live_event_enabled()) && return nothing
+        return _replace_loader_event(live_interp_event(interp_infos, starttime))
     end
+end
+
+# The live-only event replaces the loader's own one unless `EARTHSCIDATA_LIVE_EVENT=0`;
+# read when the factory runs.
+_live_event_enabled() = get(ENV, "EARTHSCIDATA_LIVE_EVENT", "1") != "0"
+
+# What the factory returns to have EarthSciMLBase's convert-time walker put `ev`
+# in place of the loader's own update event: `nothing` (keep the loader's
+# event) when there is no replacement or the walker has no replacement hook.
+function _replace_loader_event(ev)
+    (ev === nothing || !isdefined(EarthSciMLBase, :ReplaceDiscreteEvents)) &&
+        return nothing
+    return EarthSciMLBase.ReplaceDiscreteEvents(Any[ev])
 end
 
 Latexify.@latexrecipe function f(itp::EarthSciData.DataSetInterpolator)

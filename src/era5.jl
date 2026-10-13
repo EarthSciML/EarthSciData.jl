@@ -474,7 +474,7 @@ function ERA5(
             CoupleType => ERA5Coupler,
             SysDomainInfo => domaininfo,
             InterpInfos => interp_infos,
-            SysDiscreteEvent => make_prune_factory(interp_infos)
+            SysDiscreteEvent => make_prune_factory(interp_infos, starttime)
         )
     )
     return sys

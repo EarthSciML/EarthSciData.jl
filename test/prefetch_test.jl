@@ -429,6 +429,105 @@ end
     @test length(sync_loads(fs_b)) <= 3
 end
 
+# The event rebuilt over the live interpolators (what the convert-time factory
+# puts in place of the loader's own event) must leave the same parameter values
+# in place as the event over all interpolators, at every time, although it no
+# longer fires at the time stops only a pruned interpolator had.
+@testset "live event: same buffers as the event over all interpolators" begin
+    start, finish = DateTime(2024, 1, 1), DateTime(2024, 1, 2)
+    dstart, dfinish = start + Hour(3), finish - Hour(3)
+    domain = pf_domain(dstart, dfinish)
+    t_ref = datetime2unix(dstart)
+    # PA hourly and PB 3-hourly stay live; PC (2-hourly, stops at odd hours that
+    # neither of the others has) is pruned.
+    names = (:PA, :PB, :PC)
+    freqs = (Hour(1), Hour(3), Hour(2))
+    sfx = ("_data", "_tstart", "_tstep")
+    function mkinfos(prefetch)
+        infos = Any[]
+        for (n, fr) in zip(names, freqs)
+            p = lowercase(string(n))
+            d, ts, tst = [only(@parameters $(Symbol(p, s))) for s in sfx]
+            itp = EarthSciData.DataSetInterpolator{Float64}(
+                PrefetchFS(start, finish; freq = fr), "X", dstart, dfinish, domain;
+                prefetch = prefetch)
+            push!(infos,
+                (data_sym = d, tstart_sym = ts, tstep_sym = tst, itp = itp,
+                    var_sym = n, data_eltype = Float64, live = Ref(true),
+                    preloaded_buf = Ref{Any}(nothing), mask_settled = Ref(false)))
+        end
+        infos[3].live[] = false
+        EarthSciData._settle_mask!(infos)
+        return infos
+    end
+    keys_of(n) = Tuple(Symbol(lowercase(string(n)), s) for s in sfx)
+    stops(infos) = sort(unique(vcat([EarthSciData.get_tstops(i.itp, dstart)
+                                     for i in infos]...))) .- t_ref
+    call(aff, t) = aff.f(nothing, nothing, aff.ctx, (; t = t, f = nothing))
+
+    for prefetch in (true, false)
+        @testset "prefetch = $prefetch" begin
+            full_infos, live_infos = mkinfos(prefetch), mkinfos(prefetch)
+            full = EarthSciData.build_interp_event(full_infos, dstart)
+            ev = EarthSciData.live_interp_event(live_infos, dstart)
+            @test ev isa ModelingToolkit.SymbolicDiscreteCallback
+
+            # Only PA and PB appear: modified parameters, context, keys, stops.
+            aff = ev.affect
+            @test aff.mod_syms == collect((keys_of(:PA)..., keys_of(:PB)...))
+            @test length(full.affect.mod_syms) == 9
+            @test keys(aff.ctx) == (:itp_PA, :itp_PB)
+            @test aff.ctx.itp_PA === live_infos[1].itp
+            @test getfield(aff.f, :per_interp_keys) == [keys_of(:PA), keys_of(:PB)]
+            @test sort(ev.conditions) == stops(live_infos[1:2])
+            @test sort(full.conditions) == stops(full_infos)
+            pc_only = setdiff(stops(live_infos[3:3]), stops(live_infos[1:2]))
+            @test !isempty(pc_only) && isempty(intersect(pc_only, ev.conditions))
+            @test ev.initialize === aff
+
+            # Each event fires at its own stops (and at 0, the initialize fire);
+            # at every query time the parameters each one last wrote must agree
+            # bit for bit.
+            span = datetime2unix(dfinish) - t_ref
+            fire_full = sort(filter(s -> 0 < s <= span, full.conditions))
+            fire_live = sort(filter(s -> 0 < s <= span, ev.conditions))
+            nt_full, nt_live = call(full.affect, 0.0), call(aff, 0.0)
+            identical = true
+            nchecked = 0
+            for q in 0.0:600.0:span
+                while !isempty(fire_full) && first(fire_full) <= q
+                    nt_full = call(full.affect, popfirst!(fire_full))
+                end
+                while !isempty(fire_live) && first(fire_live) <= q
+                    nt_live = call(aff, popfirst!(fire_live))
+                end
+                identical &= keys(nt_live) == keys(nt_full) ==
+                             (keys_of(:PA)..., keys_of(:PB)...)
+                for k in keys(nt_live)
+                    a, b = nt_full[k], nt_live[k]
+                    identical &= a isa EarthSciData.DataBufferType ?
+                                 a.data == b.data : a === b
+                end
+                nchecked += 1
+            end
+            @test identical
+            @test nchecked > 100
+            # The pruned interpolator was never loaded by either event.
+            @test full_infos[3].preloaded_buf[] === nothing
+            @test live_infos[3].preloaded_buf[] === nothing
+            @test !full_infos[3].itp.cache.initialized
+            @test !live_infos[3].itp.cache.initialized
+            foreach(i -> wait_prefetch(i.itp), vcat(full_infos, live_infos))
+        end
+    end
+
+    # Nothing to rebuild when every interpolator is live, or none is.
+    infos = mkinfos(false)
+    @test EarthSciData.live_interp_event(infos[1:2], dstart) === nothing
+    foreach(i -> i.live[] = false, infos)
+    @test EarthSciData.live_interp_event(infos, dstart) === nothing
+end
+
 # Real data: GEOS-FP (A1 hourly, A3dyn 3-hourly averages, I3 3-hourly
 # instantaneous) and NEI 2016 monthly emissions. Prefetched windows must equal
 # synchronously loaded ones bit for bit across consecutive data times.

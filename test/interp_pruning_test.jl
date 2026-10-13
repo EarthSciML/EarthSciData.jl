@@ -473,6 +473,14 @@ end
     @test all(info_for(n).live[] for n in kept)
     @test !any(info_for(n).live[] for n in dropped)
     @test all(i.mask_settled[] for i in infos)
+    # With EarthSciMLBase's `ReplaceDiscreteEvents` hook the factory's rebuilt
+    # event takes the place of ERA5's own, so the converted system's event
+    # modifies only the kept interpolators' parameters.
+    nmod = length([v for ev in ModelingToolkit.discrete_events(parent)
+                   for v in ev.affect.modified])
+    nlisted = isdefined(EarthSciMLBase, :ReplaceDiscreteEvents) ? length(kept) :
+              length(infos)
+    @test nmod == 3 * nlisted
 
     ps = parameters(parent)
     coords = (("₊lat", deg2rad(35.0)), ("₊lon", deg2rad(-90.0)), ("₊lev", 1.0))
@@ -508,4 +516,129 @@ end
     unused = mtkcompile(System([Du(X4) ~ 0], tu; name = :unused))
     @test EarthSciData._apply_live_mask!(infos, unused) ==
           fixpoint_is_needed(infos, unused) == falses(length(infos))
+end
+
+struct LiveEventCoupler
+    sys::Any
+end
+function EarthSciMLBase.couple2(m::LiveEventCoupler, e::EarthSciData.ERA5Coupler)
+    m, e = m.sys, e.sys
+    ConnectorSystem([m.Tc ~ e.pl₊t, m.Qc ~ e.pl₊q], m, e)
+end
+
+# The convert-time factory's 2-arg path returns the update event rebuilt over the
+# live interpolators, to replace the loader's own event.  Put in place of it, the
+# rebuilt event must compile in a composed system (its parameters are namespaced
+# with the loader) and give the same solution as the loader's own event.
+@testset "Live event: replaces the loader's event with the same solution" begin
+    tu = ModelingToolkit.t
+    Du = ModelingToolkit.D
+    era5_vars = Dict(
+        "t" => ("K", "Temperature", 260.0, 300.0),
+        "q" => ("kg kg**-1", "Specific humidity", 0.0, 0.02),
+        "u" => ("m s**-1", "U component of wind", -15.0, 15.0)
+    )
+    era5_dir = write_era5_fixture(mktempdir(), era5_vars)
+    starttime = DateTime(2022, 1, 1)
+    domain = DomainInfo(
+        starttime, DateTime(2022, 1, 2);
+        latrange = deg2rad(20.0f0):deg2rad(2.0):deg2rad(50.0f0),
+        lonrange = deg2rad(-130.0f0):deg2rad(2.0):deg2rad(-60.0f0),
+        levrange = 1:4
+    )
+    hook = isdefined(EarthSciMLBase, :ReplaceDiscreteEvents)
+    with_events(sys, evs) = ModelingToolkit.Setfield.@set sys.discrete_events = evs
+    modified_syms(sys) = [string(EarthSciMLBase.var2symbol(v))
+                          for ev in ModelingToolkit.discrete_events(sys)
+                          for v in ev.affect.modified]
+    # t and q are used, u is not.
+    used(infos) = [i.var_sym != Symbol("pl₊u") for i in infos]
+    coords = (("₊lat", deg2rad(35.0)), ("₊lon", deg2rad(-90.0)), ("₊lev", 1.0))
+    coord_vals(sys) = [p => v for (suffix, v) in coords
+                       for p in parameters(sys) if endswith(string(Symbol(p)), suffix)]
+
+    # `mode`: `:own` keeps the loader's event after the 2-arg prune, `:live`
+    # replaces it with the factory's rebuilt event, `:legacy` runs the 1-arg
+    # (no-prune) factory call.
+    function build_and_solve(mode)
+        era5 = ERA5(domain; mirror = "file://$(era5_dir)", variables = ["t", "q", "u"])
+        infos = ModelingToolkit.getmetadata(era5, EarthSciData.InterpInfos, nothing)
+        @variables C1(tu) = 0.0 [unit = u"K*s"] C2(tu) = 0.0 [unit = u"s"]
+        state = System([Du(C1) ~ era5.pl₊t, Du(C2) ~ era5.pl₊q], tu, [C1, C2], [];
+            name = :live_state)
+        parent = mtkcompile(compose(state, era5))
+        f = ModelingToolkit.getmetadata(era5, EarthSciMLBase.SysDiscreteEvent, nothing)
+        if mode === :legacy
+            @test f(parent) === nothing
+            @test all(i.live[] for i in infos)
+        else
+            r = f(parent, Any[])
+            @test [i.live[] for i in infos] == used(infos)
+            ev = EarthSciData.live_interp_event(infos, starttime)
+            @test ev isa ModelingToolkit.SymbolicDiscreteCallback
+            if hook
+                @test r isa EarthSciMLBase.ReplaceDiscreteEvents
+                ev = only(r.events)
+            else
+                @test r === nothing
+            end
+            mode === :live && (era5 = with_events(era5, [ev]))
+        end
+        sys = mtkcompile(compose(state, era5))
+        sol = solve(ODEProblem(sys, coord_vals(sys), (0.0, 86400.0)), Tsit5();
+            saveat = 3600.0)
+        return sol, sys, infos
+    end
+
+    sol_own, sys_own, infos_own = build_and_solve(:own)
+    sol_live, sys_live, infos_live = build_and_solve(:live)
+    sol_leg, sys_leg, infos_leg = build_and_solve(:legacy)
+    @test ModelingToolkit.SciMLBase.successful_retcode(sol_own)
+    @test ModelingToolkit.SciMLBase.successful_retcode(sol_live)
+    @test ModelingToolkit.SciMLBase.successful_retcode(sol_leg)
+
+    # The compiled event lists only the live interpolators' parameters, with the
+    # loader's namespace.
+    live_syms = ["ERA5₊pl₊$(v)_$(s)" for v in ("t", "q")
+                 for s in ("data", "tstart", "tstep")]
+    @test sort(modified_syms(sys_live)) == sort(live_syms)
+    @test length(modified_syms(sys_own)) == 9
+    @test length(modified_syms(sys_leg)) == 9
+
+    # Same solution, and the interpolators that were loaded: t and q, never u.
+    @test sol_live.t == sol_own.t
+    @test sol_live.u == sol_own.u
+    @test sol_leg.u == sol_own.u
+    loaded(infos) = [i.itp.cache.initialized for i in infos]
+    @test loaded(infos_live) == loaded(infos_own) == used(infos_live)
+    @test all(loaded(infos_leg))
+    @test maximum(abs, sol_live.u[end]) > 0
+
+    # Through `couple` → `convert`: with EarthSciMLBase's replace hook the
+    # converted system carries the rebuilt event, unless
+    # `EARTHSCIDATA_LIVE_EVENT=0`; the solution is the same either way.
+    function convert_and_solve(live_event)
+        era5 = ERA5(domain; mirror = "file://$(era5_dir)", variables = ["t", "q", "u"])
+        infos = ModelingToolkit.getmetadata(era5, EarthSciData.InterpInfos, nothing)
+        @variables C1(tu) = 0.0 [unit = u"K*s"] C2(tu) = 0.0 [unit = u"s"] Tc(tu) [
+            unit = u"K"] Qc(tu)
+        model = System([Du(C1) ~ Tc, Du(C2) ~ Qc], tu, [C1, C2, Tc, Qc], [];
+            name = :LiveEvent,
+            metadata = Dict(EarthSciMLBase.CoupleType => LiveEventCoupler))
+        parent = withenv("EARTHSCIDATA_LIVE_EVENT" => live_event ? nothing : "0") do
+            convert(System, couple(model, era5, domain))
+        end
+        @test [i.live[] for i in infos] == used(infos)
+        sol = solve(ODEProblem(parent, coord_vals(parent), (0.0, 86400.0)), Tsit5();
+            saveat = 3600.0)
+        return sol, parent
+    end
+    sol_conv, parent_conv = convert_and_solve(true)
+    sol_off, parent_off = convert_and_solve(false)
+    @test ModelingToolkit.SciMLBase.successful_retcode(sol_conv)
+    @test length(modified_syms(parent_conv)) == (hook ? 6 : 9)
+    @test length(modified_syms(parent_off)) == 9
+    @test sol_conv.t == sol_off.t
+    @test sol_conv.u == sol_off.u
+    @test maximum(abs, sol_conv.u[end]) > 0
 end

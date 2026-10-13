@@ -796,7 +796,7 @@ function NEI2016MonthlyEmis(
         metadata = Dict(CoupleType => NEI2016MonthlyEmisCoupler,
             SysDomainInfo => domaininfo,
             InterpInfos => interp_infos,
-            SysDiscreteEvent => make_prune_factory(interp_infos))
+            SysDiscreteEvent => make_prune_factory(interp_infos, starttime))
     )
     return sys
 end

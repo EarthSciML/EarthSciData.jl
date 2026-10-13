@@ -334,7 +334,7 @@ function EDGARv81MonthlyEmis(
         metadata = Dict(CoupleType => EDGARv81MonthlyEmisCoupler,
             SysDomainInfo => domaininfo,
             InterpInfos => interp_infos,
-            SysDiscreteEvent => make_prune_factory(interp_infos))
+            SysDiscreteEvent => make_prune_factory(interp_infos, starttime))
     )
     return sys
 end
