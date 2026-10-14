@@ -174,11 +174,13 @@ DataFrequencyInfo(fs::GEOSFPFileSet)::DataFrequencyInfo = fs.freq_info
 """
 $(SIGNATURES)
 
-Load the data in place for the given variable name at the given time.
+Load the data in place for the given variable name at the given time; with
+`box` (one index range per spatial dimension), only that part of the grid.
 """
-function loadslice!(data::AbstractArray, fs::GEOSFPFileSet, t::DateTime, varname)
+function loadslice!(data::AbstractArray, fs::GEOSFPFileSet, t::DateTime, varname,
+        box = nothing)
     lock(nclock) do
-        var = loadslice!(data, fs, fs.ds, t, varname, "time") # Load data from NetCDF file.
+        var = loadslice!(data, fs, fs.ds, t, varname, "time", box) # Load data from NetCDF file.
 
         scale, _ = to_unit(var.attrib["units"])
         if scale != 1
@@ -187,6 +189,8 @@ function loadslice!(data::AbstractArray, fs::GEOSFPFileSet, t::DateTime, varname
     end
     nothing
 end
+
+supports_subset_reads(::GEOSFPFileSet) = true
 
 """
 $(SIGNATURES)

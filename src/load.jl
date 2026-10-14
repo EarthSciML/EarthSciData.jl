@@ -58,6 +58,11 @@ To satisfy this interface, a type must implement the following methods:
   - `loadslice!(cache::AbstractArray, ::FileSet, ::DateTime, varname)`
   - `varnames(::FileSet)`
   - `get_geometry(::FileSet, ::MetaData)` (Returns the geometry of the data)
+
+Optionally, to read only the part of the grid a domain needs:
+
+  - `supports_subset_reads(::FileSet) = true`
+  - `loadslice!(cache::AbstractArray, ::FileSet, ::DateTime, varname, box)` (`box` holds one index range per spatial dimension)
 """
 abstract type FileSet end
 
@@ -450,6 +455,10 @@ the interpolator. `spatial_ref` is the spatial reference system that the simulat
 When streaming, `prefetch` (default: on unless the environment variable
 `EARTHSCIDATA_PREFETCH` is `0`) loads the record after the cached window in a
 background task, so moving the window forward copies it in instead of reading it.
+`subset_reads` (default: on unless the environment variable
+`EARTHSCIDATA_SUBSET_READS` is `0`) reads only the index box of the native grid
+that the domain needs, for file sets that support it and the default regridder
+(see `_read_box`).
 """
 mutable struct DataSetInterpolator{To, N, N2, FT, DomT, ET, FS, RG}
     fs::FS
@@ -488,23 +497,29 @@ mutable struct DataSetInterpolator{To, N, N2, FT, DomT, ET, FS, RG}
     End of the period the interpolator was built for; records past the first one at or after it are not prefetched.
     """
     endtime::DateTime
+    """
+    Index range read along each spatial dimension of the native grid, or `nothing` to read the full grid (see `_read_box`).
+    """
+    read_box::Union{Nothing, NTuple{N2, UnitRange{Int}}}
 
     function DataSetInterpolator{To}(fs::FileSet, varname::AbstractString,
             starttime::DateTime, endtime::DateTime, domain;
             stream = true, extrapolate_type = Flat(),
-            regrid_f = nothing, prefetch::Bool = _prefetch_default()) where {To <: Real}
+            regrid_f = nothing, prefetch::Bool = _prefetch_default(),
+            subset_reads::Bool = _subset_reads_default()) where {To <: Real}
         metadata = loadmetadata(fs, varname)
 
         # Default regridder: BSpline interpolation onto the (possibly
         # staggered) model grid.  Callers that need conservative or
-        # nearest-neighbour regridding pass `regrid_f` explicitly.
+        # nearest-neighbour regridding pass `regrid_f` explicitly.  Only the
+        # default regridder knows how to read a boxed source.
+        box = nothing
         rg = if regrid_f === nothing
             model_grid = _compute_grid(domain, metadata.staggering)
-            (dst::AbstractArray, src::AbstractArray;
-                extrapolate_type = extrapolate_type) -> begin
-                interpolate_from!(dst, src, metadata, model_grid, domain;
-                    extrapolate_type = extrapolate_type)
+            if subset_reads && supports_subset_reads(fs)
+                box = _read_box(metadata, model_grid, domain)
             end
+            _default_regridder(metadata, model_grid, domain, extrapolate_type, box)
         else
             regrid_f
         end
@@ -563,7 +578,8 @@ mutable struct DataSetInterpolator{To, N, N2, FT, DomT, ET, FS, RG}
             grid_size,
             cache_size,
             prefetch && stream,
-            endtime
+            endtime,
+            box
         )
         itp
     end
@@ -571,6 +587,106 @@ end
 
 # Background prefetch is on unless `EARTHSCIDATA_PREFETCH=0`; read when an interpolator is built.
 _prefetch_default() = get(ENV, "EARTHSCIDATA_PREFETCH", "1") != "0"
+
+# The default regridder: interpolation of a full-grid or boxed source onto the
+# model grid. A function barrier, so the closure's fields are concretely typed.
+function _default_regridder(metadata, model_grid, domain, extrapolate_type, box)
+    (dst::AbstractArray, src::AbstractArray;
+        extrapolate_type = extrapolate_type) -> begin
+        interpolate_from!(dst, src, metadata, model_grid, domain;
+            extrapolate_type = extrapolate_type, box = box)
+    end
+end
+
+# Subset reads are on unless `EARTHSCIDATA_SUBSET_READS=0`; read when an interpolator is built.
+_subset_reads_default() = get(ENV, "EARTHSCIDATA_SUBSET_READS", "1") != "0"
+
+"""
+Whether `loadslice!(data, fs, t, varname, box)` can read only the index box
+`box` (one `UnitRange` per spatial dimension) of a variable. File sets that
+return `true` must implement that 5-argument method.
+"""
+supports_subset_reads(::FileSet) = false
+
+"""
+The index box of the native grid that regridding onto `model_grid` reads, plus
+one native cell on each side, or `nothing` when that box is the whole grid or
+the variable's layout is not one `interpolate_from!` handles.
+
+Along each spatial dimension the box runs from the lower corner the interpolant
+uses for the smallest query to the upper corner it uses for the largest one,
+using the same index mapping as `_build_regrid_interp` (scaled range if every
+axis is uniform, knot search otherwise). Queries outside the native grid are
+clamped (`Flat`) or filled without reading, so they need no special case: the
+box then reaches the grid edge on that side. A domain that straddles the edge
+of the native longitude range (e.g. the dateline on a -180..180 grid) gets the
+whole range along that axis, which is still exact.
+"""
+function _read_box(metadata::MetaData, model_grid, domain)
+    N2 = length(metadata.varsize)
+    (N2 == 3 && metadata.zdim > 0) || (N2 == 2 && metadata.zdim <= 0) || return nothing
+    # `_pad_singletons` copies the whole source along singleton dimensions.
+    any(n -> n < 2, metadata.varsize) && return nothing
+    all(issorted, metadata.coords) || return nothing
+    ext = _query_extent(metadata, model_grid, domain)
+    ext === nothing && return nothing
+    uniform = all(c -> isuniform(c), metadata.coords)
+    box = ntuple(N2) do d
+        c = metadata.coords[d]
+        n = length(c)
+        lo, hi = ext[d]
+        max(1, _lower_corner(c, lo, uniform) - 1):min(n, _lower_corner(c, hi, uniform) + 2)
+    end
+    all(d -> length(box[d]) == metadata.varsize[d], 1:N2) && return nothing
+    return box
+end
+
+# Index of the lower of the two native points that linear interpolation along
+# axis `c` weights for a query at `x`.
+function _lower_corner(c, x::Float64, uniform::Bool)
+    n = length(c)
+    i = if uniform
+        r = knots2range(c)
+        floor(Int, clamp((x - first(r)) / step(r) + 1, 1.0, Float64(n)))
+    else
+        searchsortedfirst(c, x) - 1
+    end
+    clamp(i, 1, n - 1)
+end
+
+# Smallest and largest native coordinate along each spatial dimension (in data
+# dimension order) at which `interpolate_from!` evaluates the interpolant, or
+# `nothing` if a model grid point does not map to a finite native coordinate.
+function _query_extent(metadata::MetaData, model_grid, domain)
+    N2 = length(metadata.varsize)
+    xd, yd, zd = metadata.xdim, metadata.ydim, metadata.zdim
+    ext = Vector{NTuple{2, Float64}}(undef, N2)
+    if N2 == 3
+        ext[zd] = Float64.(extrema(model_grid[3]))
+    end
+    xs, ys = model_grid[1], model_grid[2]
+    if _spatial_ref(domain) == metadata.native_sr
+        ext[xd] = Float64.(extrema(xs))
+        ext[yd] = Float64.(extrema(ys))
+    else
+        ct = coord_trans(metadata, domain)
+        z0 = N2 == 3 ? first(model_grid[3]) : nothing
+        xlo, xhi, ylo, yhi = Inf, -Inf, Inf, -Inf
+        for x in xs, y in ys
+
+            locs = N2 == 3 ? ct(tuple_from_vals(xd, x, yd, y, zd, z0)) :
+                   ct(tuple_from_vals(xd, x, yd, y))
+            u, v = Float64(locs[xd]), Float64(locs[yd])
+            (isfinite(u) && isfinite(v)) || return nothing
+            xlo, xhi = min(xlo, u), max(xhi, u)
+            ylo, yhi = min(ylo, v), max(yhi, v)
+        end
+        ext[xd] = (xlo, xhi)
+        ext[yd] = (ylo, yhi)
+    end
+    all(e -> all(isfinite, e), ext) || return nothing
+    return Tuple(ext)
+end
 
 function replace_in_tuple(t::NTuple{N, T1}, index1::Int, v1::T2,
         index2::Int, v2::T2) where {T1, T2, N}
@@ -734,7 +850,9 @@ end
 
 function initialize!(itp::DataSetInterpolator, t::DateTime, target::AbstractArray)
     tc = itp.cache
-    tc.load_cache = zeros(eltype(tc.load_cache), itp.metadata.varsize...)
+    box = itp.read_box
+    tc.load_cache = zeros(eltype(tc.load_cache),
+        (box === nothing ? itp.metadata.varsize : length.(box))...)
     # Cross-device runs need a CPU staging array because the regridder writes
     # element-by-element via scalar indexing, which `CuArray` etc. don't
     # support.  CPU runs reuse `target` directly — `regrid_target_for` returns
@@ -754,7 +872,12 @@ end
 end
 
 function load_data_for_time!(itp::DataSetInterpolator, t::DateTime)
-    loadslice!(itp.cache.load_cache, itp.fs, t, itp.varname)
+    box = itp.read_box
+    if box === nothing
+        loadslice!(itp.cache.load_cache, itp.fs, t, itp.varname)
+    else
+        loadslice!(itp.cache.load_cache, itp.fs, t, itp.varname, box)
+    end
     return t
 end
 

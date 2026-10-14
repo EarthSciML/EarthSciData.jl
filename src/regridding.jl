@@ -69,13 +69,48 @@ function regrid_horizontal!(dst_field, regridder::ConservativeRegridding.Regridd
 end
 
 """
+The full native grid of a variable of which only the index box `box` was read
+into `data`. Regridding through it keeps the full-grid interpolant (knots,
+uniform-or-gridded path, extrapolation bounds), so the regridded values equal
+those of a full read bit for bit. The box must hold every grid point the
+interpolant reads; reading outside it throws.
+"""
+struct _BoxedArray{T, N, A <: AbstractArray{T, N}} <: AbstractArray{T, N}
+    data::A
+    offsets::NTuple{N, Int}
+    size::NTuple{N, Int}
+end
+function _BoxedArray(data::AbstractArray{T, N}, box::NTuple{N, UnitRange{Int}},
+        fullsize::NTuple{N, Int}) where {T, N}
+    size(data) == length.(box) || throw(DimensionMismatch(
+        "Data of size $(size(data)) does not fill the read box $box."))
+    _BoxedArray(data, first.(box) .- 1, fullsize)
+end
+Base.size(b::_BoxedArray) = b.size
+Base.IndexStyle(::Type{<:_BoxedArray}) = IndexCartesian()
+# Interpolations reads `first(A)` only to infer its element type.
+Base.first(b::_BoxedArray) = first(b.data)
+@inline function Base.getindex(b::_BoxedArray{T, N}, I::Vararg{Int, N}) where {T, N}
+    J = I .- b.offsets
+    checkbounds(Bool, b.data, J...) || _throw_outside_box(b, I)
+    @inbounds b.data[J...]
+end
+@noinline _throw_outside_box(b, I) = throw(BoundsError(
+    "Grid point $I lies outside the read box $(map((o, n) -> (o + 1):(o + n), b.offsets, size(b.data))); the box must cover every point the regridder reads."))
+
+"""
 Build the source-grid interpolator for regridding. Uniform axes take the fast
 scaled-BSpline path; any non-uniform axis (e.g. the GEOS-FP half-polar latitude
 grid, spacings {0.1875, 0.25} deg) switches to `Gridded` interpolation on the
 true knots. Forcing a uniform range onto that axis displaced every met field
 poleward by up to ~4 km and blended 7-14% with the neighbouring native row.
+With `box`, `src` holds only that index box of the grid (see `_BoxedArray`).
 """
-function _build_regrid_interp(src, coords, extrapolate_type, degree = Linear())
+function _build_regrid_interp(src, coords, extrapolate_type, degree = Linear();
+        box = nothing)
+    if box !== nothing
+        src = _BoxedArray(src, box, Tuple(length.(coords)))
+    end
     if all(c -> isuniform(c), coords)
         data_grid = Tuple(knots2range.(coords))
         padded_src, padded_grid = _pad_singletons(src, data_grid)
@@ -84,16 +119,27 @@ function _build_regrid_interp(src, coords, extrapolate_type, degree = Linear())
     else
         knots = Tuple(collect(Float64, c) for c in coords)
         padded_src, padded_knots = _pad_singletons(src, knots)
-        return extrapolate(
-            interpolate(padded_knots, padded_src, Gridded(degree)), extrapolate_type)
+        # `interpolate` copies its input, which for a boxed source would
+        # allocate the full grid; the boxed source is only read here.
+        itp0 = box === nothing ? interpolate(padded_knots, padded_src, Gridded(degree)) :
+               interpolate!(padded_knots, padded_src, Gridded(degree))
+        return extrapolate(itp0, extrapolate_type)
     end
 end
 
 function interpolate_from!(dst::AbstractArray{T, N},
         src::AbstractArray{T, N}, mta::MetaData, model_grid, domain;
-        extrapolate_type = Flat()) where {T, N}
-    itp = _build_regrid_interp(src, mta.coords, extrapolate_type)
+        extrapolate_type = Flat(), box = nothing) where {T, N}
+    itp = _build_regrid_interp(src, mta.coords, extrapolate_type; box = box)
     ct = coord_trans(mta, domain)
+    _interpolate_points!(dst, itp, ct, mta, model_grid)
+end
+
+# The point loop of `interpolate_from!`, behind a function barrier: the
+# interpolant's type depends on the grid (uniform or gridded, boxed or not),
+# so without it every point would be evaluated through dynamic dispatch.
+function _interpolate_points!(dst::AbstractArray{T, N}, itp, ct, mta::MetaData,
+        model_grid) where {T, N}
     if N == 3
         for (i, x) in enumerate(model_grid[1])
             for (j, y) in enumerate(model_grid[2])

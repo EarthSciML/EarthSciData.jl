@@ -14,6 +14,7 @@ const TEST_FILES = [
     "regridding.jl",
     "load_test.jl",
     "prefetch_test.jl",
+    "subset_reads_test.jl",
     "netcdf_output_test.jl",
     "solve_test.jl",
     "ceds_test.jl",
