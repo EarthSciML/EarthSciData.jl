@@ -37,6 +37,14 @@ function EarthSciMLBase.couple2(e::NEI2016MonthlyEmisCoupler, g::GEOSFPCoupler)
     _couple_emis_to_met(e, g)
 end
 
+# NEI inline (elevated point sources, #211) + GEOSFP / ERA5
+function EarthSciMLBase.couple2(e::NEI2016InlineEmisCoupler, g::GEOSFPCoupler)
+    _couple_emis_to_met(e, g)
+end
+function EarthSciMLBase.couple2(e::NEI2016InlineEmisCoupler, g::ERA5Coupler)
+    _couple_emis_to_met(e, g)
+end
+
 # EDGAR + GEOSFP
 function EarthSciMLBase.couple2(e::EDGARv81MonthlyEmisCoupler, g::GEOSFPCoupler)
     _couple_emis_to_met(e, g)

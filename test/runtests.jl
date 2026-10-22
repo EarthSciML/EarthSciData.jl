@@ -18,6 +18,7 @@ const TEST_FILES = [
     "ceds_test.jl",
     "edgar_v81_monthly_test.jl",
     "nei2016monthly_test.jl",
+    "nei2016_inline_test.jl",
     "openaq_test.jl",
     "geosfp_test.jl",
     "era5_test.jl",
