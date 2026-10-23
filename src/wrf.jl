@@ -297,7 +297,7 @@ function WRF(domaininfo::DomainInfo; name = :WRF, stream = true,
         metadata = Dict(CoupleType => WRFCoupler,
             SysDomainInfo => domaininfo,
             InterpInfos => interp_infos,
-            SysDiscreteEvent => make_prune_factory(interp_infos))
+            SysDiscreteEvent => make_prune_factory(interp_infos, starttime))
     )
     return sys
 end

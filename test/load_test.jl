@@ -588,8 +588,10 @@ end
         levrange = 1:1
     )
     fs = HysteresisCountFS(DateTime(2024, 1, 1), DateTime(2024, 1, 2))
+    # Synchronous loads only, so the read counts below are exact (prefetch is
+    # covered in prefetch_test.jl).
     itp = EarthSciData.DataSetInterpolator{Float64}(
-        fs, "X", DateTime(2024, 1, 1), DateTime(2024, 1, 2), domain)
+        fs, "X", DateTime(2024, 1, 1), DateTime(2024, 1, 2), domain; prefetch = false)
     buf = EarthSciData.make_data_buffer(itp)
 
     # Initial load at a centerpoint well inside the dataset: fills the whole
@@ -642,6 +644,38 @@ end
           [DateTime(2024, 1, 1, 5), DateTime(2024, 1, 1, 6), DateTime(2024, 1, 1, 7)]
 end
 
+@testset "3-slot window keeps its size after a dataset end" begin
+    domain = DomainInfo(
+        DateTime(2024, 1, 1), DateTime(2024, 1, 2);
+        lonrange = deg2rad(0.0):deg2rad(1.0):deg2rad(1.0),
+        latrange = deg2rad(0.0):deg2rad(1.0):deg2rad(1.0),
+        levrange = 1:1
+    )
+    fs = HysteresisCountFS(DateTime(2024, 1, 1), DateTime(2024, 1, 2))
+    # Synchronous loads only, so the read counts below are exact (prefetch is
+    # covered in prefetch_test.jl).
+    itp = EarthSciData.DataSetInterpolator{Float64}(
+        fs, "X", DateTime(2024, 1, 1), DateTime(2024, 1, 2), domain; prefetch = false)
+    buf = EarthSciData.make_data_buffer(itp)
+    # The first bucket has no lookback slot, so its window holds two records.
+    EarthSciData.lazyload!(itp, DateTime(2024, 1, 1, 0, 10), buf)
+    @test itp.cache.times == [DateTime(2024, 1, 1, 0), DateTime(2024, 1, 1, 1)]
+    # Later windows must regain the lookback slot...
+    EarthSciData.lazyload!(itp, DateTime(2024, 1, 1, 6), buf)
+    @test itp.cache.times ==
+          [DateTime(2024, 1, 1, 5), DateTime(2024, 1, 1, 6), DateTime(2024, 1, 1, 7)]
+    # ...so a dip into the first half of the anchor bucket is covered without a reload.
+    n = fs.nloads[]
+    t_dip = DateTime(2024, 1, 1, 5, 40)
+    EarthSciData.lazyload!(itp, t_dip, buf)
+    @test fs.nloads[] == n
+    @test itp.cache.times[begin] <= t_dip < itp.cache.times[end]
+    v5 = _hcfs_tv(fs, DateTime(2024, 1, 1, 5))
+    v6 = _hcfs_tv(fs, DateTime(2024, 1, 1, 6))
+    @test EarthSciData.interp_unsafe(itp, buf, t_dip, itp.grid_starts[1],
+        itp.grid_starts[2]) ≈ v5 + (40 / 60) * (v6 - v5)
+end
+
 # ---------------------------------------------------------------------------
 # Guard tests for the lock-free `lazyload!` fast path and the interp-event
 # affect NamedTuple cache (keyed by t_abs). Offline: reuses the counting
@@ -659,7 +693,7 @@ end
     @testset "repeated lazyload! at unchanged time performs no reload" begin
         fs = HysteresisCountFS(DateTime(2024, 1, 1), DateTime(2024, 1, 2))
         itp = EarthSciData.DataSetInterpolator{Float64}(
-            fs, "X", DateTime(2024, 1, 1), DateTime(2024, 1, 2), domain)
+            fs, "X", DateTime(2024, 1, 1), DateTime(2024, 1, 2), domain; prefetch = false)
         buf = EarthSciData.make_data_buffer(itp)
         t0 = DateTime(2024, 1, 1, 6)
         EarthSciData.lazyload!(itp, t0, buf)
@@ -680,7 +714,7 @@ end
         fs = HysteresisCountFS(DateTime(2024, 1, 1), DateTime(2024, 1, 2))
         starttime = DateTime(2024, 1, 1)
         itp = EarthSciData.DataSetInterpolator{Float64}(
-            fs, "X", starttime, DateTime(2024, 1, 2), domain)
+            fs, "X", starttime, DateTime(2024, 1, 2), domain; prefetch = false)
         # Minimal interp_info (the NamedTuple shape built by
         # `create_interp_equation`), restricted to the fields the event path
         # touches.
@@ -710,5 +744,74 @@ end
         @test nt3 isa NamedTuple
         @test nt3 !== nt2
         @test fs.nloads[] > nloads1
+    end
+end
+
+# ---------------------------------------------------------------------------
+# Unevenly spaced records (monthly data): the 3-slot window spans two
+# intervals of different lengths, so one (t_start, t_step) pair cannot map
+# both exactly. The parameters must map the interval containing the query.
+# ---------------------------------------------------------------------------
+
+struct MonthlyCountFS <: EarthSciData.FileSet
+    start::DateTime
+    finish::DateTime
+end
+
+function EarthSciData.DataFrequencyInfo(fs::MonthlyCountFS)::EarthSciData.DataFrequencyInfo
+    starts = collect(fs.start:Month(1):(fs.finish - Month(1)))
+    centerpoints = [t + (t + Month(1) - t) / 2 for t in starts]
+    EarthSciData.DataFrequencyInfo(fs.start, Month(1), centerpoints)
+end
+_mcfs_tv(t) = Dates.value(t - DateTime(2024, 1, 1)) / 86_400_000
+function EarthSciData.loadslice!(cache::AbstractArray, fs::MonthlyCountFS, t::DateTime, varname)
+    dfi = EarthSciData.DataFrequencyInfo(fs)
+    fill!(cache, _mcfs_tv(dfi.centerpoints[EarthSciData.centerpoint_index(dfi, t)]))
+end
+function EarthSciData.loadmetadata(fs::MonthlyCountFS, varname)
+    EarthSciData.MetaData(
+        [[0.0, 1.0], [0.0, 1.0]],
+        "m", "test", ["x", "y"], [2, 2],
+        "+proj=longlat +datum=WGS84 +no_defs", 1, 2, -1, (false, false, false)
+    )
+end
+
+@testset "unevenly spaced records interpolate exactly in time" begin
+    # Domain inside the first and last monthly centerpoints, as the data event requires.
+    starttime, endtime = DateTime(2024, 1, 20), DateTime(2024, 6, 10)
+    domain = DomainInfo(starttime, endtime;
+        lonrange = deg2rad(0.0):deg2rad(1.0):deg2rad(1.0),
+        latrange = deg2rad(0.0):deg2rad(1.0):deg2rad(1.0),
+        levrange = 1:1)
+    fs = MonthlyCountFS(DateTime(2024, 1, 1), DateTime(2024, 7, 1))
+    itp = EarthSciData.DataSetInterpolator{Float64}(fs, "X", starttime, endtime, domain)
+    buf = EarthSciData.make_data_buffer(itp)
+    cps = EarthSciData.DataFrequencyInfo(fs).centerpoints
+    # The field equals days since 2024-01-01 at each centerpoint, so the exact
+    # linear interpolant in time is days since 2024-01-01 itself.
+    exact(t) = _mcfs_tv(t)
+    # February (29 days) sits between two 31-day months.
+    for t in (cps[2], cps[2] + Day(5), cps[3] - Hour(1), cps[3], cps[3] + Day(10),
+        cps[2] + Day(20), DateTime(2024, 3, 1), DateTime(2024, 4, 20, 7))
+        EarthSciData.lazyload!(itp, t, buf)
+        @test length(itp.cache.times) == 3
+        v = EarthSciData.interp_unsafe(itp, buf, t, itp.grid_starts[1], itp.grid_starts[2])
+        @test v ≈ exact(t) rtol = 1e-12
+    end
+
+    # The interp-event path records the same exact (t_start, t_step).
+    @parameters mfx_data mfx_tstart mfx_tstep
+    itp2 = EarthSciData.DataSetInterpolator{Float64}(fs, "X", starttime, endtime, domain)
+    info = (data_sym = mfx_data, tstart_sym = mfx_tstart, tstep_sym = mfx_tstep,
+        itp = itp2, var_sym = :MFX, data_eltype = Float64, live = Ref(true),
+        preloaded_buf = Ref{Any}(nothing))
+    aff = EarthSciData.build_interp_event([info], starttime).affect
+    for t in (cps[2] + Day(3), cps[3] + Day(1), cps[3] - Hour(2))
+        tsec = datetime2unix(t) - datetime2unix(starttime)
+        nt = aff.f(nothing, nothing, aff.ctx, (; t = tsec, f = nothing))
+        times = itp2.cache.times
+        j = searchsortedlast(times, t)
+        fit = 1 + (datetime2unix(t) - nt.mfx_tstart) / nt.mfx_tstep
+        @test fit ≈ j + (t - times[j]) / (times[j + 1] - times[j]) rtol = 1e-12
     end
 end

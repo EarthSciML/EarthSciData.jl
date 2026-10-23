@@ -151,13 +151,50 @@ Returns `(equation, discretes, constants, interp_info)` where:
   - `constants`: vector of constant symbolic variables [spatial grid params..., extrap, unit_scale]
   - `interp_info`: named tuple with all symbolic pieces needed to build interpolation expressions
 """
-function create_interp_equation(itp::DataSetInterpolator{To}, filename, t, t_ref, coords;
-        wrapper_f = v -> v, spatial_interp::Symbol = :linear) where {To}
-    spatial_interp in (:linear, :nearest) ||
-        throw(ArgumentError("spatial_interp must be :linear or :nearest, got $spatial_interp"))
-
+function create_interp_equation(itp::DataSetInterpolator, filename, t, t_ref, coords;
+        wrapper_f = v -> v, spatial_interp::Symbol = :linear)
     n = length(filename) > 0 ? Symbol("$(filename)₊$(itp.varname)") :
         Symbol("$(itp.varname)")
+
+    discretes, constants, interp_info = create_interp_info(itp, n, coords;
+        spatial_interp = spatial_interp)
+
+    # Single source of truth for the interp formula.
+    rhs = wrapper_f(build_interp_expr(interp_info, t_ref + t, coords))
+
+    # Create left hand side of equation.
+    desc = description(itp)
+    uu_rhs = ModelingToolkit.get_unit(rhs)
+    lhs = only(
+        @variables $n(t) [
+        unit = uu_rhs,
+        description = desc,
+        misc = Dict(:staggering => itp.metadata.staggering)
+    ]
+    )
+
+    eq = lhs ~ rhs
+
+    return eq, discretes, constants, interp_info
+end
+
+"""
+$(SIGNATURES)
+
+Create the symbolic parameters for interpolating `itp` (data buffer, time grid and
+spatial grid) without an equation, for loaders that combine several interpolators in
+one equation. `n` names the parameters (`<n>_data`, `<n>_tstart`, ...) and the
+interpolator in the update event, so it must be unique within the system.
+`spatial_interp` is as in [`create_interp_equation`](@ref).
+
+Returns `(discretes, constants, interp_info)` as described in
+[`create_interp_equation`](@ref); evaluate the interpolator with
+[`build_interp_expr`](@ref).
+"""
+function create_interp_info(itp::DataSetInterpolator{To}, n::Symbol, coords;
+        spatial_interp::Symbol = :linear) where {To}
+    spatial_interp in (:linear, :nearest) ||
+        throw(ArgumentError("spatial_interp must be :linear or :nearest, got $spatial_interp"))
 
     # Compute the correct data array dimensions from the cached spatial
     # grid size (populated once at DSI construction) plus the time-cache
@@ -283,33 +320,24 @@ function create_interp_equation(itp::DataSetInterpolator{To}, filename, t, t_ref
     # mtkcompile` path.  Shared by reference across every `ODEProblem` built
     # from the same compiled system, so memory stays at one buffer per live
     # interp regardless of how many problems are built.
+    #
+    # `mask_settled`: set once an explicit pass has decided `live[]` (the
+    # convert-time factory, in either calling form, or `prune_unused_interps!`).
+    # The affect's first-fire auto-prune skips when it is set, because that
+    # fallback has no `extra_needed` and would drop fields only operators or
+    # callbacks read.
     interp_info = (data_sym = p_data, tstart_sym = p_tstart, tstep_sym = p_tstep,
         spatial_consts = spatial_consts, extrap_const = p_extrap,
         unit_const = unit_scale, itp = itp, var_sym = n,
         data_dims = data_dims, data_eltype = To,
         const_defaults = const_defaults, spatial_interp = spatial_interp,
-        live = Ref(true), preloaded_buf = Ref{Any}(nothing))
-
-    # Single source of truth for the interp formula.
-    rhs = wrapper_f(build_interp_expr(interp_info, t_ref + t, coords))
-
-    # Create left hand side of equation.
-    desc = description(itp)
-    uu_rhs = ModelingToolkit.get_unit(rhs)
-    lhs = only(
-        @variables $n(t) [
-        unit = uu_rhs,
-        description = desc,
-        misc = Dict(:staggering => itp.metadata.staggering)
-    ]
-    )
-
-    eq = lhs ~ rhs
+        live = Ref(true), preloaded_buf = Ref{Any}(nothing),
+        mask_settled = Ref(false))
 
     discretes = [p_data, p_tstart, p_tstep]
     constants = [spatial_consts..., p_extrap, unit_scale]
 
-    return eq, discretes, constants, interp_info
+    return discretes, constants, interp_info
 end
 
 """
@@ -321,13 +349,19 @@ the interpolation at modified coordinates (e.g., `lev + 1` for finite difference
 Uses the same `spatial_interp` mode that was configured on `interp_info`.
 """
 function build_interp_expr(info, t_expr, coord_exprs)
+    interp_f = get(info, :spatial_interp, :linear) === :nearest ? interp_time_only :
+               interp_unsafe
+    interp_f(interp_index_exprs(info, t_expr, coord_exprs)...) * info.unit_const
+end
+
+# Arguments of `interp_unsafe`/`interp_time_only` for `info` at the given time and
+# coordinate expressions: data buffer, fractional time and spatial indices, extrapolation.
+function interp_index_exprs(info, t_expr, coord_exprs)
     fit = 1 + (t_expr - info.tstart_sym) / info.tstep_sym
     n_spatial = length(coord_exprs)
     fis = [1 + (coord_exprs[i] - info.spatial_consts[2i - 1]) / info.spatial_consts[2i]
            for i in 1:n_spatial]
-    interp_f = get(info, :spatial_interp, :linear) === :nearest ? interp_time_only :
-               interp_unsafe
-    interp_f(info.data_sym, fit, fis..., info.extrap_const) * info.unit_const
+    return (info.data_sym, fit, fis..., info.extrap_const)
 end
 
 """
@@ -495,31 +529,92 @@ end
 # `getproperty` / `generated_callfunc` frames. Bouncing through this
 # top-level helper lets Julia re-specialize on the concrete runtime
 # types of `info` and `dsi`, so the body compiles down to static calls.
+#
+# Returns whether the interpolator's buffer was swapped (see `_lazyload_and_record!`).
 @inline function _update_one_interp!(info, dsi, t_abs,
-        data_wrappers::Vector{Any}, ts_buf::Vector{Float64},
+        data_wrappers::Vector{Any}, spare_bufs::Vector{Any}, ts_buf::Vector{Float64},
         tstep_buf::Vector{Float64}, i::Int)
-    info.live[] || return nothing
+    info.live[] || return false
     if data_wrappers[i] === nothing
         info.preloaded_buf[] === nothing && _preload_interp!(info)
         data_wrappers[i] = DataBufferType(info.preloaded_buf[])
     end
     buf = info.preloaded_buf[]
-    _lazyload_and_record!(dsi, t_abs, buf, ts_buf, tstep_buf, i)
-    return nothing
+    return _lazyload_and_record!(info, dsi, t_abs, buf, data_wrappers, spare_bufs,
+        ts_buf, tstep_buf, i)
 end
 
 # Second-level barrier: `info.preloaded_buf` is intentionally `Ref{Any}`
 # so a single `interp_info` can carry `Array`/`CuArray`/etc. depending on
 # the domain backend, which means `buf` is statically `Any` at this point.
-# Re-specializing here turns `lazyload!`/`get_time_grid_params` into static
+# Re-specializing here turns `lazyload_swap!`/`get_time_grid_params` into static
 # dispatch on the concrete buffer / `dsi` types.
-@inline function _lazyload_and_record!(dsi, t_abs, buf,
+#
+# Solver threads keep reading `buf` through the shared parameter object until
+# the returned NamedTuple is written back, so a window move never touches it:
+# `lazyload_swap!` assembles the new window in the spare buffer, which becomes
+# the published buffer, and `buf` becomes the spare. The spare is next written
+# at this interpolator's following window move, one data interval later.
+@inline function _lazyload_and_record!(info, dsi, t_abs, buf,
+        data_wrappers::Vector{Any}, spare_bufs::Vector{Any},
         ts_buf::Vector{Float64}, tstep_buf::Vector{Float64}, i::Int)
-    lazyload!(dsi, t_abs, buf)
-    ts, tstep = get_time_grid_params(dsi)
+    t = Dates.unix2datetime(t_abs)
+    spare = spare_bufs[i]
+    newbuf = lazyload_swap!(dsi, t, buf, spare isa typeof(buf) ? spare : nothing)
+    swapped = newbuf !== buf
+    if swapped
+        spare_bufs[i] = buf
+        info.preloaded_buf[] = newbuf
+        data_wrappers[i] = DataBufferType(newbuf)
+    end
+    ts, tstep = get_time_grid_params(dsi, t)
     @inbounds ts_buf[i] = ts
     @inbounds tstep_buf[i] = tstep
+    return swapped
+end
+
+# Function barrier for `_await_prefetch` on a heterogeneous `ctx` entry.
+@inline function _await_one_prefetch(info, dsi, t::DateTime)
+    info.live[] && _await_prefetch(dsi, t)
     return nothing
+end
+
+# Results of the last two affect builds, most recent first, keyed by the
+# absolute time each was built for. Never mutated once published (`mutable`
+# only so that the atomic field below holds a pointer).
+mutable struct _AffectEntries
+    const t1::Float64
+    const nt1::Any
+    const t2::Float64
+    const nt2::Any
+end
+
+# The affect's result cache and the lock for building a result. Results are
+# published as a whole `_AffectEntries` in one atomic write, so a lock-free
+# reader never pairs a time with another time's result. Two entries, because
+# under `SolverStrangThreads` the step-start (t0) initializations of some
+# blocks interleave with the step-end (tf) fires of others.
+mutable struct _AffectCache
+    @atomic entries::_AffectEntries
+    const lock::ReentrantLock
+end
+_AffectCache() = _AffectCache(_AffectEntries(NaN, nothing, NaN, nothing), ReentrantLock())
+
+@inline function _cached_result(c::_AffectCache, t_abs::Float64)
+    e = @atomic c.entries
+    e.t1 == t_abs && return e.nt1
+    e.t2 == t_abs && return e.nt2
+    return nothing
+end
+
+# Publish `nt` for `t_abs`, keeping the previous most recent result unless this
+# build swapped a buffer: a result built before the swap references the
+# replaced buffer, which the interpolator's next window move overwrites.
+function _publish_result!(c::_AffectCache, t_abs::Float64, nt, swapped::Bool)
+    e = @atomic c.entries
+    @atomic c.entries = swapped ? _AffectEntries(t_abs, nt, NaN, nothing) :
+                        _AffectEntries(t_abs, nt, e.t1, e.nt1)
+    return nt
 end
 
 # Build a preset-time `SymbolicDiscreteCallback` that reloads the
@@ -535,7 +630,10 @@ end
 # problem init — populating the parameter buffer at `tspan[1]` before any
 # parameter query or the first RHS evaluation. This makes direct
 # `getsym(prob, ...)` return real data without having to run `solve`.
-function build_interp_event(interp_infos, starttime::DateTime)
+#
+# `validate = false` skips the tspan-coverage check, for a rebuild over
+# interpolators that were already checked (see `live_interp_event`).
+function build_interp_event(interp_infos, starttime::DateTime; validate::Bool = true)
     t_ref = datetime2unix(starttime)
 
     # Compute all time stops across all interpolators, validating that each
@@ -548,7 +646,7 @@ function build_interp_event(interp_infos, starttime::DateTime)
     # the misalignment here points at the actual problem.
     all_tstops = Float64[]
     for info in interp_infos
-        _validate_tspan_coverage(info)
+        validate && _validate_tspan_coverage(info)
         append!(all_tstops, get_tstops(info.itp, starttime))
     end
     all_tstops = unique(all_tstops) .- t_ref
@@ -592,9 +690,11 @@ function build_interp_event(interp_infos, starttime::DateTime)
     # whether pruning ran at convert time or at problem-init.
     #
     # `SolverStrangThreads` fires the affect from multiple threads
-    # concurrently, so it is guarded by a lock.  The lock only covers callback
-    # invocation (rare, at tstops), not the RHS hot path, so the cost is
-    # negligible.  The same closure is registered as both the `affect` (fires
+    # concurrently, so building a result is guarded by a lock.  Repeat fires
+    # are served from the result cache without it, and the data a window move
+    # needs is loaded in the background (see `_start_prefetch!`), so the lock
+    # only covers swapping buffers and building the NamedTuple.  The same
+    # closure is registered as both the `affect` (fires
     # at each tstop in `all_tstops`) and the `initialize` affect (fires once
     # at problem build, before any RHS evaluation).  A separate init affect
     # would be cleaner, but some operator-split solvers
@@ -604,22 +704,24 @@ function build_interp_event(interp_infos, starttime::DateTime)
     # closure means the first fire on each path performs the sentinel→full
     # buffer swap and refreshes the cache window, regardless of whether MTK's
     # `initialize` callback reached this integrator.
-    update_lock = ReentrantLock()
 
     # Auto-prune fallback flag.  On the first affect invocation against a
     # given integrator we walk `integ.f.sys` and apply `_apply_live_mask!` to
     # settle the `live` Refs, so `compose + mtkcompile` paths (which bypass
     # `convert(::Type{System}, ::CoupledSystem)` and therefore the
     # `SysDiscreteEvent` factory walk) get the same gating as the coupled
-    # path.  Idempotent w.r.t. the factory: if pruning already ran at convert
-    # time, the second pass leaves the `false` flags alone.  This Ref is
-    # closure-captured (shared across every problem built from the compiled
-    # system); that's fine because the live mask is a property of the
-    # compiled system, not the problem.  Some operator-split solvers
-    # (`SolverStrangSerial/Threads`, `SolverIMEX`) build inner integrators
-    # whose `integ.f.sys` is `nothing`; in those cases we skip auto-pruning
-    # and rely on the convert-time factory walk, which has already settled
-    # `live[]` for that path.
+    # path.  The fallback passes no `extra_needed`, so it is skipped whenever
+    # an explicit pass already settled the mask (`info.mask_settled[]`): the
+    # convert-time factory (which knows the operator and callback needs, or
+    # deliberately keeps everything live in its 1-arg form) or a manual
+    # `prune_unused_interps!`.  Re-running it there would drop fields read only
+    # by operators or callbacks (e.g. `A1₊PBLH`, `A3dyn₊U`) and leave them as
+    # zero sentinels.  This Ref is closure-captured (shared across every
+    # problem built from the compiled system); that's fine because the live
+    # mask is a property of the compiled system, not the problem.  Some
+    # operator-split solvers (`SolverStrangSerial/Threads`, `SolverIMEX`)
+    # build inner integrators whose `integ.f.sys` is `nothing`; those never
+    # auto-prune.
     prune_done = Ref(false)
 
     # Cached `Val`-lifted tuples of the *live* keys and interp indices,
@@ -638,41 +740,45 @@ function build_interp_event(interp_infos, starttime::DateTime)
     # this callback — no per-call `Vector{Any}` allocation, and no `Float64`
     # boxing on the way into the result NamedTuple.
     #
-    # `data_wrappers` caches `DataBufferType(buf)` lazily: once
-    # `info.preloaded_buf[]` is populated the wrapped reference is stable,
-    # so we wrap it exactly once and re-emit the same instance every fire.
+    # `data_wrappers` caches `DataBufferType(buf)` for the published buffer
+    # `info.preloaded_buf[]`, so every fire re-emits the same instance; it is
+    # replaced when a window move swaps the buffer. `spare_bufs` holds each
+    # interpolator's second buffer, allocated at its first window move.
     n_interp = length(interp_infos)
     data_wrappers = Vector{Any}(undef, n_interp)
     fill!(data_wrappers, nothing)
+    spare_bufs = Vector{Any}(undef, n_interp)
+    fill!(spare_bufs, nothing)
     ts_buf = Vector{Float64}(undef, n_interp)
     tstep_buf = Vector{Float64}(undef, n_interp)
 
-    # Cache the last-built parameter NamedTuple, keyed by the absolute time it was
-    # built for. Under SolverStrangThreads every grid cell's `reinit!` fires this
-    # affect at the SAME `t_abs` within one outer step, so the built result is
-    # identical. Without caching, all solver threads serialize on `update_lock`
+    # Cache the last two parameter NamedTuples, keyed by the absolute time each
+    # was built for. Under SolverStrangThreads every grid cell's `reinit!` fires
+    # this affect at the SAME `t_abs` within one outer step, so the built result
+    # is identical. Without caching, all solver threads serialize on the lock
     # AND allocate a fresh NamedTuple once per cell — the dominant high-thread
-    # scaling wall (more threads then run no faster than fewer). Repeat fires now return the
-    # cache with no lock and no allocation.
-    last_tabs = Ref(NaN)
-    cached_nt = Ref{Any}(nothing)
+    # scaling wall (more threads then run no faster than fewer). Repeat fires
+    # return the cache with no lock and no allocation.
+    affect_cache = _AffectCache()
 
     function update_data!(_modified, _observed, ctx, integ)
         t_abs = integ.t + t_ref
-        # Lock-free fast path: same t_abs as the last build → identical result.
-        if t_abs == last_tabs[]
-            c = cached_nt[]
-            c === nothing || return c
+        # Lock-free fast path: a result already built for this time.
+        nt_cached = _cached_result(affect_cache, t_abs)
+        nt_cached === nothing || return nt_cached
+        # Wait for any background load that this time needs before taking the
+        # lock, so the lock is not held while data are read.
+        t_dt = Dates.unix2datetime(t_abs)
+        for i in 1:n_interp
+            _await_one_prefetch(interp_infos[i], ctx[i], t_dt)
         end
-        lock(update_lock) do
+        lock(affect_cache.lock) do
             # Double-check under the lock: another thread may have just built it.
-            if t_abs == last_tabs[]
-                c = cached_nt[]
-                c === nothing || return c
-            end
+            nt_cached = _cached_result(affect_cache, t_abs)
+            nt_cached === nothing || return nt_cached
             if !prune_done[]
                 sys = isdefined(integ.f, :sys) ? integ.f.sys : nothing
-                if sys !== nothing
+                if sys !== nothing && !_mask_settled(interp_infos)
                     _apply_live_mask!(interp_infos, sys)
                 end
                 prune_done[] = true
@@ -690,7 +796,7 @@ function build_interp_event(interp_infos, starttime::DateTime)
             end
             # Per-interp work goes through `_update_one_interp!` to get a
             # function barrier: that's what makes `info.preloaded_buf[]`,
-            # `lazyload!(dsi, …)`, etc. dispatch statically on the concrete
+            # `lazyload_swap!(dsi, …)`, etc. dispatch statically on the concrete
             # runtime types instead of through the heterogeneous
             # `interp_infos[i]` / `ctx[i]` containers. On first fire the
             # full-grid buffer exists (`_preload_interp!` no-ops if
@@ -700,15 +806,14 @@ function build_interp_event(interp_infos, starttime::DateTime)
             # signal `data_wrappers[i] === nothing` replaces a
             # `modified[dkey]` probe whose heterogeneous-union return would
             # otherwise box.
+            swapped = false
             for i in 1:n_interp
-                _update_one_interp!(interp_infos[i], ctx[i], t_abs,
-                    data_wrappers, ts_buf, tstep_buf, i)
+                swapped |= _update_one_interp!(interp_infos[i], ctx[i], t_abs,
+                    data_wrappers, spare_bufs, ts_buf, tstep_buf, i)
             end
             nt = _build_updates_nt(live_keys_val_ref[], live_idx_val_ref[],
                 data_wrappers, ts_buf, tstep_buf)
-            last_tabs[] = t_abs
-            cached_nt[] = nt
-            nt
+            _publish_result!(affect_cache, t_abs, nt, swapped)
         end
     end
 
@@ -726,6 +831,22 @@ function build_interp_event(interp_infos, starttime::DateTime)
     return ModelingToolkit.SymbolicDiscreteCallback(
         all_tstops, affect; initialize = affect,
         initialize_save_discretes = false)
+end
+
+# The update event for the live interpolators of `interp_infos` only, for the
+# convert-time factory to put in place of the event the loader was built with
+# once the live mask is settled.  That event lists every interpolator's
+# `data`/`tstart`/`tstep` parameters as modified, and MTK compiles the affect
+# against all of them and reads and boxes every one on each fire, although the
+# affect never writes a pruned interpolator's parameters.  The rebuild drops
+# them from `modified`, `ctx`, the per-interpolator keys and the time stops, so
+# a pruned interpolator's parameters keep their defaults as before.  Returns
+# `nothing` when every interpolator is live (the original event already covers
+# exactly the live ones) or none is (the original event loads nothing).
+function live_interp_event(interp_infos, starttime::DateTime)
+    live = filter(info -> info.live[], interp_infos)
+    (isempty(live) || length(live) == length(interp_infos)) && return nothing
+    return build_interp_event(live, starttime; validate = false)
 end
 
 """
@@ -757,10 +878,13 @@ path (e.g. plain `compose` + `mtkcompile`) or when you need to inject
 `extra_needed`.
 
 The pruning is irreversible for the lifetime of the loader's `interp_info`
-vector — build a fresh loader to reset `live[]` to `true`.
+vector — build a fresh loader to reset `live[]` to `true`.  It also turns
+off the update event's first-fire auto-prune (the `compose` + `mtkcompile`
+fallback), so a later `ODEProblem` keeps what `extra_needed` kept.
 
-The "needed" check substitutes observed equations into state-equation RHSs
-via `Symbolics.fixpoint_sub` and walks the resulting variables.  A variable
+The "needed" check collects the variables that state-equation RHSs reach
+through the observed equations (the variables of `Symbolics.fixpoint_sub`
+of each RHS, found without building the substituted expression).  A variable
 that downstream compilation inlines through observed eqs that this walk
 doesn't reach (e.g. through coordinate-aware codegen paths in some
 operator-split solvers) could be marked dead in error.  If this happens
@@ -834,7 +958,7 @@ end
 # output actually evaluates.
 #
 # The walk collects every variable/parameter reachable (through the observed
-# equations, folded in with `fixpoint_sub`) from a set of *roots*:
+# equations) from a set of *roots*:
 #   - state-equation RHSs — the dynamics the solver integrates;
 #   - initialization equations — constraints solved at problem build (e.g. the
 #     plume-rise `H_p ~ Z_agl` pin, which routes through the PBLH interpolator);
@@ -855,11 +979,18 @@ end
 # unknown-to-unknown dependency graph and never reports parameters or
 # observed-only diagnostics.
 #
+# The reachable set equals the variables of `fixpoint_sub(root, observed)`, but
+# it is found by walking the observed-equation graph and expanding each observed
+# left-hand side once, rather than substituting every observed equation into
+# every root: on a production 4x5 CONUS build (595 observed equations) that
+# substitution took 87 s for NEI and 74 s for GEOS-FP; the walk takes 0.1 s.
+#
 # As a safety fallback, if no interpolator is found to be needed (e.g. a
 # standalone `mtkcompile(loader)` with no parent dynamics) nothing is pruned.
 # NetCDF data is loaded lazily by `_preload_interp!` on the affect's first
 # fire, not here.  Used by `prune_unused_interps!`, `make_prune_factory`, and
-# the affect's first-fire auto-prune path.
+# the affect's first-fire auto-prune path; every call marks the mask settled
+# so that auto-prune does not run again.
 function _apply_live_mask!(interp_infos, parent_sys; extra_needed = ())
     bare_data_syms = [string(EarthSciMLBase.var2symbol(info.data_sym))
                       for info in interp_infos]
@@ -870,10 +1001,7 @@ function _apply_live_mask!(interp_infos, parent_sys; extra_needed = ())
     matches(bare, name) = name == bare || endswith(name, "₊" * bare)
 
     obs = ModelingToolkit.observed(parent_sys)
-    obs_subst = Dict{Any, Any}()
-    for eq in obs
-        obs_subst[eq.lhs] = eq.rhs
-    end
+    rhs_of = Dict{Any, Any}(eq.lhs => eq.rhs for eq in obs)
 
     # Derive the loader's namespace prefix (e.g. `GEOSFP₊`) from one of its
     # loader equations: `var_sym` is bare (`A1₊PBLH`) while the compiled LHS is
@@ -893,12 +1021,21 @@ function _apply_live_mask!(interp_infos, parent_sys; extra_needed = ())
         end
     end
 
+    # `record!(expr)` adds the leaf variables `expr` reaches through `rhs_of`.
+    # `seen` is shared across calls: an observed variable's leaves are already
+    # in `referenced` after its first expansion.
     referenced = Set{String}()
+    seen = Set{Any}()
     function record!(expr)
-        substed = isempty(obs_subst) ? expr :
-                  Symbolics.fixpoint_sub(expr, obs_subst)
-        for v in Symbolics.get_variables(substed)
-            push!(referenced, string(EarthSciMLBase.var2symbol(v)))
+        stack = Any[expr]
+        while !isempty(stack)
+            for v in Symbolics.get_variables(pop!(stack))
+                if haskey(rhs_of, v)
+                    v in seen || (push!(seen, v); push!(stack, rhs_of[v]))
+                else
+                    push!(referenced, string(EarthSciMLBase.var2symbol(v)))
+                end
+            end
         end
         return nothing
     end
@@ -940,8 +1077,14 @@ function _apply_live_mask!(interp_infos, parent_sys; extra_needed = ())
         @debug "Live-mask pruning: kept $(length(kept)) of $(length(interp_infos)) " *
                "interpolators, dropped $(length(dropped))" kept dropped
     end
+    _settle_mask!(interp_infos)
     return is_needed
 end
+
+# Record that an explicit pass decided `live[]`, so the affect's first-fire
+# auto-prune (which has no `extra_needed`) leaves it alone.
+_settle_mask!(interp_infos) = foreach(info -> info.mask_settled[] = true, interp_infos)
+_mask_settled(interp_infos) = any(info -> info.mask_settled[], interp_infos)
 
 function prune_unused_interps!(loader_sys, parent_sys; extra_needed = ())
     interp_infos = ModelingToolkit.getmetadata(
@@ -951,15 +1094,6 @@ function prune_unused_interps!(loader_sys, parent_sys; extra_needed = ())
     return loader_sys
 end
 
-"""
-$(SIGNATURES)
-
-Convenience wrapper: convert `csys` to a `System`, gather operator-needed
-variables via `EarthSciMLBase.operator_vars`, and call
-[`prune_unused_interps!`] on `loader_sys` with both.  Returns the
-post-`mtkcompile` parent system so callers can use it for
-`ODEProblem(parent_sys, ...)`.
-"""
 # Collect the interpolated met vars needed by BOTH the coupled system's operators
 # (`operator_vars`, over `csys.ops`) AND its init-callbacks (each one's
 # `get_needed_vars`, e.g. `PBLMixingCallback` needs `A1₊PBLH`). Callback needs are
@@ -981,6 +1115,16 @@ function _operator_and_callback_vars(csys, parent_sys)
     return unique(vcat(ov, cv))
 end
 
+"""
+$(SIGNATURES)
+
+Convenience wrapper: convert `csys` to a `System`, gather the variables its
+operators (`EarthSciMLBase.operator_vars`) and init-callbacks
+(`EarthSciMLBase.get_needed_vars`) read outside the equations, and call
+[`prune_unused_interps!`] on `loader_sys` with both.  Returns the
+post-`mtkcompile` parent system so callers can use it for
+`ODEProblem(parent_sys, ...)`.
+"""
 function prune_unused_interps!(
         loader_sys, csys::EarthSciMLBase.CoupledSystem; kwargs...)
     parent_sys = convert(ModelingToolkit.System, csys; kwargs...)
@@ -1010,15 +1154,24 @@ two calling conventions:
     (`_apply_live_mask!`), pruning interpolators referenced neither by
     the compiled system's equations nor by `extra_needed`.
 
-Both forms return `nothing`, and EarthSciMLBase's walker filters
-`nothing` returns, so registering this factory adds no new discrete
-events to the parent system — the existing loader-attached
-`build_interp_event` callback fires as before, just with a settled live
-mask in the 2-arg case.  [`prune_unused_interps!`](@ref) on the
+Both forms settle the live mask (pruned in the 2-arg case, all live in
+the 1-arg case), so the loader-attached `build_interp_event` callback's
+first-fire auto-prune does not run again.
+
+When the 2-arg form pruned something and `starttime` (the loader's
+`build_interp_event` start time) is given, the factory returns
+`EarthSciMLBase.ReplaceDiscreteEvents([ev])`, where `ev` is
+[`live_interp_event`]'s update event over the live interpolators only;
+the walker puts it in place of the loader's own event.  Otherwise, or
+when the installed EarthSciMLBase has no `ReplaceDiscreteEvents` or
+`EARTHSCIDATA_LIVE_EVENT=0` is set, it returns `nothing`, which the
+walker filters out, and the loader's own event (which skips pruned
+interpolators at run time) stays.
+[`prune_unused_interps!`](@ref) on the
 `CoupledSystem` remains the explicit operator- and callback-aware prune
 path for callers who want it.
 """
-function make_prune_factory(interp_infos)
+function make_prune_factory(interp_infos, starttime::Union{Nothing, DateTime} = nothing)
     # Backward-compatible with two `convert(System, ::CoupledSystem)` walker
     # conventions:
     #
@@ -1040,11 +1193,31 @@ function make_prune_factory(interp_infos)
     #
     # Either way `prune_unused_interps!(loader, csys)` remains the explicit,
     # operator- and callback-aware prune path for callers who want it.
+    #
+    # Both forms settle the mask, so the affect's first-fire auto-prune (which
+    # has no operator/callback keep-set either) cannot prune afterwards.
     return function (parent_sys, extra_needed = nothing)
-        extra_needed === nothing && return nothing  # legacy 1-arg caller: cannot prune safely
+        if extra_needed === nothing  # legacy 1-arg caller: cannot prune safely
+            _settle_mask!(interp_infos)
+            return nothing
+        end
         _apply_live_mask!(interp_infos, parent_sys; extra_needed = extra_needed)
-        return nothing
+        (starttime === nothing || !_live_event_enabled()) && return nothing
+        return _replace_loader_event(live_interp_event(interp_infos, starttime))
     end
+end
+
+# The live-only event replaces the loader's own one unless `EARTHSCIDATA_LIVE_EVENT=0`;
+# read when the factory runs.
+_live_event_enabled() = get(ENV, "EARTHSCIDATA_LIVE_EVENT", "1") != "0"
+
+# What the factory returns to have EarthSciMLBase's convert-time walker put `ev`
+# in place of the loader's own update event: `nothing` (keep the loader's
+# event) when there is no replacement or the walker has no replacement hook.
+function _replace_loader_event(ev)
+    (ev === nothing || !isdefined(EarthSciMLBase, :ReplaceDiscreteEvents)) &&
+        return nothing
+    return EarthSciMLBase.ReplaceDiscreteEvents(Any[ev])
 end
 
 Latexify.@latexrecipe function f(itp::EarthSciData.DataSetInterpolator)
