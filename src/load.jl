@@ -846,6 +846,13 @@ function update!(itp::DataSetInterpolator, t::DateTime, target::AbstractArray)
     @assert issorted(tc.times) "Interpolator times are in wrong order"
 end
 
+"""
+$(SIGNATURES)
+
+Ensure the cached time window of `itp` covers time `t`, loading (and regridding
+into the full-grid buffer `target`) any data slices that are not already
+resident. A no-op when the current window already covers `t`.
+"""
 function lazyload!(itp::DataSetInterpolator, t::DateTime, target::AbstractArray)
     # Lock-free fast path. A reload is only needed once per data interval (per
     # centerpoint crossing); the overwhelmingly common per-cell call finds the

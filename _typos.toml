@@ -6,3 +6,5 @@ setp = "setp"
 nd = "nd"
 iit = "iit"
 domian = "domian"
+# Mechanism species name (ketone carbonyl) in nei2016_inline.jl.
+ket = "ket"

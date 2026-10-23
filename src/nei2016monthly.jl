@@ -436,7 +436,7 @@ function NEI2016MonthlyEmis(
     fs = NEI2016MonthlyEmisFileSet(sector, starttime, endtime)
     # The regridder is built from the first variable's grid metadata and
     # reused across every variable; if any later variable's grid disagrees,
-    # the regridder would silently mis-map its emissions.  Validate up-front
+    # the regridder would silently misplace its emissions.  Validate up-front
     # rather than letting the mismatch produce wrong numbers at solve time.
     ref_var = first(varnames(fs))
     ref_meta = loadmetadata(fs, ref_var)
