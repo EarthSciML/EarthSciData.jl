@@ -470,8 +470,12 @@ end
     parent = convert(System, csys)
     kept = ["q", "o3", "ciwc", "crwc"]
     dropped = ["clwc", "cswc"]
+    # `convert` calls the 2-arg factory only in an EarthSciMLBase with the
+    # `callback_vars` keep-set (EarthSciMLBase#227); before that, the 1-arg call
+    # settles the mask with every interpolator live.
+    prunes = isdefined(EarthSciMLBase, :callback_vars)
     @test all(info_for(n).live[] for n in kept)
-    @test !any(info_for(n).live[] for n in dropped)
+    @test all(info_for(n).live[] == !prunes for n in dropped)
     @test all(i.mask_settled[] for i in infos)
     # With EarthSciMLBase's `ReplaceDiscreteEvents` hook the factory's rebuilt
     # event takes the place of ERA5's own, so the converted system's event
@@ -489,7 +493,7 @@ end
     init(ODEProblem(parent, coord_vals, (0.0, 60.0)), Tsit5())
     @test all(info_for(n).live[] for n in kept)
     @test all(info_for(n).itp.cache.initialized for n in kept)
-    @test !any(info_for(n).itp.cache.initialized for n in dropped)
+    @test all(info_for(n).itp.cache.initialized == !prunes for n in dropped)
 
     # (2) The walk and the fixpoint_sub oracle agree on the coupled system, with
     # and without the keep-set, and on the expected keep/drop split.
@@ -547,7 +551,9 @@ end
         levrange = 1:4
     )
     hook = isdefined(EarthSciMLBase, :ReplaceDiscreteEvents)
-    with_events(sys, evs) = ModelingToolkit.Setfield.@set sys.discrete_events = evs
+    # Whether `convert` calls the 2-arg factory (EarthSciMLBase#227).
+    prunes = isdefined(EarthSciMLBase, :callback_vars)
+    with_events(sys, evs) =ModelingToolkit.Setfield.@set sys.discrete_events = evs
     modified_syms(sys) = [string(EarthSciMLBase.var2symbol(v))
                           for ev in ModelingToolkit.discrete_events(sys)
                           for v in ev.affect.modified]
@@ -628,7 +634,7 @@ end
         parent = withenv("EARTHSCIDATA_LIVE_EVENT" => live_event ? nothing : "0") do
             convert(System, couple(model, era5, domain))
         end
-        @test [i.live[] for i in infos] == used(infos)
+        @test [i.live[] for i in infos] == (prunes ? used(infos) : trues(length(infos)))
         sol = solve(ODEProblem(parent, coord_vals(parent), (0.0, 86400.0)), Tsit5();
             saveat = 3600.0)
         return sol, parent
