@@ -837,7 +837,7 @@ function NEI2016InlineEmis(
         metadata = Dict(CoupleType => NEI2016InlineEmisCoupler,
             SysDomainInfo => domaininfo,
             InterpInfos => interp_infos,
-            SysDiscreteEvent => make_prune_factory(interp_infos))
+            SysDiscreteEvent => make_prune_factory(interp_infos, starttime))
     )
     return sys
 end
