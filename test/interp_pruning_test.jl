@@ -553,7 +553,7 @@ end
     hook = isdefined(EarthSciMLBase, :ReplaceDiscreteEvents)
     # Whether `convert` calls the 2-arg factory (EarthSciMLBase#227).
     prunes = isdefined(EarthSciMLBase, :callback_vars)
-    with_events(sys, evs) =ModelingToolkit.Setfield.@set sys.discrete_events = evs
+    with_events(sys, evs) = ModelingToolkit.Setfield.@set sys.discrete_events = evs
     modified_syms(sys) = [string(EarthSciMLBase.var2symbol(v))
                           for ev in ModelingToolkit.discrete_events(sys)
                           for v in ev.affect.modified]
