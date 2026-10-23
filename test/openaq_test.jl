@@ -451,7 +451,8 @@ $id,8001,$name,2024-06-15T14:00:00+00:00,$lat,$lon,pm25,µg/m³,300.0"""
         )
         starttime, endtime = get_tspan_datetime(domain)
 
-        itp = EarthSciData.DataSetInterpolator{Float64}(fs, "pm25", starttime, endtime, domain)
+        itp = EarthSciData.DataSetInterpolator{Float64}(
+            fs, "pm25", starttime, endtime, domain)
         buf = EarthSciData.make_data_buffer(itp)
 
         # Interpolate at grid center at hour 12: all stations report 100 µg/m³ = 100e-6 kg/m³
@@ -535,7 +536,8 @@ $id,8001,$name,2024-06-15T14:00:00+00:00,$lat,$lon,pm25,µg/m³,300.0"""
 
         # The variable should have units of kg/m^3 (converted from ug/m3)
         var_unit = ModelingToolkit.get_unit(vars[1])
-        @test DynamicQuantities.dimension(var_unit) == DynamicQuantities.dimension(u"kg/m^3")
+        @test DynamicQuantities.dimension(var_unit) ==
+              DynamicQuantities.dimension(u"kg/m^3")
 
         delete!(ENV, "EARTHSCIDATADIR")
     end

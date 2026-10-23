@@ -151,7 +151,8 @@ end
         ti = EarthSciData.DataFrequencyInfo(fs)
         epp = EarthSciData.endpoints(ti)
 
-        @test epp[begin] == (DateTime("2022-04-30T00:00:00"), DateTime("2022-04-30T03:00:00"))
+        @test epp[begin] ==
+              (DateTime("2022-04-30T00:00:00"), DateTime("2022-04-30T03:00:00"))
         @test epp[end] == (DateTime("2022-05-03T21:00:00"), DateTime("2022-05-04T00:00:00"))
 
         metadata = EarthSciData.loadmetadata(fs, "U")
@@ -168,11 +169,11 @@ end
         (; itp) = setup()
         @test itp.grid_size == (142, 86, 10)
         @test itp.grid_starts[1] ≈ deg2rad(-175.0 - 1.25)
-        @test itp.grid_steps[1]  ≈ deg2rad(2.5)
+        @test itp.grid_steps[1] ≈ deg2rad(2.5)
         @test itp.grid_starts[2] ≈ deg2rad(-85.0)
-        @test itp.grid_steps[2]  ≈ deg2rad(2)
+        @test itp.grid_steps[2] ≈ deg2rad(2)
         @test itp.grid_starts[3] ≈ 1.0
-        @test itp.grid_steps[3]  ≈ 1.0
+        @test itp.grid_steps[3] ≈ 1.0
     end
 
     @testset "interpolation" begin
@@ -368,8 +369,10 @@ end
             extrap = T(1.0)
 
             # Type stability: @inferred throws if the return type is not concrete.
-            @test @inferred(EarthSciData.interp_unsafe(db4, fit, fi1, fi2, fi3, extrap)) isa T
-            @test @inferred(EarthSciData.interp_time_only(db4, fit, fi1, fi2, fi3, extrap)) isa
+            @test @inferred(EarthSciData.interp_unsafe(db4, fit, fi1, fi2, fi3, extrap)) isa
+                  T
+            @test @inferred(EarthSciData.interp_time_only(
+                db4, fit, fi1, fi2, fi3, extrap)) isa
                   T
 
             # Allocation: zero heap allocations after warmup.
@@ -388,7 +391,8 @@ end
             EarthSciData.interp_unsafe(db3, fit, fi1, fi2, extrap)
             EarthSciData.interp_time_only(db3, fit, fi1, fi2, extrap)
             @test (@allocated EarthSciData.interp_unsafe(db3, fit, fi1, fi2, extrap)) == 0
-            @test (@allocated EarthSciData.interp_time_only(db3, fit, fi1, fi2, extrap)) == 0
+            @test (@allocated EarthSciData.interp_time_only(db3, fit, fi1, fi2, extrap)) ==
+                  0
 
             # ----- 2D (1 spatial + time) -----
             data2 = rand(T, 10, 2)

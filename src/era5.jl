@@ -39,7 +39,8 @@ const ERA5_LAT_DIM = "latitude"
 const ERA5_PLEV_DIM = "pressure_level"
 
 # Map ERA5 dimension names to DomainInfo coordinate names.
-const ERA5_COORD_MAP = Dict(ERA5_LON_DIM => :lon, ERA5_LAT_DIM => :lat, ERA5_PLEV_DIM => :lev)
+const ERA5_COORD_MAP = Dict(ERA5_LON_DIM => :lon, ERA5_LAT_DIM => :lat, ERA5_PLEV_DIM =>
+    :lev)
 
 """
 $(SIGNATURES)
@@ -118,18 +119,18 @@ struct ERA5PressureLevelFileSet <: FileSet
                 # Also sample edges to capture curvature for large domains.
                 for x in xs
                     lo, la = to_lonlat(x, first(ys))
-                    push!(lon_vals, rad2deg(lo));
+                    push!(lon_vals, rad2deg(lo))
                     push!(lat_vals, rad2deg(la))
                     lo, la = to_lonlat(x, last(ys))
-                    push!(lon_vals, rad2deg(lo));
+                    push!(lon_vals, rad2deg(lo))
                     push!(lat_vals, rad2deg(la))
                 end
                 for y in ys
                     lo, la = to_lonlat(first(xs), y)
-                    push!(lon_vals, rad2deg(lo));
+                    push!(lon_vals, rad2deg(lo))
                     push!(lat_vals, rad2deg(la))
                     lo, la = to_lonlat(last(xs), y)
-                    push!(lon_vals, rad2deg(lo));
+                    push!(lon_vals, rad2deg(lo))
                     push!(lat_vals, rad2deg(la))
                 end
                 lonrange_deg = extrema(lon_vals)
@@ -223,10 +224,9 @@ end
 
 DataFrequencyInfo(fs::ERA5PressureLevelFileSet)::DataFrequencyInfo = fs.freq_info
 
-Base.close(fs::ERA5PressureLevelFileSet) =
-    lock(nclock) do ;
-        close(fs.ds);
-    end
+Base.close(fs::ERA5PressureLevelFileSet) = lock(nclock) do ;
+    close(fs.ds)
+end
 
 function loadslice!(data::AbstractArray, fs::ERA5PressureLevelFileSet, t::DateTime, varname)
     lock(nclock) do

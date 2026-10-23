@@ -337,7 +337,8 @@ end
 
         x, y, _=EarthSciMLBase.pvars(xy_domain2)
         @variables c(ModelingToolkit.t) = 5.0 [unit = u"mol/m^3"]
-        @constants c_unit = 6.0 [unit = u"m", description = "constant to make units cancel out"]
+        @constants c_unit = 6.0 [
+            unit = u"m", description = "constant to make units cancel out"]
 
         exsys=System(
             [ModelingToolkit.D(c)~(sin(x/c_unit)+sin(y/c_unit))*c/ModelingToolkit.t],

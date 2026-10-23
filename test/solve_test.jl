@@ -27,7 +27,7 @@ end
             levrange = 1:1:2
         )
 
-        @variables ACET(t)=0.0 [unit = u"kg/kg"]
+        @variables ACET(t) = 0.0 [unit = u"kg/kg"]
         @constants c=1000 [unit = u"s"]
 
         @named sys = System([D(ACET) ~ 0], t, metadata = Dict(CoupleType => SysCoupler))

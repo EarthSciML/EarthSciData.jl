@@ -36,31 +36,31 @@ Write a minimal stack_groups nc4: 3 stacks in 2 distinct 12US1 cells.
 function write_stack_groups(dir)
     path = joinpath(dir, "stack_groups_$(TEST_SECTOR)_12US1_WR413_MYR_2017.nc4")
     ds = NCDataset(path, "c")
-    defDim(ds, "TSTEP", 1);
-    defDim(ds, "DATE-TIME", 2);
+    defDim(ds, "TSTEP", 1)
+    defDim(ds, "DATE-TIME", 2)
     defDim(ds, "LAY", 1)
-    defDim(ds, "VAR", 8);
-    defDim(ds, "ROW", 3);
+    defDim(ds, "VAR", 8)
+    defDim(ds, "ROW", 3)
     defDim(ds, "COL", 1)
     # 12US1 LCC attributes (as in the real files)
-    ds.attrib["P_ALP"] = 33.0;
+    ds.attrib["P_ALP"] = 33.0
     ds.attrib["P_BET"] = 45.0
-    ds.attrib["XCENT"] = -97.0;
+    ds.attrib["XCENT"] = -97.0
     ds.attrib["YCENT"] = 40.0
-    ds.attrib["XORIG"] = -2556000.0;
+    ds.attrib["XORIG"] = -2556000.0
     ds.attrib["YORIG"] = -1728000.0
-    ds.attrib["XCELL"] = 12000.0;
+    ds.attrib["XCELL"] = 12000.0
     ds.attrib["YCELL"] = 12000.0
     ds.attrib["GDNAM"] = "12US1_459X299"
     v(n, x) = (vv = defVar(ds, n, Float64, ("COL", "ROW", "LAY", "TSTEP"));
         vv[:] = reshape(x, 1, 3, 1, 1))
     # stacks 1+2 share cell (100, 150); stack 3 alone in (200, 250)
-    v("LATITUDE", [39.0, 39.0, 41.0]);
+    v("LATITUDE", [39.0, 39.0, 41.0])
     v("LONGITUDE", [-97.0, -97.0, -90.0])
-    v("COL", [100.0, 100.0, 200.0]);
+    v("COL", [100.0, 100.0, 200.0])
     v("ROW", [150.0, 150.0, 250.0])
     v("STKHT", [200.0, 50.0, 100.0])   # tall coal / short gas / medium
-    v("STKDM", [8.0, 3.0, 5.0]);
+    v("STKDM", [8.0, 3.0, 5.0])
     v("STKTK", [420.0, 350.0, 400.0])
     v("STKVE", [25.0, 10.0, 15.0])
     close(ds)
@@ -74,11 +74,11 @@ function write_inln_day(dir, d::Date; so2 = (12.0, 0.0, 3.0), no = (5.0, 2.0, 1.
     ymd = Dates.format(d, "yyyymmdd")
     path = joinpath(dir, "inln_mole_$(TEST_SECTOR)_$(ymd)_12US1_WR413_MYR_2017.nc4")
     ds = NCDataset(path, "c")
-    defDim(ds, "TSTEP", 25);
-    defDim(ds, "DATE-TIME", 2);
+    defDim(ds, "TSTEP", 25)
+    defDim(ds, "DATE-TIME", 2)
     defDim(ds, "LAY", 1)
-    defDim(ds, "VAR", 2);
-    defDim(ds, "ROW", 3);
+    defDim(ds, "VAR", 2)
+    defDim(ds, "ROW", 3)
     defDim(ds, "COL", 1)
     tf = defVar(ds, "TFLAG", Int32, ("DATE-TIME", "VAR", "TSTEP"))
     for k in 1:25

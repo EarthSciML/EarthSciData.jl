@@ -368,7 +368,7 @@ function varnames(fs::NEI2016MonthlyEmisFileSet)
 end
 
 Base.close(fs::NEI2016MonthlyEmisFileSet) = lock(nclock) do ;
-    close(fs.ds);
+    close(fs.ds)
 end
 
 # Verify that `varname`'s grid metadata matches `ref_meta` on every dimension

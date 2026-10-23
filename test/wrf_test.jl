@@ -62,7 +62,9 @@ end
         @testset "wrf" begin
             (; domain) = setup()
             lon, lat, lev = EarthSciMLBase.pvars(domain)
-            @constants c_unit=6.0 [unit = u"rad" description = "constant to make units cancel out"]
+            @constants c_unit=6.0 [
+                                   unit = u"rad" description = "constant to make units cancel out"
+                                   ]
 
             lonv = deg2rad(-118.2707)
             latv = deg2rad(34.0059)

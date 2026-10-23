@@ -146,10 +146,9 @@ function varnames(fs::WRFFileSet)
     end
 end
 
-Base.close(fs::WRFFileSet) =
-    lock(nclock) do ;
-        close(fs.ds);
-    end
+Base.close(fs::WRFFileSet) = lock(nclock) do ;
+    close(fs.ds)
+end
 
 struct WRFCoupler
     sys::Any

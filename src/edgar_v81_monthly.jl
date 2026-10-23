@@ -242,10 +242,9 @@ function varnames(fs::EDGARv81MonthlyEmisFileSet)
     end
 end
 
-Base.close(fs::EDGARv81MonthlyEmisFileSet) =
-    lock(nclock) do ;
-        close(fs.ds);
-    end
+Base.close(fs::EDGARv81MonthlyEmisFileSet) = lock(nclock) do ;
+    close(fs.ds)
+end
 
 struct EDGARv81MonthlyEmisCoupler
     sys::Any
