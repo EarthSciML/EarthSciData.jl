@@ -642,7 +642,11 @@ end
 Load the time points that should be cached in this interpolator.
 """
 function interp_cache_times!(itp::DataSetInterpolator, t::DateTime)
-    cache_size = length(itp.cache.times)
+    # Use the capacity fixed at construction, not `length(itp.cache.times)`:
+    # a window clamped at the dataset start (e.g. `[1, 2]` when `ti == 1`) is
+    # shorter than the capacity, and sizing later windows from it would pin
+    # them at that length and permanently drop the lookback slot.
+    cache_size = itp.cache_size
     dfi = DataFrequencyInfo(itp.fs)
     ti = centerpoint_index(dfi, t)
     n = length(dfi.centerpoints)

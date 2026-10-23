@@ -17,7 +17,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       GROUP: ${{ matrix.group }}    
-      JULIA_NO_VERIFY_HOSTS: 'gaftp.epa.gov'
+      JULIA_NO_VERIFY_HOSTS: 'gaftp.epa.gov,data.rda.ucar.edu'
     strategy:
       fail-fast: false
       matrix:

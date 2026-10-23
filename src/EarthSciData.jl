@@ -2,7 +2,7 @@ module EarthSciData
 using Dates, Downloads
 using DocStringExtensions
 using SciMLBase: DiscreteCallback
-using Interpolations, DataInterpolations
+using Interpolations
 using NCDatasets, ModelingToolkit, Symbolics, Proj
 using ModelingToolkit: t
 using EarthSciMLBase, DiffEqCallbacks

@@ -343,10 +343,25 @@ function varnames(fs::ERA5PressureLevelFileSet)
     return fs.varlist
 end
 
-# Module-level interpolator mapping level index to pressure in hPa.
-const era5_P_itp = DataInterpolations.LinearInterpolation(
-    Float64.(ERA5_PRESSURE_LEVELS_HPA), 1:length(ERA5_PRESSURE_LEVELS_HPA)
-)
+# Pressure (hPa) as a piecewise-linear function of the fractional level index,
+# and its derivative w.r.t. the level index.  Registered as symbolic functions
+# with an explicit derivative (same approach as GEOS-FP's `Ap`/`Bp`) rather than
+# a `DataInterpolations.LinearInterpolation` constant, which Latexify cannot
+# render and which needs a unit-inference shim for its derivative.
+const _era5_P_data = Float64.(ERA5_PRESSURE_LEVELS_HPA)
+era5_P(levx::Real) = _hybrid_lerp(_era5_P_data, levx)
+era5_P_deriv(levx::Real) = _hybrid_lerp_deriv(_era5_P_data, levx)
+
+# Unit-inference shims: `era5_P` returns a bare hPa magnitude (converted to Pa
+# by a unit-carrying constant at the call site), so both are dimensionless.
+ModelingToolkit.get_unit(::typeof(era5_P)) = 1.0
+ModelingToolkit.get_unit(::typeof(era5_P_deriv)) = 1.0
+ModelingToolkit.get_unit(::typeof(era5_P), args) = 1.0
+ModelingToolkit.get_unit(::typeof(era5_P_deriv), args) = 1.0
+
+@register_symbolic era5_P(levx::Real)
+@register_symbolic era5_P_deriv(levx::Real)
+@register_derivative era5_P(levx) 1 era5_P_deriv(levx)
 
 struct ERA5Coupler
     sys::Any
@@ -431,7 +446,7 @@ function ERA5(
     @constants hPa2Pa = 100.0 [unit = u"Pa", description = "Conversion hPa to Pa"]
     @variables P(t) [unit = u"Pa", description = "Pressure"]
     lev = pvdict[:lev]
-    push!(eqs, P ~ hPa2Pa * era5_P_itp(lev))
+    push!(eqs, P ~ hPa2Pa * era5_P(lev))
     push!(lhs_vars, P)
 
     # Coordinate transforms.
@@ -451,7 +466,7 @@ function ERA5(
     if :lev in keys(pvdict)
         @variables δPδlev(t) [
             unit = u"Pa", description = "Pressure gradient with respect to level index"]
-        push!(eqs, δPδlev ~ hPa2Pa * DataInterpolations.derivative(era5_P_itp, lev))
+        push!(eqs, δPδlev ~ hPa2Pa * era5_P_deriv(lev))
         push!(lhs_vars, δPδlev)
     end
 
@@ -513,9 +528,9 @@ function partialderivatives_δPδlev_era5(; default_lev = 1.0)
         end
 
         # d(u)/d(P) = d(u)/d(lev) / (d(P)/d(lev))
-        # P(lev) = P_unit * era5_P_itp(lev)  [Pa]
-        # dP/dlev = P_unit * derivative(era5_P_itp, lev)  [Pa/level]
-        δPδlev = P_unit * DataInterpolations.derivative(era5_P_itp, Num(lev))
+        # P(lev) = P_unit * era5_P(lev)  [Pa]
+        # dP/dlev = P_unit * era5_P_deriv(lev)  [Pa/level]
+        δPδlev = P_unit * era5_P_deriv(Num(lev))
 
         return Dict(only(levindex) => 1 / δPδlev)
     end

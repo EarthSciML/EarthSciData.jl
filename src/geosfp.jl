@@ -423,13 +423,6 @@ ModelingToolkit.get_unit(::typeof(Bp_deriv), args) = 1.0
 @register_derivative Ap(levx) 1 Ap_deriv(levx)
 @register_derivative Bp(levx) 1 Bp_deriv(levx)
 
-# Unit-inference shim for `DataInterpolations.derivative` — used by era5.jl
-# which still relies on `DataInterpolations.LinearInterpolation`.  Kept here
-# (rather than in era5.jl) because it has historically lived next to the
-# Ap/Bp shims and removing it from this file silently broke era5's unit
-# checking.
-ModelingToolkit.get_unit(::typeof(DataInterpolations.derivative), args) = 1.0
-
 # Exact inverse of the hybrid-grid pressure map.  Given a pressure `P` and
 # surface pressure `Ps` (both Pa), return the fractional level argument `x`
 # satisfying  P = P_unit*Ap(x) + Bp(x)*Ps.  `Ap`/`Bp` are piecewise linear

@@ -642,6 +642,46 @@ end
           [DateTime(2024, 1, 1, 5), DateTime(2024, 1, 1, 6), DateTime(2024, 1, 1, 7)]
 end
 
+@testset "lazyload! window regains lookback slot after start-of-data clamp" begin
+    domain = DomainInfo(
+        DateTime(2024, 1, 1), DateTime(2024, 1, 2);
+        lonrange = deg2rad(0.0):deg2rad(1.0):deg2rad(1.0),
+        latrange = deg2rad(0.0):deg2rad(1.0):deg2rad(1.0),
+        levrange = 1:1
+    )
+    fs = HysteresisCountFS(DateTime(2024, 1, 1), DateTime(2024, 1, 2))
+    itp = EarthSciData.DataSetInterpolator{Float64}(
+        fs, "X", DateTime(2024, 1, 1), DateTime(2024, 1, 2), domain)
+    buf = EarthSciData.make_data_buffer(itp)
+
+    # Starting in the first centerpoint's bucket there is no slot before the
+    # anchor, so the first window is clamped to 2 slots.
+    EarthSciData.lazyload!(itp, DateTime(2024, 1, 1, 0, 10), buf)
+    @test itp.cache.times == [DateTime(2024, 1, 1, 0), DateTime(2024, 1, 1, 1)]
+
+    # Once away from the dataset start the window must grow back to its full
+    # 3-slot capacity rather than staying at the clamped length.
+    EarthSciData.lazyload!(itp, DateTime(2024, 1, 1, 1), buf)
+    @test itp.cache.times ==
+          [DateTime(2024, 1, 1, 0), DateTime(2024, 1, 1, 1), DateTime(2024, 1, 1, 2)]
+    t_c = DateTime(2024, 1, 1, 2)
+    EarthSciData.lazyload!(itp, t_c, buf)
+    @test itp.cache.times ==
+          [DateTime(2024, 1, 1, 1), DateTime(2024, 1, 1, 2), DateTime(2024, 1, 1, 3)]
+
+    # A Strang-style reinit! to just before the centerpoint the window was
+    # last advanced at is served by the lookback slot, with no reload.
+    n = fs.nloads[]
+    t_dip = t_c - Minute(1)
+    EarthSciData.lazyload!(itp, t_dip, buf)
+    @test fs.nloads[] == n
+    v1 = _hcfs_tv(fs, DateTime(2024, 1, 1, 1))
+    v2 = _hcfs_tv(fs, t_c)
+    @test EarthSciData.interp_unsafe(
+        itp, buf, t_dip, itp.grid_starts[1], itp.grid_starts[2]) ≈
+          v1 + (59 / 60) * (v2 - v1)
+end
+
 # ---------------------------------------------------------------------------
 # Guard tests for the lock-free `lazyload!` fast path and the interp-event
 # affect NamedTuple cache (keyed by t_abs). Offline: reuses the counting
