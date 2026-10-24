@@ -28,7 +28,7 @@ end
     # Test that the coordinates that we calculate match the coordinates in the file.
     @testset "coordinates" begin
         (; domain) = setup()
-        fs = EarthSciData.WRFFileSet("https://data.rda.ucar.edu/d340000/", domain)
+        fs = EarthSciData.WRFFileSet("https://data.gdex.ucar.edu/d340000/", domain)
         mdU = EarthSciData.loadmetadata(fs, "U")
         @test mdU.staggering == (true, false, false)
         trans = Proj.Transformation(
@@ -62,7 +62,9 @@ end
         @testset "wrf" begin
             (; domain) = setup()
             lon, lat, lev = EarthSciMLBase.pvars(domain)
-            @constants c_unit=6.0 [unit = u"rad" description = "constant to make units cancel out"]
+            @constants c_unit=6.0 [
+                                   unit = u"rad" description = "constant to make units cancel out"
+                                   ]
 
             lonv = deg2rad(-118.2707)
             latv = deg2rad(34.0059)

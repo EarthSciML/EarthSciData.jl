@@ -7,7 +7,7 @@ struct WRFFileSet <: EarthSciData.FileSet
     ds::Any
     freq_info::DataFrequencyInfo
     function WRFFileSet(domain)
-        WRFFileSet("https://data.rda.ucar.edu/d340000/", domain)
+        WRFFileSet("https://data.gdex.ucar.edu/d340000/", domain)
     end
     function WRFFileSet(mirror, domain)
         starttime, endtime = get_tspan_datetime(domain)
@@ -146,10 +146,9 @@ function varnames(fs::WRFFileSet)
     end
 end
 
-Base.close(fs::WRFFileSet) =
-    lock(nclock) do ;
-        close(fs.ds);
-    end
+Base.close(fs::WRFFileSet) = lock(nclock) do ;
+    close(fs.ds)
+end
 
 struct WRFCoupler
     sys::Any
@@ -169,7 +168,7 @@ are always at grid points.
 function WRF(domaininfo::DomainInfo; name = :WRF, stream = true,
         spatial_interp::Symbol = :linear)
     starttime, endtime = get_tspan_datetime(domaininfo)
-    fs = WRFFileSet("https://data.rda.ucar.edu/d340000/", domaininfo)
+    fs = WRFFileSet("https://data.gdex.ucar.edu/d340000/", domaininfo)
 
     pvs = EarthSciMLBase.pvars(domaininfo)
     pvdict = Dict([Symbol(v) => v for v in pvs]...)

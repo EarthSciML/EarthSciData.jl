@@ -27,13 +27,21 @@ Information about an OpenAQ monitoring station.
 $(FIELDS)
 """
 struct OpenAQStation
-    "OpenAQ location ID"
+    """
+    OpenAQ location ID
+    """
     id::Int
-    "Station name"
+    """
+    Station name
+    """
     name::String
-    "Longitude in radians"
+    """
+    Longitude in radians
+    """
     lon::Float64
-    "Latitude in radians"
+    """
+    Latitude in radians
+    """
     lat::Float64
 end
 

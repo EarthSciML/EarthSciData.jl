@@ -161,13 +161,16 @@ end
         @test plevs[4] == 925
 
         # Test the interpolator: level index → hPa.
-        itp=EarthSciData.era5_P_itp
+        itp=EarthSciData.era5_P
         @test itp(1.0) ≈ 1000.0
         @test itp(2.0) ≈ 975.0
         @test itp(3.0) ≈ 950.0
         @test itp(4.0) ≈ 925.0
         # Midpoint interpolation.
         @test itp(1.5) ≈ 987.5
+        # Derivative w.r.t. level index (hPa per level).
+        @test EarthSciData.era5_P_deriv(1.5) ≈ -25.0
+        @test EarthSciData.era5_P_deriv(11.5) ≈ -50.0
 
         # Verify the pressure equation is present in the system.
         era5=ERA5(domain; mirror = era5_mirror)
@@ -334,7 +337,8 @@ end
 
         x, y, _=EarthSciMLBase.pvars(xy_domain2)
         @variables c(ModelingToolkit.t) = 5.0 [unit = u"mol/m^3"]
-        @constants c_unit = 6.0 [unit = u"m", description = "constant to make units cancel out"]
+        @constants c_unit = 6.0 [
+            unit = u"m", description = "constant to make units cancel out"]
 
         exsys=System(
             [ModelingToolkit.D(c)~(sin(x/c_unit)+sin(y/c_unit))*c/ModelingToolkit.t],

@@ -8,27 +8,49 @@ Create an `EarthSciMLBase.Operator` to write simulation output to a NetCDF file.
 $(TYPEDFIELDS)
 """
 mutable struct NetCDFOutputter
-    "The path of the NetCDF file to write to"
+    """
+    The path of the NetCDF file to write to
+    """
     filepath::String
-    "The netcdf dataset"
+    """
+    The netcdf dataset
+    """
     file::Any
-    "The netcdf variables corresponding to the state variables"
+    """
+    The netcdf variables corresponding to the state variables
+    """
     vars::Any
-    "The netcdf variable for time"
+    """
+    The netcdf variable for time
+    """
     tvar::Any
-    "Current time index for writing"
+    """
+    Current time index for writing
+    """
     h::Int
-    "Simulation time interval (in seconds) at which to write to disk"
+    """
+    Simulation time interval (in seconds) at which to write to disk
+    """
     time_interval::AbstractFloat
-    "Extra observed variables to write to disk"
+    """
+    Extra observed variables to write to disk
+    """
     extra_vars::AbstractVector
-    "Functions to get the extra vars"
+    """
+    Functions to get the extra vars
+    """
     extra_var_fs::AbstractVector
-    "Spatial grid specification"
+    """
+    Spatial grid specification
+    """
     grid::Any
-    "Data type of the output"
+    """
+    Data type of the output
+    """
     dtype::Any
-    "Reference time for the simulation, used to convert to Unix time"
+    """
+    Reference time for the simulation, used to convert to Unix time
+    """
     tref::Any
 
     function NetCDFOutputter(

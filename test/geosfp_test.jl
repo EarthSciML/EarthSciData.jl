@@ -48,8 +48,10 @@ end
 
         function Example()
             lon, lat, _ = EarthSciMLBase.pvars(domain)
-            @variables c(t)=5.0 [unit = u"mol/m^3"]
-            @constants c_unit=6.0 [unit = u"rad" description = "constant to make units cancel out"]
+            @variables c(t) = 5.0 [unit = u"mol/m^3"]
+            @constants c_unit=6.0 [
+                                   unit = u"rad" description = "constant to make units cancel out"
+                                   ]
             System(
                 [D(c) ~ (sin(lat * c_unit) + sin(lon * c_unit)) * c / t],
                 t,
@@ -120,7 +122,8 @@ end
         prob = ODEProblem(compiled, [], (24.0 * 3600, 48.0 * 3600))
         integ = init(prob, Tsit5())
         f = getsym(integ, compiled.GEOSFP.P)
-        setter = setp(integ, [compiled.GEOSFP.lon, compiled.GEOSFP.lat, compiled.GEOSFP.lev])
+        setter = setp(integ, [
+            compiled.GEOSFP.lon, compiled.GEOSFP.lat, compiled.GEOSFP.lev])
 
         p_levels = map([1, 1.5, 2, 72, 72.5, 73]) do lev
             setter(integ, [deg2rad(-155.7), deg2rad(39.1), lev])
@@ -135,7 +138,8 @@ end
         prob = ODEProblem(compiled, [], (24.0 * 3600, 48.0 * 3600))
         integ = init(prob, Tsit5())
         f = getsym(integ, compiled.GEOSFP.A3dyn₊OMEGA)
-        setter = setp(integ, [compiled.GEOSFP.lon, compiled.GEOSFP.lat, compiled.GEOSFP.lev])
+        setter = setp(integ, [
+            compiled.GEOSFP.lon, compiled.GEOSFP.lat, compiled.GEOSFP.lev])
 
         omega_levels = map([0.5, 1, 1.5, 2, 72, 72.5, 73]) do lev
             setter(integ, [deg2rad(-155.7), deg2rad(39.1), lev])
@@ -172,7 +176,8 @@ end
         prob = ODEProblem(compiled, [], (24.0 * 3600, 48.0 * 3600))
         integ = init(prob, Tsit5())
         f = getsym(integ, compiled.GEOSFP.Z_agl)
-        setter = setp(integ, [compiled.GEOSFP.lon, compiled.GEOSFP.lat, compiled.GEOSFP.lev])
+        setter = setp(integ, [
+            compiled.GEOSFP.lon, compiled.GEOSFP.lat, compiled.GEOSFP.lev])
 
         z_levels = map([1.0, 1.5, 2.0, 72.0, 72.5, 73.0]) do lev
             setter(integ, [deg2rad(-155.7), deg2rad(39.1), lev])
