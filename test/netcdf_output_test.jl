@@ -11,7 +11,7 @@ using Test
         @parameters lev = 1.0
         @parameters y=2.0 [unit = u"kg"]
         @parameters x=1.0 [unit = u"kg", description = "x coordinate"]
-        @variables u(t)=1.0 [unit = u"kg", description = "u value"]
+        @variables u(t) = 1.0 [unit = u"kg", description = "u value"]
         @variables v(t) [unit = u"kg", description = "v value"]
         @constants c=1.0 [unit = u"kg^2"]
         @constants p=1.0 [unit = u"kg/s"]

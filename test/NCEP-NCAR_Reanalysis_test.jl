@@ -3,7 +3,8 @@ using EarthSciMLBase
 using EarthSciMLBase: DomainInfo
 using Dates: DateTime
 using ModelingToolkit
-using ModelingToolkit: mtkcompile, @constants, @variables, D, PDESystem, System, t, equations
+using ModelingToolkit: mtkcompile, @constants, @variables, D, PDESystem, System, t,
+                       equations
 using DynamicQuantities: @u_str
 using SymbolicIndexingInterface: setp, getsym, parameter_values
 using SciMLBase: ODEProblem
@@ -87,7 +88,9 @@ end
 
         function Example()
             lon, lat, _ = EarthSciMLBase.pvars(domain)
-            @constants c_unit=6.0 [unit = u"rad" description = "constant to make units cancel out"]
+            @constants c_unit=6.0 [
+                                   unit = u"rad" description = "constant to make units cancel out"
+                                   ]
             @variables c(t) [unit = u"mol/m^3"]
             eqs = [D(c) ~ (sin(lat * c_unit) + sin(lon * c_unit)) * c / t]
             return System(

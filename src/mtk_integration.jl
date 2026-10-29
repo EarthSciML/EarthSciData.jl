@@ -389,9 +389,8 @@ This exists so downstream packages can evaluate an interpolator at
 levels) without having to recompute fractional indices by hand.
 
 Use [`interp_callable`](@ref) to fetch one by variable name from a
-`create_interp_equation`-built system, and [`parent_scope_interp_info`](@ref)
-to re-scope the captured parameters when building a coupling equation in a
-parent system.
+`create_interp_equation`-built system; pass `parent_scope = true` to re-scope
+the captured parameters when building a coupling equation in a parent system.
 """
 struct InterpCallable{I}
     info::I
@@ -849,68 +848,6 @@ function live_interp_event(interp_infos, starttime::DateTime)
     return build_interp_event(live, starttime; validate = false)
 end
 
-"""
-$(SIGNATURES)
-
-Mark each interpolator in `loader_sys`'s [`InterpInfos`] metadata that no
-compiled equation in `parent_sys` references as `live[] = false`, so
-[`build_interp_event`]'s affect skips its `lazyload!` call (no NetCDF read,
-no full-grid allocation).  For every interpolator that survives the cut, the
-full-grid buffer is allocated immediately and the first cache window is
-read from NetCDF into it — so any I/O errors surface here rather than at
-solve time, and downstream `ODEProblem` construction reuses the same
-buffer by reference.  `parent_sys` should be the post-`mtkcompile` system
-that `loader_sys` is part of.
-
-`extra_needed` is an extra set of symbolic variables to treat as needed
-(beyond what `equations(parent_sys)` and `observed(parent_sys)` reach).
-Pass `EarthSciMLBase.operator_vars(csys, parent_sys, domain)` here when the
-system uses [`EarthSciMLBase.Operator`]s (e.g. advection); operators
-specify their needs via `get_needed_vars` outside the symbolic equation
-graph and would otherwise be missed by the equation/observed walk.
-
-Loaders auto-register a `SysDiscreteEvent`-shaped factory in their
-metadata that calls this function with the temp coupled+`mtkcompile`d
-system at `convert(::Type{System}, ::CoupledSystem)` time, so the standard
-`couple(...)` → `convert(System, csys)` path applies pruning without any
-extra user action.  Call this function manually only when you bypass that
-path (e.g. plain `compose` + `mtkcompile`) or when you need to inject
-`extra_needed`.
-
-The pruning is irreversible for the lifetime of the loader's `interp_info`
-vector — build a fresh loader to reset `live[]` to `true`.  It also turns
-off the update event's first-fire auto-prune (the `compose` + `mtkcompile`
-fallback), so a later `ODEProblem` keeps what `extra_needed` kept.
-
-The "needed" check collects the variables that state-equation RHSs reach
-through the observed equations (the variables of `Symbolics.fixpoint_sub`
-of each RHS, found without building the substituted expression).  A variable
-that downstream compilation inlines through observed eqs that this walk
-doesn't reach (e.g. through coordinate-aware codegen paths in some
-operator-split solvers) could be marked dead in error.  If this happens
-the symptom is `interp_unsafe: time index outside loaded cache range` at
-solve time; in that case skip the call or expand `extra_needed`.
-
-# Example
-
-```julia
-emis = NEI2016MonthlyEmis(\"sector\", domain)
-@variables ACET(t) = 0.0
-sys = compose(System([D(ACET) ~ emis.ACET], t, [ACET], []; name = :state), emis)
-sys = mtkcompile(sys)
-EarthSciData.prune_unused_interps!(emis, sys)  # opt in to gating
-prob = ODEProblem(sys, ..., tspan)
-```
-
-When the workflow uses operators:
-
-```julia
-csys = couple(sys, emis, Advection(), domain)
-parent_sys = convert(System, csys)
-extra = EarthSciMLBase.operator_vars(csys, parent_sys, domain)
-EarthSciData.prune_unused_interps!(emis, parent_sys; extra_needed = extra)
-```
-"""
 # Assert that the interpolator's data centerpoints bracket its domain's
 # tspan.  Called from `build_interp_event` for every interp_info; failures
 # raise at problem build time rather than partway through `solve`.

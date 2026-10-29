@@ -535,7 +535,7 @@ function varnames(fs::NEI2016MonthlyEmisFileSet)
 end
 
 Base.close(fs::NEI2016MonthlyEmisFileSet) = lock(nclock) do ;
-    close(fs.ds);
+    close(fs.ds)
 end
 
 # Grid attributes of an NEI file; sectors are summed and regridded together only if
@@ -703,8 +703,8 @@ function NEI2016MonthlyEmis(
     _check_same_grid([sub for (_, fs) in groups for sub in fs.filesets])
     group_vars = [Set(varnames(fs)) for (_, fs) in groups]
     # The regridder is built from the first variable's grid metadata and
-    # reused across every variable and sector; if any later variable's grid disagrees,
-    # the regridder would silently mis-map its emissions.  Validate up-front
+    # reused across every variable; if any later variable's grid disagrees,
+    # the regridder would silently misplace its emissions.  Validate up-front
     # rather than letting the mismatch produce wrong numbers at solve time.
     ref_fs = groups[1][2]
     ref_var = first(varnames(ref_fs))

@@ -208,10 +208,9 @@ Return the variable names associated with this FileSet.
 """
 varnames(fs::GEOSFPFileSet) = fs.var_names
 
-Base.close(fs::GEOSFPFileSet) =
-    lock(nclock) do ;
-        close(fs.ds);
-    end
+Base.close(fs::GEOSFPFileSet) = lock(nclock) do ;
+    close(fs.ds)
+end
 
 # Hybrid-grid Ap and Bp coefficients for GEOS-FP, tabulated at integer
 # vertical levels 1..73.  Pressure at fractional level `lev` is
@@ -371,7 +370,7 @@ const _Bp_data = [
 # Piecewise linear interpolation over integer knots `1..length(coeffs)`.
 # `levx` outside the knot range is clamped (Flat extrapolation, matching
 # the previous DataInterpolations default).
-@inline function _hybrid_lerp(coeffs::AbstractVector, levx::T) where T
+@inline function _hybrid_lerp(coeffs::AbstractVector, levx::T) where {T}
     isnan(levx) && return T(NaN)
     n = length(coeffs)
     i = clamp(trunc(Int, levx), 1, n - 1)
@@ -426,13 +425,6 @@ ModelingToolkit.get_unit(::typeof(Bp_deriv), args) = 1.0
 
 @register_derivative Ap(levx) 1 Ap_deriv(levx)
 @register_derivative Bp(levx) 1 Bp_deriv(levx)
-
-# Unit-inference shim for `DataInterpolations.derivative` — used by era5.jl
-# which still relies on `DataInterpolations.LinearInterpolation`.  Kept here
-# (rather than in era5.jl) because it has historically lived next to the
-# Ap/Bp shims and removing it from this file silently broke era5's unit
-# checking.
-ModelingToolkit.get_unit(::typeof(DataInterpolations.derivative), args) = 1.0
 
 # Exact inverse of the hybrid-grid pressure map.  Given a pressure `P` and
 # surface pressure `Ps` (both Pa), return the fractional level argument `x`
@@ -628,10 +620,10 @@ function GEOSFP(
     lat_var = get(pvdict, :lat, get(pvdict, :y, nothing))
     @assert !isnothing(lon_var) && !isnothing(lat_var) "Z_agl requires lon/lat (or x/y) coordinates"
 
-    Tv_at(k_expr) =
-        build_interp_expr(t_info, t_ref + t, [lon_var, lat_var, k_expr]) *
-        (1 + 0.61 *
-             build_interp_expr(qv_info, t_ref + t, [lon_var, lat_var, k_expr]))
+    Tv_at(k_expr) = build_interp_expr(t_info, t_ref + t, [lon_var, lat_var, k_expr]) *
+                    (1 +
+                     0.61 *
+                     build_interp_expr(qv_info, t_ref + t, [lon_var, lat_var, k_expr]))
     P_at(k_expr) = P_unit * Ap(k_expr) + Bp(k_expr) * PS
 
     # 73 Ap/Bp edges → 72 layers.  Each layer k contributes either its full

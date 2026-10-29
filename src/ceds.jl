@@ -273,10 +273,9 @@ function varnames(fs::CEDSFileSet)
     ["$(fs.species)_em_anthro"]
 end
 
-Base.close(fs::CEDSFileSet) =
-    lock(nclock) do
-        close(fs.ds)
-    end
+Base.close(fs::CEDSFileSet) = lock(nclock) do
+    close(fs.ds)
+end
 
 struct CEDSCoupler
     sys::Any

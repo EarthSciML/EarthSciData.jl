@@ -22,7 +22,7 @@ const _INLINE_DELP = [15.199, 15.286, 15.285, 15.284, 15.285, 15.285, 15.283,
 # to [1, 30]. Registered symbolic; unit fallback returns level 1.
 function inline_target_lev(H::Real)
     isfinite(H) || return 1.0
-    best = 1;
+    best = 1
     bd = Inf
     @inbounds for l in 1:length(_INLINE_MIDALT)
         d = abs(_INLINE_MIDALT[l] - H)
@@ -182,7 +182,7 @@ end
 
 DataFrequencyInfo(fs::NEI2016InlineEmisFileSet) = fs.freq_info
 Base.close(fs::NEI2016InlineEmisFileSet) = lock(nclock) do ;
-    close(fs.ds);
+    close(fs.ds)
 end
 
 """
@@ -299,7 +299,7 @@ function loadslice!(data::AbstractArray, fs::NEI2016InlineEmisFileSet, t::DateTi
         @assert length(emis)==st.n "inline EMIS length $(length(emis)) != NSTACKS $(st.n)"
         if tokg != 0.0
             @inbounds for s in 1:st.n
-                c = st.col[s];
+                c = st.col[s]
                 r = st.row[s]
                 (1 <= c <= fs.ncols && 1 <= r <= fs.nrows) || continue
                 data[c, r] += emis[s] * tokg         # kg/s accumulated into the cell
@@ -384,15 +384,15 @@ function NEI2016InlineEmisFileSet(
         stacks = _read_stack_groups(stkds)
         # 12US1 grid + LCC projection from the stack_groups global attributes.
         a = stkds.attrib
-        p_alp = a["P_ALP"];
-        p_bet = a["P_BET"];
-        xcent = a["XCENT"];
+        p_alp = a["P_ALP"]
+        p_bet = a["P_BET"]
+        xcent = a["XCENT"]
         ycent = a["YCENT"]
         native_sr = "+proj=lcc +lat_1=$(p_alp) +lat_2=$(p_bet) +lat_0=$(ycent) " *
                     "+lon_0=$(xcent) +x_0=0 +y_0=0 +a=6370997.0 +b=6370997.0 +to_meter=1"
-        x0 = a["XORIG"];
-        y0 = a["YORIG"];
-        dx = a["XCELL"];
+        x0 = a["XORIG"]
+        y0 = a["YORIG"]
+        dx = a["XCELL"]
         dy = a["YCELL"]
         # NCOLS/NROWS in the sparse stack_groups are (1, NSTACKS); the full target
         # grid size comes from GDNAM ("12US1_459X299") -> 459 x 299.
@@ -434,7 +434,7 @@ function _compute_hinj_grids(ds, st::StackTable, ncols, nrows, cellarea)
     wg1 = zeros(Float64, ncols, nrows)   # equal-weight fallback
     hw1 = zeros(Float64, ncols, nrows)
     @inbounds for s in 1:st.n
-        c = st.col[s];
+        c = st.col[s]
         r = st.row[s]
         (1 <= c <= ncols && 1 <= r <= nrows) || continue
         wg[c, r] += w[s] / cellarea
@@ -471,9 +471,9 @@ function _inline_centerpoints(ds, model_year::Integer)
     base_yr = Int(tf[1, 1, 1]) ÷ 1000   # proxy base year (e.g. 2017)
     out = DateTime[]
     for k in 1:nt
-        yyyyddd = Int(tf[1, 1, k]);
+        yyyyddd = Int(tf[1, 1, k])
         hhmmss = Int(tf[2, 1, k])
-        yr = yyyyddd ÷ 1000;
+        yr = yyyyddd ÷ 1000
         doy = yyyyddd % 1000
         hh = hhmmss ÷ 10000
         dt = DateTime(yr, 1, 1) + Day(doy - 1) + Hour(hh)
@@ -570,8 +570,7 @@ function _atomic_write_member(out, bytes, expected_size)
         error("staging $(basename(out)): payload is not NetCDF — tar offset table misaligned")
     tmp = out * ".tmp-$(getpid())-$(rand(UInt32))"
     open(tmp, "w") do io
-        ;
-        write(io, bytes);
+        write(io, bytes)
     end
     mv(tmp, out; force = true)
     return out
@@ -674,8 +673,7 @@ function _inline_ensure_extracted(mirror, sector, starttime, endtime, extract_di
             (endswith(fn, ".ncf") && !startswith(fn, ".")) || continue
             out = joinpath(extract_dir, fn)
             isfile(out) || open(out, "w") do io
-                ;
-                write(io, read(f));
+                write(io, read(f))
             end
         end
     finally
@@ -783,9 +781,9 @@ function NEI2016InlineEmis(
             stream = stream, regrid_f = shared_regridder)
         feq, fdisc, fconst, finfo = create_interp_equation(
             fitp, "", t, t_ref, [x, y]; spatial_interp = spatial_interp)
-        push!(eqs, feq);
+        push!(eqs, feq)
         append!(all_discretes, fdisc)
-        append!(all_constants, fconst);
+        append!(all_constants, fconst)
         push!(interp_infos, finfo)
         push!(lhs_vars, feq.lhs)
         store === :hinjw ? (hinjw_var = feq.lhs) : (wemis_var = feq.lhs)
@@ -821,9 +819,9 @@ function NEI2016InlineEmis(
         eq, discretes, constants, info = create_interp_equation(
             itp, "", t, t_ref, [x, y];
             wrapper_f = wrapper_f, spatial_interp = spatial_interp)
-        push!(eqs, eq);
+        push!(eqs, eq)
         append!(all_discretes, discretes)
-        append!(all_constants, constants);
+        append!(all_constants, constants)
         push!(interp_infos, info)
         push!(lhs_vars, eq.lhs)
     end

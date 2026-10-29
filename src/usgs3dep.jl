@@ -71,18 +71,18 @@ function USGS3DEPFileSet(domaininfo; resolution = 1 / 3)
         # Also sample edges to capture curvature for large domains.
         for x in xs
             lo, la = to_lonlat(x, first(ys))
-            push!(lon_vals, rad2deg(lo));
+            push!(lon_vals, rad2deg(lo))
             push!(lat_vals, rad2deg(la))
             lo, la = to_lonlat(x, last(ys))
-            push!(lon_vals, rad2deg(lo));
+            push!(lon_vals, rad2deg(lo))
             push!(lat_vals, rad2deg(la))
         end
         for y in ys
             lo, la = to_lonlat(first(xs), y)
-            push!(lon_vals, rad2deg(lo));
+            push!(lon_vals, rad2deg(lo))
             push!(lat_vals, rad2deg(la))
             lo, la = to_lonlat(last(xs), y)
-            push!(lon_vals, rad2deg(lo));
+            push!(lon_vals, rad2deg(lo))
             push!(lat_vals, rad2deg(la))
         end
         lon_min, lon_max = extrema(lon_vals)

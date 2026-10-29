@@ -86,7 +86,7 @@ using Test
         # DAE with `u0 = Nothing` which errors during solver initialization.
         # Wrap with a trivial `D(_dummy) ~ 0` state so `solve` has something
         # to integrate — same pattern used in the GEOSFP/WRF/NCEP tests.
-        @variables _dummy(t)=0.0
+        @variables _dummy(t) = 0.0
         _sys=compose(System([D(_dummy)~0], t; name = :_w), emis)
         sys=mtkcompile(_sys)
         prob=ODEProblem(

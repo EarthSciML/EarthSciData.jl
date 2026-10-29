@@ -51,6 +51,11 @@ jobs:
             Pkg.instantiate();
             include("runbenchmarks.jl")'
 
+      # `Pkg.develop` above rewrites bench/Project.toml; discard that so the
+      # benchmark action can switch to the gh-pages branch.
+      - name: Restore bench/Project.toml
+        run: git checkout -- bench/Project.toml
+
       - name: Store benchmark result
         uses: benchmark-action/github-action-benchmark@v1
         with:
