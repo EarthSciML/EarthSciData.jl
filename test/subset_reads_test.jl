@@ -249,3 +249,14 @@ end
         end
     end
 end
+
+@testset "subset reads are off for Periodic/Line extrapolation" begin
+    domain = DomainInfo(DateTime(2024, 1, 1), DateTime(2024, 1, 2);
+        lonrange = deg2rad(1.0):deg2rad(1.0):deg2rad(2.0),
+        latrange = deg2rad(1.0):deg2rad(1.0):deg2rad(2.0), levrange = 1:2)
+    for ext in (EarthSciData.Periodic(), EarthSciData.Line())
+        a = DataSetInterpolator{Float64}(uniform_fs(), "C", DateTime(2024, 1, 1),
+            DateTime(2024, 1, 2), domain; extrapolate_type = ext)
+        @test a.read_box === nothing
+    end
+end

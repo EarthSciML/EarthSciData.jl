@@ -516,10 +516,13 @@ mutable struct DataSetInterpolator{To, N, N2, FT, DomT, ET, FS, RG}
         box = nothing
         rg = if regrid_f === nothing
             model_grid = _compute_grid(domain, metadata.staggering)
-            if subset_reads && supports_subset_reads(fs)
+            # The box is clamped to the grid edges, which suffices for `Flat` and
+            # constant-fill extrapolation; `Periodic`, `Line` etc. read beyond it.
+            if subset_reads && supports_subset_reads(fs) &&
+               (extrapolate_type isa Flat || extrapolate_type isa Real)
                 box = _read_box(metadata, model_grid, domain)
             end
-            _default_regridder(metadata, model_grid, domain, extrapolate_type, box)
+            InterpolatingRegridder(metadata, model_grid, domain, box)
         else
             regrid_f
         end
@@ -587,16 +590,6 @@ end
 
 # Background prefetch is on unless `EARTHSCIDATA_PREFETCH=0`; read when an interpolator is built.
 _prefetch_default() = get(ENV, "EARTHSCIDATA_PREFETCH", "1") != "0"
-
-# The default regridder: interpolation of a full-grid or boxed source onto the
-# model grid. A function barrier, so the closure's fields are concretely typed.
-function _default_regridder(metadata, model_grid, domain, extrapolate_type, box)
-    (dst::AbstractArray, src::AbstractArray;
-        extrapolate_type = extrapolate_type) -> begin
-        interpolate_from!(dst, src, metadata, model_grid, domain;
-            extrapolate_type = extrapolate_type, box = box)
-    end
-end
 
 # Subset reads are on unless `EARTHSCIDATA_SUBSET_READS=0`; read when an interpolator is built.
 _subset_reads_default() = get(ENV, "EARTHSCIDATA_SUBSET_READS", "1") != "0"
@@ -1016,7 +1009,10 @@ end
 function _wait_quietly(task::Task)
     try
         wait(task)
-    catch
+    catch e
+        # A failed load is reported where its result is consumed or discarded;
+        # anything else (e.g. an interrupt of the waiting task) must propagate.
+        e isa TaskFailedException || rethrow()
     end
     return nothing
 end
@@ -1042,7 +1038,7 @@ function _start_prefetch!(itp::DataSetInterpolator{To}) where {To}
     itp.prefetch || return
     tc = itp.cache
     last_t = tc.times[end]
-    last_t <= itp.endtime || return
+    last_t < itp.endtime || return
     cpts = DataFrequencyInfo(itp.fs).centerpoints
     i = searchsortedlast(cpts, last_t) + 1
     i <= length(cpts) || return
@@ -1051,6 +1047,7 @@ function _start_prefetch!(itp::DataSetInterpolator{To}) where {To}
     if pf !== nothing
         pf.time == t_next && return
         _wait_quietly(pf.task)  # it uses `load_cache` and `staging`
+        _prefetch_succeeded(itp, pf)  # report a failure of the discarded load
     end
     if tc.staging === nothing
         tc.staging = zeros(To, itp.grid_size..., 1)
@@ -1189,7 +1186,10 @@ function lazyload_swap!(itp::DataSetInterpolator, t::DateTime,
         (tc.currenttime == t || _window_covers(tc, t)) && return active
         # Zeroed rather than `similar`: a window shorter than the buffer leaves
         # a slot unwritten, and the time interpolation multiplies it by zero.
-        dst = spare === nothing ? fill!(similar(active), zero(eltype(active))) : spare
+        # A backward move can follow the previous move closely (so readers may
+        # still hold the spare), so it always gets a fresh buffer.
+        fresh = spare === nothing || t < tc.times[begin]
+        dst = fresh ? fill!(similar(active), zero(eltype(active))) : spare
         update!(itp, t, active, dst)
         return dst
     end

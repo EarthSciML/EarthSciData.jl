@@ -563,7 +563,11 @@ missing from one sector's file is treated as zero for that sector.
 """
 struct NEI2016MonthlyEmisMultiFileSet{F <: NEI2016MonthlyEmisFileSet} <: FileSet
     filesets::Vector{F}
+    vars::Vector{Vector{String}}  # `varnames` of each file set, read once
 end
+
+NEI2016MonthlyEmisMultiFileSet(filesets::Vector{<:NEI2016MonthlyEmisFileSet}) =
+    NEI2016MonthlyEmisMultiFileSet(filesets, [varnames(fs) for fs in filesets])
 
 function NEI2016MonthlyEmisMultiFileSet(sectors::AbstractVector{<:AbstractString},
         starttime::DateTime, endtime::DateTime)
@@ -574,7 +578,7 @@ function NEI2016MonthlyEmisMultiFileSet(sectors::AbstractVector{<:AbstractString
 end
 
 function _first_with(fs::NEI2016MonthlyEmisMultiFileSet, varname)
-    i = findfirst(sub -> varname in varnames(sub), fs.filesets)
+    i = findfirst(vars -> varname in vars, fs.vars)
     isnothing(i) && error("Variable $varname not found in any of the NEI2016 sectors.")
     fs.filesets[i]
 end
@@ -590,17 +594,26 @@ end
 function get_geometry(fs::NEI2016MonthlyEmisMultiFileSet, m::MetaData)
     get_geometry(first(fs.filesets), m)
 end
-varnames(fs::NEI2016MonthlyEmisMultiFileSet) = unique(vcat(varnames.(fs.filesets)...))
+varnames(fs::NEI2016MonthlyEmisMultiFileSet) = unique(vcat(fs.vars...))
 
 function loadslice!(data::AbstractArray, fs::NEI2016MonthlyEmisMultiFileSet,
         t::DateTime, varname)
-    fill!(data, zero(eltype(data)))
-    buf = similar(data)
-    for sub in fs.filesets
-        varname in varnames(sub) || continue
-        loadslice!(buf, sub, t, varname)
-        data .+= buf
+    # The first sector with the variable loads straight into `data`; the temporary
+    # is only allocated when a second one has to be added.
+    buf = nothing
+    first_loaded = false
+    for (sub, vars) in zip(fs.filesets, fs.vars)
+        varname in vars || continue
+        if !first_loaded
+            loadslice!(data, sub, t, varname)
+            first_loaded = true
+        else
+            buf === nothing && (buf = similar(data))
+            loadslice!(buf, sub, t, varname)
+            data .+= buf
+        end
     end
+    first_loaded || fill!(data, zero(eltype(data)))
     nothing
 end
 
@@ -738,7 +751,12 @@ function NEI2016MonthlyEmis(
     dt = EarthSciMLBase.eltype(domaininfo)
     # Top model layer of the domain; profiles reaching above it are folded into it.
     levidx = findfirst(v -> Symbol(v) === Symbol(lev), EarthSciMLBase.pvars(domaininfo))
-    ktop = round(Int, maximum(EarthSciMLBase.grid(domaininfo, (false, false, false))[levidx]))
+    levidx === nothing && error(
+        "The domain has no vertical coordinate named $(Symbol(lev)); NEI2016 emissions need it to place them in layers.")
+    levgrid = EarthSciMLBase.grid(domaininfo, (false, false, false))[levidx]
+    all(l -> isinteger(l) && l >= 1, levgrid) || error(
+        "NEI2016 emissions need layer-index vertical levels (1, 2, ...); got $(collect(levgrid)).")
+    ktop = round(Int, maximum(levgrid))
     group_f = spatial_interp === :nearest ? nei_group_emis_nearest : nei_group_emis
     allvars = unique(vcat([varnames(fs) for (_, fs) in groups]...))
     for varname in allvars

@@ -586,3 +586,30 @@ end
     @test ok
     @test nswap >= 3
 end
+
+@testset "lazyload_swap!: backward move never reuses the spare" begin
+    start, finish = DateTime(2024, 1, 1), DateTime(2024, 1, 2)
+    itp = EarthSciData.DataSetInterpolator{Float64}(
+        PrefetchFS(start, finish), "X", start, finish, pf_domain(start, finish);
+        prefetch = false)
+    sb = SwapBufs(itp)
+    swapload!(itp, start + Hour(6), sb)
+    swapload!(itp, start + Hour(8), sb)   # forward: the old buffer becomes the spare
+    spare = sb.spare
+    held = sb.active                      # what solver threads may still be reading
+    swapload!(itp, start + Hour(2), sb)   # backward past the lookback slot
+    @test sb.active !== spare
+    @test sb.active !== held
+end
+
+@testset "prefetch: nothing past the interpolator's end time" begin
+    start, finish = DateTime(2024, 1, 1), DateTime(2024, 1, 2)
+    fs = PrefetchFS(start, finish)
+    itp = EarthSciData.DataSetInterpolator{Float64}(
+        fs, "X", start, start + Hour(6), pf_domain(start, finish); prefetch = true)
+    buf = EarthSciData.make_data_buffer(itp)
+    EarthSciData.lazyload!(itp, start + Hour(5) + Minute(30), buf)
+    wait_prefetch(itp)
+    @test all(l -> l[1] <= start + Hour(7), fs.loads)
+    @test itp.cache.prefetch === nothing || itp.cache.prefetch.time <= start + Hour(7)
+end

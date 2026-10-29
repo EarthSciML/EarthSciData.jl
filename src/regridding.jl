@@ -174,16 +174,19 @@ the model grid. Typed fields keep the per-timestep call site statically
 dispatched; the earlier closure-based implementation could capture its
 variables with abstract types.
 """
-struct InterpolatingRegridder{MT, MG, DT}
+struct InterpolatingRegridder{MT, MG, DT, BT}
     metadata::MT
     model_grid::MG
     domain::DT
+    box::BT  # index box of a subset-read source, or `nothing` for the full grid
 end
+InterpolatingRegridder(metadata, model_grid, domain) =
+    InterpolatingRegridder(metadata, model_grid, domain, nothing)
 
 function (r::InterpolatingRegridder)(dst::AbstractArray, src::AbstractArray;
         extrapolate_type = Flat())
     interpolate_from!(dst, src, r.metadata, r.model_grid, r.domain;
-        extrapolate_type = extrapolate_type)
+        extrapolate_type = extrapolate_type, box = r.box)
 end
 
 """
