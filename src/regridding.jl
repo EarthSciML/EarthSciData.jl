@@ -38,7 +38,26 @@ function horizontal_regridder(fs::FileSet, metadata::MetaData, domain::DomainInf
         model_grid[i] = ct.(poly)
     end
     data_grid = get_geometry(fs, metadata)
-    ConservativeRegridding.Regridder(model_grid, data_grid)
+    planar_regridder(model_grid, data_grid)
+end
+
+# ConservativeRegridding 0.1 `Regridder(dst, src)` with explicit `Planar()` areas, avoiding GeoInterface's deprecated `crstrait` fallback.
+function planar_regridder(dst_vertices, src_vertices; nodecapacity = 10)
+    to_polys(v) = GO.fix.(GI.Polygon.(GI.LinearRing.(v)))
+    dst_polys, src_polys = to_polys(dst_vertices), to_polys(src_vertices)
+    intersections = SparseArrays.spzeros(Float64, length(dst_polys), length(src_polys))
+    src_tree = STRtree(src_polys; nodecapacity = nodecapacity)
+    dst_tree = STRtree(dst_polys; nodecapacity = nodecapacity)
+    GO.SpatialTreeInterface.dual_depth_first_search(
+        Extents.intersects, src_tree, dst_tree) do i, j
+        polys = GO.intersection(src_polys[i], dst_polys[j]; target = GI.PolygonTrait())
+        a = GO.area(GO.Planar(), polys)
+        a > 0 && (intersections[j, i] += a)
+    end
+    dst_areas = [GO.area(GO.Planar(), p) for p in dst_polys]
+    src_areas = [GO.area(GO.Planar(), p) for p in src_polys]
+    rg = ConservativeRegridding.Regridder(intersections, dst_areas, src_areas)
+    LinearAlgebra.normalize!(rg)
 end
 
 function regrid_horizontal!(dst_field, regridder::ConservativeRegridding.Regridder, src_field, mta::MetaData)
@@ -50,13 +69,48 @@ function regrid_horizontal!(dst_field, regridder::ConservativeRegridding.Regridd
 end
 
 """
+The full native grid of a variable of which only the index box `box` was read
+into `data`. Regridding through it keeps the full-grid interpolant (knots,
+uniform-or-gridded path, extrapolation bounds), so the regridded values equal
+those of a full read bit for bit. The box must hold every grid point the
+interpolant reads; reading outside it throws.
+"""
+struct _BoxedArray{T, N, A <: AbstractArray{T, N}} <: AbstractArray{T, N}
+    data::A
+    offsets::NTuple{N, Int}
+    size::NTuple{N, Int}
+end
+function _BoxedArray(data::AbstractArray{T, N}, box::NTuple{N, UnitRange{Int}},
+        fullsize::NTuple{N, Int}) where {T, N}
+    size(data) == length.(box) || throw(DimensionMismatch(
+        "Data of size $(size(data)) does not fill the read box $box."))
+    _BoxedArray(data, first.(box) .- 1, fullsize)
+end
+Base.size(b::_BoxedArray) = b.size
+Base.IndexStyle(::Type{<:_BoxedArray}) = IndexCartesian()
+# Interpolations reads `first(A)` only to infer its element type.
+Base.first(b::_BoxedArray) = first(b.data)
+@inline function Base.getindex(b::_BoxedArray{T, N}, I::Vararg{Int, N}) where {T, N}
+    J = I .- b.offsets
+    checkbounds(Bool, b.data, J...) || _throw_outside_box(b, I)
+    @inbounds b.data[J...]
+end
+@noinline _throw_outside_box(b, I) = throw(BoundsError(
+    "Grid point $I lies outside the read box $(map((o, n) -> (o + 1):(o + n), b.offsets, size(b.data))); the box must cover every point the regridder reads."))
+
+"""
 Build the source-grid interpolator for regridding. Uniform axes take the fast
 scaled-BSpline path; any non-uniform axis (e.g. the GEOS-FP half-polar latitude
 grid, spacings {0.1875, 0.25} deg) switches to `Gridded` interpolation on the
 true knots. Forcing a uniform range onto that axis displaced every met field
 poleward by up to ~4 km and blended 7-14% with the neighbouring native row.
+With `box`, `src` holds only that index box of the grid (see `_BoxedArray`).
 """
-function _build_regrid_interp(src, coords, extrapolate_type, degree = Linear())
+function _build_regrid_interp(src, coords, extrapolate_type, degree = Linear();
+        box = nothing)
+    if box !== nothing
+        src = _BoxedArray(src, box, Tuple(length.(coords)))
+    end
     if all(c -> isuniform(c), coords)
         data_grid = Tuple(knots2range.(coords))
         padded_src, padded_grid = _pad_singletons(src, data_grid)
@@ -65,16 +119,27 @@ function _build_regrid_interp(src, coords, extrapolate_type, degree = Linear())
     else
         knots = Tuple(collect(Float64, c) for c in coords)
         padded_src, padded_knots = _pad_singletons(src, knots)
-        return extrapolate(
-            interpolate(padded_knots, padded_src, Gridded(degree)), extrapolate_type)
+        # `interpolate` copies its input, which for a boxed source would
+        # allocate the full grid; the boxed source is only read here.
+        itp0 = box === nothing ? interpolate(padded_knots, padded_src, Gridded(degree)) :
+               interpolate!(padded_knots, padded_src, Gridded(degree))
+        return extrapolate(itp0, extrapolate_type)
     end
 end
 
 function interpolate_from!(dst::AbstractArray{T, N},
         src::AbstractArray{T, N}, mta::MetaData, model_grid, domain;
-        extrapolate_type = Flat()) where {T, N}
-    itp = _build_regrid_interp(src, mta.coords, extrapolate_type)
+        extrapolate_type = Flat(), box = nothing) where {T, N}
+    itp = _build_regrid_interp(src, mta.coords, extrapolate_type; box = box)
     ct = coord_trans(mta, domain)
+    _interpolate_points!(dst, itp, ct, mta, model_grid)
+end
+
+# The point loop of `interpolate_from!`, behind a function barrier: the
+# interpolant's type depends on the grid (uniform or gridded, boxed or not),
+# so without it every point would be evaluated through dynamic dispatch.
+function _interpolate_points!(dst::AbstractArray{T, N}, itp, ct, mta::MetaData,
+        model_grid) where {T, N}
     if N == 3
         for (i, x) in enumerate(model_grid[1])
             for (j, y) in enumerate(model_grid[2])
@@ -109,16 +174,19 @@ the model grid. Typed fields keep the per-timestep call site statically
 dispatched; the earlier closure-based implementation could capture its
 variables with abstract types.
 """
-struct InterpolatingRegridder{MT, MG, DT}
+struct InterpolatingRegridder{MT, MG, DT, BT}
     metadata::MT
     model_grid::MG
     domain::DT
+    box::BT  # index box of a subset-read source, or `nothing` for the full grid
 end
+InterpolatingRegridder(metadata, model_grid, domain) =
+    InterpolatingRegridder(metadata, model_grid, domain, nothing)
 
 function (r::InterpolatingRegridder)(dst::AbstractArray, src::AbstractArray;
         extrapolate_type = Flat())
     interpolate_from!(dst, src, r.metadata, r.model_grid, r.domain;
-        extrapolate_type = extrapolate_type)
+        extrapolate_type = extrapolate_type, box = r.box)
 end
 
 """

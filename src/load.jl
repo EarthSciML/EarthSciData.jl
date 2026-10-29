@@ -58,6 +58,11 @@ To satisfy this interface, a type must implement the following methods:
   - `loadslice!(cache::AbstractArray, ::FileSet, ::DateTime, varname)`
   - `varnames(::FileSet)`
   - `get_geometry(::FileSet, ::MetaData)` (Returns the geometry of the data)
+
+Optionally, to read only the part of the grid a domain needs:
+
+  - `supports_subset_reads(::FileSet) = true`
+  - `loadslice!(cache::AbstractArray, ::FileSet, ::DateTime, varname, box)` (`box` holds one index range per spatial dimension)
 """
 abstract type FileSet end
 
@@ -383,6 +388,15 @@ function centerpoint_index(t_info::DataFrequencyInfo, t::DateTime)
 end
 
 """
+A background load of the record at `time` into the interpolator's staging
+buffer (see `_start_prefetch!`).
+"""
+struct _Prefetch
+    time::DateTime
+    task::Task
+end
+
+"""
 Cache for time-varying interpolation state within a `DataSetInterpolator`.
 The full-grid data buffer lives on the parameter object (see
 `build_interp_event`), not here; the affect threads it back into
@@ -414,6 +428,14 @@ mutable struct TemporalCache{To, N, N2}
     Whether the cache has been initialized with real data.
     """
     initialized::Bool
+    """
+    Host-side one-record buffer, sized `(grid..., 1)`, that background prefetches regrid into; `nothing` until the first prefetch.
+    """
+    staging::Union{Nothing, Array{To, N}}
+    """
+    The running or finished background load of the record after the window, or `nothing`.
+    """
+    prefetch::Union{Nothing, _Prefetch}
 end
 
 """
@@ -430,6 +452,13 @@ data records for the times immediately before and after the current time step.
 `varname` is the name of the variable to interpolate. `default_time` is the time to use when initializing
 the interpolator. `spatial_ref` is the spatial reference system that the simulation will be using.
 `stream` specifies whether the data should be streamed in as needed or loaded all at once.
+When streaming, `prefetch` (default: on unless the environment variable
+`EARTHSCIDATA_PREFETCH` is `0`) loads the record after the cached window in a
+background task, so moving the window forward copies it in instead of reading it.
+`subset_reads` (default: on unless the environment variable
+`EARTHSCIDATA_SUBSET_READS` is `0`) reads only the index box of the native grid
+that the domain needs, for file sets that support it and the default regridder
+(see `_read_box`).
 """
 mutable struct DataSetInterpolator{To, N, N2, FT, DomT, ET, FS, RG}
     fs::FS
@@ -460,23 +489,40 @@ mutable struct DataSetInterpolator{To, N, N2, FT, DomT, ET, FS, RG}
     Number of time slices the interpolator caches at once (size of the trailing time dim of the data buffer).
     """
     cache_size::Int
+    """
+    Whether to load the record after the window in the background (see `_start_prefetch!`).
+    """
+    prefetch::Bool
+    """
+    End of the period the interpolator was built for; records past the first one at or after it are not prefetched.
+    """
+    endtime::DateTime
+    """
+    Index range read along each spatial dimension of the native grid, or `nothing` to read the full grid (see `_read_box`).
+    """
+    read_box::Union{Nothing, NTuple{N2, UnitRange{Int}}}
 
     function DataSetInterpolator{To}(fs::FileSet, varname::AbstractString,
             starttime::DateTime, endtime::DateTime, domain;
             stream = true, extrapolate_type = Flat(),
-            regrid_f = nothing) where {To <: Real}
+            regrid_f = nothing, prefetch::Bool = _prefetch_default(),
+            subset_reads::Bool = _subset_reads_default()) where {To <: Real}
         metadata = loadmetadata(fs, varname)
 
         # Default regridder: BSpline interpolation onto the (possibly
         # staggered) model grid.  Callers that need conservative or
-        # nearest-neighbour regridding pass `regrid_f` explicitly.
+        # nearest-neighbour regridding pass `regrid_f` explicitly.  Only the
+        # default regridder knows how to read a boxed source.
+        box = nothing
         rg = if regrid_f === nothing
             model_grid = _compute_grid(domain, metadata.staggering)
-            (dst::AbstractArray, src::AbstractArray;
-                extrapolate_type = extrapolate_type) -> begin
-                interpolate_from!(dst, src, metadata, model_grid, domain;
-                    extrapolate_type = extrapolate_type)
+            # The box is clamped to the grid edges, which suffices for `Flat` and
+            # constant-fill extrapolation; `Periodic`, `Line` etc. read beyond it.
+            if subset_reads && supports_subset_reads(fs) &&
+               (extrapolate_type isa Flat || extrapolate_type isa Real)
+                box = _read_box(metadata, model_grid, domain)
             end
+            InterpolatingRegridder(metadata, model_grid, domain, box)
         else
             regrid_f
         end
@@ -518,7 +564,7 @@ mutable struct DataSetInterpolator{To, N, N2, FT, DomT, ET, FS, RG}
 
         tc = TemporalCache{To, N, N2}(
             load_cache, nothing, times,
-            DateTime(1, 1, 1), false
+            DateTime(1, 1, 1), false, nothing, nothing
         )
         itp = new{To, N, N2, FT, typeof(domain), typeof(extrapolate_type),
             typeof(fs), typeof(rg)}(
@@ -533,10 +579,106 @@ mutable struct DataSetInterpolator{To, N, N2, FT, DomT, ET, FS, RG}
             grid_starts,
             grid_steps,
             grid_size,
-            cache_size
+            cache_size,
+            prefetch && stream,
+            endtime,
+            box
         )
         itp
     end
+end
+
+# Background prefetch is on unless `EARTHSCIDATA_PREFETCH=0`; read when an interpolator is built.
+_prefetch_default() = get(ENV, "EARTHSCIDATA_PREFETCH", "1") != "0"
+
+# Subset reads are on unless `EARTHSCIDATA_SUBSET_READS=0`; read when an interpolator is built.
+_subset_reads_default() = get(ENV, "EARTHSCIDATA_SUBSET_READS", "1") != "0"
+
+"""
+Whether `loadslice!(data, fs, t, varname, box)` can read only the index box
+`box` (one `UnitRange` per spatial dimension) of a variable. File sets that
+return `true` must implement that 5-argument method.
+"""
+supports_subset_reads(::FileSet) = false
+
+"""
+The index box of the native grid that regridding onto `model_grid` reads, plus
+one native cell on each side, or `nothing` when that box is the whole grid or
+the variable's layout is not one `interpolate_from!` handles.
+
+Along each spatial dimension the box runs from the lower corner the interpolant
+uses for the smallest query to the upper corner it uses for the largest one,
+using the same index mapping as `_build_regrid_interp` (scaled range if every
+axis is uniform, knot search otherwise). Queries outside the native grid are
+clamped (`Flat`) or filled without reading, so they need no special case: the
+box then reaches the grid edge on that side. A domain that straddles the edge
+of the native longitude range (e.g. the dateline on a -180..180 grid) gets the
+whole range along that axis, which is still exact.
+"""
+function _read_box(metadata::MetaData, model_grid, domain)
+    N2 = length(metadata.varsize)
+    (N2 == 3 && metadata.zdim > 0) || (N2 == 2 && metadata.zdim <= 0) || return nothing
+    # `_pad_singletons` copies the whole source along singleton dimensions.
+    any(n -> n < 2, metadata.varsize) && return nothing
+    all(issorted, metadata.coords) || return nothing
+    ext = _query_extent(metadata, model_grid, domain)
+    ext === nothing && return nothing
+    uniform = all(c -> isuniform(c), metadata.coords)
+    box = ntuple(N2) do d
+        c = metadata.coords[d]
+        n = length(c)
+        lo, hi = ext[d]
+        max(1, _lower_corner(c, lo, uniform) - 1):min(n, _lower_corner(c, hi, uniform) + 2)
+    end
+    all(d -> length(box[d]) == metadata.varsize[d], 1:N2) && return nothing
+    return box
+end
+
+# Index of the lower of the two native points that linear interpolation along
+# axis `c` weights for a query at `x`.
+function _lower_corner(c, x::Float64, uniform::Bool)
+    n = length(c)
+    i = if uniform
+        r = knots2range(c)
+        floor(Int, clamp((x - first(r)) / step(r) + 1, 1.0, Float64(n)))
+    else
+        searchsortedfirst(c, x) - 1
+    end
+    clamp(i, 1, n - 1)
+end
+
+# Smallest and largest native coordinate along each spatial dimension (in data
+# dimension order) at which `interpolate_from!` evaluates the interpolant, or
+# `nothing` if a model grid point does not map to a finite native coordinate.
+function _query_extent(metadata::MetaData, model_grid, domain)
+    N2 = length(metadata.varsize)
+    xd, yd, zd = metadata.xdim, metadata.ydim, metadata.zdim
+    ext = Vector{NTuple{2, Float64}}(undef, N2)
+    if N2 == 3
+        ext[zd] = Float64.(extrema(model_grid[3]))
+    end
+    xs, ys = model_grid[1], model_grid[2]
+    if _spatial_ref(domain) == metadata.native_sr
+        ext[xd] = Float64.(extrema(xs))
+        ext[yd] = Float64.(extrema(ys))
+    else
+        ct = coord_trans(metadata, domain)
+        z0 = N2 == 3 ? first(model_grid[3]) : nothing
+        xlo, xhi, ylo, yhi = Inf, -Inf, Inf, -Inf
+        for x in xs, y in ys
+
+            locs = N2 == 3 ? ct(tuple_from_vals(xd, x, yd, y, zd, z0)) :
+                   ct(tuple_from_vals(xd, x, yd, y))
+            u, v = Float64(locs[xd]), Float64(locs[yd])
+            (isfinite(u) && isfinite(v)) || return nothing
+            xlo, xhi = min(xlo, u), max(xhi, u)
+            ylo, yhi = min(ylo, v), max(yhi, v)
+        end
+        ext[xd] = (xlo, xhi)
+        ext[yd] = (ylo, yhi)
+    end
+    all(e -> all(isfinite, e), ext) || return nothing
+    return Tuple(ext)
 end
 
 function replace_in_tuple(t::NTuple{N, T1}, index1::Int, v1::T2,
@@ -704,7 +846,9 @@ end
 
 function initialize!(itp::DataSetInterpolator, t::DateTime, target::AbstractArray)
     tc = itp.cache
-    tc.load_cache = zeros(eltype(tc.load_cache), itp.metadata.varsize...)
+    box = itp.read_box
+    tc.load_cache = zeros(eltype(tc.load_cache),
+        (box === nothing ? itp.metadata.varsize : length.(box))...)
     # Cross-device runs need a CPU staging array because the regridder writes
     # element-by-element via scalar indexing, which `CuArray` etc. don't
     # support.  CPU runs reuse `target` directly — `regrid_target_for` returns
@@ -724,7 +868,12 @@ end
 end
 
 function load_data_for_time!(itp::DataSetInterpolator, t::DateTime)
-    loadslice!(itp.cache.load_cache, itp.fs, t, itp.varname)
+    box = itp.read_box
+    if box === nothing
+        loadslice!(itp.cache.load_cache, itp.fs, t, itp.varname)
+    else
+        loadslice!(itp.cache.load_cache, itp.fs, t, itp.varname, box)
+    end
     return t
 end
 
@@ -808,42 +957,153 @@ function _shift_overlap_in_place!(rt::AbstractArray, plan::_CacheAdvancePlan)
     return
 end
 
+# Copy the overlapping slices from `src`, which holds the current window, to
+# their new-window positions in `dst`. `src` is only read.
+function _copy_overlap!(dst::AbstractArray, src::AbstractArray, plan::_CacheAdvancePlan)
+    N = ndims(dst)
+    for i in (plan.first_new):(plan.first_new + plan.overlap_count - 1)
+        selectdim(dst, N, i) .= selectdim(src, N, i + plan.delta)
+    end
+    return
+end
+
 # Predicate: is new-window slot `idx` covered by the overlap (no reload needed)?
 @inline function _slot_in_overlap(plan::_CacheAdvancePlan, idx::Int)
     plan.overlap_count > 0 &&
         plan.first_new <= idx <= plan.first_new + plan.overlap_count - 1
 end
 
-# Load + regrid every new-window slot that the overlap doesn't cover.
+# Load + regrid every new-window slot that the overlap doesn't cover. A slot
+# whose record was prefetched is copied from the staging buffer instead; the
+# prefetch regridded it into a view of the same type as `selectdim(rt, N, idx)`,
+# so the values are bit-identical to loading it here.
 function _fill_missing_slices!(rt::AbstractArray, itp::DataSetInterpolator,
         new_times::AbstractVector{DateTime}, plan::_CacheAdvancePlan)
+    any(idx -> !_slot_in_overlap(plan, idx), eachindex(new_times)) || return
     N = ndims(rt)
     tc = itp.cache
+    # A running prefetch uses `tc.load_cache`, so it must finish before any load here.
+    pf = _settle_prefetch!(tc)
+    tc.prefetch = nothing
     @inbounds for idx in eachindex(new_times)
         _slot_in_overlap(plan, idx) && continue
         d = selectdim(rt, N, idx)
-        load_data_for_time!(itp, new_times[idx])
-        itp.regridder(d, tc.load_cache; extrapolate_type = itp.extrapolate_type)
+        if pf !== nothing && pf.time == new_times[idx] &&
+           eltype(rt) === eltype(tc.staging) && _prefetch_succeeded(itp, pf)
+            d .= selectdim(tc.staging::Array, N, 1)
+        else
+            load_data_for_time!(itp, new_times[idx])
+            itp.regridder(d, tc.load_cache; extrapolate_type = itp.extrapolate_type)
+        end
     end
     return
 end
 
+# Wait for the background load, if any, without throwing; return it or `nothing`.
+function _settle_prefetch!(tc::TemporalCache)
+    pf = tc.prefetch
+    pf === nothing || _wait_quietly(pf.task)
+    return pf
+end
+
+function _wait_quietly(task::Task)
+    try
+        wait(task)
+    catch e
+        # A failed load is reported where its result is consumed or discarded;
+        # anything else (e.g. an interrupt of the waiting task) must propagate.
+        e isa TaskFailedException || rethrow()
+    end
+    return nothing
+end
+
+# Whether a finished prefetch can be used; a failed one is reported and the
+# caller loads the record synchronously, which rethrows if the failure persists.
+function _prefetch_succeeded(itp::DataSetInterpolator, pf::_Prefetch)
+    istaskfailed(pf.task) || return true
+    err = try
+        fetch(pf.task)
+    catch e
+        e
+    end
+    @warn "Background load of $(itp.varname) at $(pf.time) failed; loading it synchronously." exception=err
+    return false
+end
+
+# Start loading the record after the window in the background, so the next
+# forward move of the window copies it in instead of reading it. Skipped when
+# prefetch is off, when the window already reaches past the interpolator's end
+# time or the last record, and when that record is already being loaded.
+function _start_prefetch!(itp::DataSetInterpolator{To}) where {To}
+    itp.prefetch || return
+    tc = itp.cache
+    last_t = tc.times[end]
+    last_t < itp.endtime || return
+    cpts = DataFrequencyInfo(itp.fs).centerpoints
+    i = searchsortedlast(cpts, last_t) + 1
+    i <= length(cpts) || return
+    t_next = cpts[i]
+    pf = tc.prefetch
+    if pf !== nothing
+        pf.time == t_next && return
+        _wait_quietly(pf.task)  # it uses `load_cache` and `staging`
+        _prefetch_succeeded(itp, pf)  # report a failure of the discarded load
+    end
+    if tc.staging === nothing
+        tc.staging = zeros(To, itp.grid_size..., 1)
+    end
+    tc.prefetch = _Prefetch(t_next, Threads.@spawn _load_record!(itp, t_next))
+    return
+end
+
+# Body of a prefetch task: load and regrid the record at `t` into the staging
+# buffer, exactly as `_fill_missing_slices!` does into a window slot.
+function _load_record!(itp::DataSetInterpolator, t::DateTime)
+    staging = itp.cache.staging::Array
+    load_data_for_time!(itp, t)
+    itp.regridder(selectdim(staging, ndims(staging), 1), itp.cache.load_cache;
+        extrapolate_type = itp.extrapolate_type)
+    return nothing
+end
+
 function update!(itp::DataSetInterpolator, t::DateTime, target::AbstractArray)
+    update!(itp, t, target, target)
+end
+
+# Move the window to cover `t` and write it into `dst`, taking the overlap with
+# the current window from `src`, which holds that window. With `src === dst`
+# the window moves in place; otherwise `src` is only read, so readers of it are
+# unaffected.
+function update!(itp::DataSetInterpolator, t::DateTime,
+        src::AbstractArray, dst::AbstractArray)
     tc = itp.cache
     @assert tc.initialized "Interpolator has not been initialized"
     new_times = interp_cache_times!(itp, t)
-    rt = regrid_target_for(tc, target)
+    rt = regrid_target_for(tc, dst)
 
     plan = _plan_cache_advance(tc.times, new_times)
-    _shift_overlap_in_place!(rt, plan)
+    if rt === dst && rt !== src
+        _copy_overlap!(rt, src, plan)
+    else  # `dst` itself, or the host-side copy of the window
+        _shift_overlap_in_place!(rt, plan)
+    end
     _fill_missing_slices!(rt, itp, new_times, plan)
 
-    if rt !== target
-        copyto!(target, rt)
+    if rt !== dst
+        copyto!(dst, rt)
     end
     tc.times = new_times
     tc.currenttime = t
     @assert issorted(tc.times) "Interpolator times are in wrong order"
+    _start_prefetch!(itp)
+end
+
+# Whether the loaded window covers `t`, so no reload is needed (the fast-path
+# test of `lazyload!`; see there for why an unlocked read is safe).
+@inline function _window_covers(tc::TemporalCache, t::DateTime)
+    tc.initialized || return false
+    times = tc.times
+    return length(times) > 1 && times[begin] <= t < times[end]
 end
 
 """
@@ -867,14 +1127,7 @@ function lazyload!(itp::DataSetInterpolator, t::DateTime, target::AbstractArray)
     # so return without ever touching the lock. (Mirrors the slow-path guard
     # below exactly: within [times[begin], times[end]) → no reload — the
     # 3-slot lookback window already brackets the whole anchor bucket.)
-    let tc = itp.cache
-        if tc.initialized
-            times = tc.times
-            if length(times) > 1
-                (times[begin] <= t < times[end]) && return itp
-            end
-        end
-    end
+    _window_covers(itp.cache, t) && return itp
     lock(itp.lock) do
         tc = itp.cache
         if tc.currenttime == t
@@ -908,6 +1161,50 @@ function lazyload!(itp::DataSetInterpolator, t::DateTime, target::AbstractArray)
 end
 function lazyload!(itp::DataSetInterpolator, t::AbstractFloat, target::AbstractArray)
     lazyload!(itp, Dates.unix2datetime(t), target)
+end
+
+"""
+$(SIGNATURES)
+
+Like [`lazyload!`](@ref), but never writes into `active`, the buffer that
+concurrent readers may be using. When the window has to move, the new window is
+assembled in `spare` (allocated when `nothing`) and returned; the caller
+publishes it in place of `active` and may reuse `active` as the next spare once
+no reader holds it. Returns `active` when it already covers `t`. The first load
+fills `active` itself.
+"""
+function lazyload_swap!(itp::DataSetInterpolator, t::DateTime,
+        active::AbstractArray, spare::Union{Nothing, AbstractArray})
+    _window_covers(itp.cache, t) && return active
+    lock(itp.lock) do
+        tc = itp.cache
+        if !tc.initialized
+            initialize!(itp, t, active)
+            update!(itp, t, active)
+            return active
+        end
+        (tc.currenttime == t || _window_covers(tc, t)) && return active
+        # Zeroed rather than `similar`: a window shorter than the buffer leaves
+        # a slot unwritten, and the time interpolation multiplies it by zero.
+        # A backward move can follow the previous move closely (so readers may
+        # still hold the spare), so it always gets a fresh buffer.
+        fresh = spare === nothing || t < tc.times[begin]
+        dst = fresh ? fill!(similar(active), zero(eltype(active))) : spare
+        update!(itp, t, active, dst)
+        return dst
+    end
+end
+
+"""
+Wait, without holding any lock, for the background load that moving `itp`'s
+window to `t` will use, so the move itself only copies data.
+"""
+function _await_prefetch(itp::DataSetInterpolator, t::DateTime)
+    tc = itp.cache
+    (tc.initialized && !_window_covers(tc, t)) || return
+    pf = tc.prefetch  # unlocked read: at worst a finished or unrelated task
+    pf === nothing || _wait_quietly(pf.task)
+    return
 end
 
 """
@@ -959,7 +1256,7 @@ function interp_unsafe(
         locs::Vararg{T2, N2}
 ) where {T1, T2, N, N2}
     t_unix = datetime2unix(t)
-    t_start, t_step = get_time_grid_params(itp)
+    t_start, t_step = get_time_grid_params(itp, t)
     # Compute fractional 1-based indices from cached grid scalars.  All
     # operands are `T1 = To`, so Float32 DSIs stay in Float32 (no Float64
     # promotion on GPU).
@@ -1012,6 +1309,24 @@ function get_time_grid_params(itp::DataSetInterpolator)
         t_step = one(t_start)
     end
     return (t_start, t_step)
+end
+
+"""
+Return `(t_start, t_step)` such that `1 + (t - t_start) / t_step` is the exact fractional
+cache index of `t`. Unevenly spaced cache times (e.g. monthly records) cannot be mapped by
+a single step, so the parameters map the cached interval containing `t` exactly; the data
+event refreshes them at every centerpoint, so the solver stays within that interval.
+"""
+function get_time_grid_params(itp::DataSetInterpolator, t::DateTime)
+    times = itp.cache.times
+    n = length(times)
+    if n > 2 && !all(i -> times[i + 1] - times[i] == times[2] - times[1], 2:(n - 1))
+        j = clamp(searchsortedlast(times, t), 1, n - 1)
+        t_j = datetime2unix(times[j])
+        t_step = datetime2unix(times[j + 1]) - t_j
+        return (t_j - (j - 1) * t_step, t_step)
+    end
+    return get_time_grid_params(itp)
 end
 
 """

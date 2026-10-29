@@ -10,6 +10,10 @@ using DynamicQuantities, Latexify, ProgressMeter
 using Scratch
 using JLD2
 using ConservativeRegridding
+import GeoInterface as GI
+import GeometryOps as GO
+import Extents, LinearAlgebra, SparseArrays
+using SortTileRecursiveTree: STRtree
 using ZipFile
 using JSON3, CodecZlib
 using TiffImages
